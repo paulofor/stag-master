@@ -69,4 +69,6 @@ Matriz definida antes dos testes da nova política. A autorização inicial vale
 
 A lacuna concreta do harness era a ausência de contexto sobre o efeito das interações e de regressões para execução automática. O contrato, as instruções e as fixtures agora devem distinguir rotina de criticidade e cobrir serialização, duplicidade e cancelamento. A classificação semântica de cliques depende da interpretação da tela pelo agente; não há inspeção semântica nativa dos controles de todos os aplicativos.
 
+O primeiro job Windows desta alteração expirou sem saída ao iniciar a fixture nativa com compilação C# sob prazo de 15 s. O harness dá agora 60 s aos processos de validação/diagnóstico e registra o início de cada etapa, a compilação sintética e a execução do dispatcher. O driver de produção mantém seu prazo de 15 s, também exercitado pelo teste Restricted; esse prazo não foi ampliado. A regressão nativa é conferida novamente no job Windows do mesmo PR, pois a sandbox local é Linux.
+
 O OAuth real requer ação do cliente no navegador da sua máquina. A interação nativa com aplicativos Windows requer homologação manual em sessão Windows interativa; não é declarada como testada em Linux. Não há backend hospedado ou deploy web: a entrega desktop gera um instalador como artefato do workflow, sem certificado de assinatura nesta versão.
