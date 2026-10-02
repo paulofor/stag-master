@@ -7,38 +7,11 @@ import { pathToFileURL } from "node:url";
 if (process.platform !== "win32")
   throw new Error("Este teste requer Windows. Use os testes com doubles no Linux.");
 const script = resolve("native/windows-control.ps1");
-execFileSync(
-  "powershell.exe",
-  [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    resolve("tests/fixtures/desktop-native.ps1"),
-    "-ScriptPath",
-    script,
-  ],
-  { stdio: "inherit" },
-);
-execFileSync(
-  "powershell.exe",
-  [
-    "-NoProfile",
-    "-NonInteractive",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    resolve("native/validate.ps1"),
-    "-ScriptPath",
-    script,
-  ],
-  { stdio: "inherit" },
-);
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/windows-policy-test-"));
 const inheritedPolicy = process.env.PSExecutionPolicyPreference;
+const inheritedModules = process.env.PSModulePath;
 try {
   await build({
     entryPoints: ["src/main/desktop-tools.ts"],
@@ -48,11 +21,33 @@ try {
     platform: "node",
     format: "esm",
   });
-  const { DesktopTools } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
+  const { DesktopTools, windowsPowerShellEnvironment } = await import(
+    pathToFileURL(join(dir, "desktop-tools.mjs")).href
+  );
+  const runPowerShell = (args, options = {}) =>
+    execFileSync("powershell.exe", args, {
+      timeout: 15000,
+      ...options,
+      env: windowsPowerShellEnvironment(),
+    });
+  for (const validation of ["tests/fixtures/desktop-native.ps1", "native/validate.ps1"]) {
+    runPowerShell(
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        resolve(validation),
+        "-ScriptPath",
+        script,
+      ],
+      { stdio: "inherit" },
+    );
+  }
   const policies = () =>
     JSON.parse(
-      execFileSync(
-        "powershell.exe",
+      runPowerShell(
         [
           "-NoProfile",
           "-NonInteractive",
@@ -66,14 +61,13 @@ try {
     );
   // Restrict only this test process and its children, without Set-ExecutionPolicy or registry writes.
   process.env.PSExecutionPolicyPreference = "Restricted";
-  // Diagnostics need the Security module; Restricted may block its autoload in Windows PowerShell.
-  // Compare scopes in separate Bypass processes; the no-flag probe below remains Restricted.
+  // Compare scopes in separate diagnostic processes; the no-flag probe below remains Restricted.
   const before = policies();
   const fixture = resolve("tests/fixtures/desktop-process.ps1");
   const input = Buffer.from(JSON.stringify({ action: "list_windows" })).toString("base64");
   assert.throws(
     () =>
-      execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-File", fixture], {
+      runPowerShell(["-NoProfile", "-NonInteractive", "-File", fixture], {
         input,
         encoding: "utf8",
         timeout: 15000,
@@ -105,6 +99,11 @@ try {
     process.env.PSExecutionPolicyPreference,
     "Restricted",
     "A política herdada do processo pai deve ser preservada.",
+  );
+  assert.equal(
+    process.env.PSModulePath,
+    inheritedModules,
+    "Os caminhos de módulos do pai devem ser preservados.",
   );
   assert.deepEqual(policies(), before, "As políticas persistentes devem ser preservadas.");
   // CI Windows has no client windows. Outside CI, keep every operation synthetic.

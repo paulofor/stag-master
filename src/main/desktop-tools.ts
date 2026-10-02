@@ -178,6 +178,15 @@ export async function withoutAssistantWindow(
   }
 }
 
+/** Let Windows PowerShell rebuild its own module paths, even when launched through Node from PS7. */
+export function windowsPowerShellEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(base).filter(([key]) => key.toUpperCase() !== "PSMODULEPATH"),
+  );
+}
+
 export class DesktopTools {
   constructor(
     private script: string,
@@ -195,7 +204,12 @@ export class DesktopTools {
       "powershell.exe",
       // Apply only to this approved subprocess; Group Policy still takes precedence.
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", this.script],
-      { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 },
+      {
+        windowsHide: true,
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+        env: windowsPowerShellEnvironment(),
+      },
     );
     invocation.child.stdin?.on("error", () => {});
     invocation.child.stdin?.end(encoded);

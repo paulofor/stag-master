@@ -39,14 +39,15 @@ O teste `test:desktop` abre uma janela Electron real e valida protocolo local, p
 
 Matriz definida antes dos testes desta correção. A política é definida somente no processo filho que executa o script empacotado, após aprovação da operação. Os testes não alteram políticas persistentes nem usam as janelas do cliente.
 
-| Área                   | Cenário e aceite                                                                                                                               | Evidência prevista                                             |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| Caminho feliz          | Driver de produção executa script sintético com política herdada Restricted; JSON Unicode chega por stdin e o processo usa Bypass              | Unidade local + test:windows                                   |
-| Aprovação e isolamento | Consentimento da conversa e aprovação de cada operação continuam obrigatórios; recusa não inicia processo                                      | Unidade do serviço e E2E existentes                            |
-| Política do computador | CurrentUser, LocalMachine, UserPolicy e MachinePolicy permanecem iguais antes/depois; nenhuma alteração persistente ou elevação                | test:windows, com ambiente temporário e consulta das políticas |
-| Falha e recuperação    | Bloqueio de política recebe mensagem legível, responde ao agente e incrementa falhas; nova tentativa exige aprovação e pode funcionar          | Unidade do driver e serviço                                    |
-| Integração             | Parser, dispatcher sintético e driver real compartilham o código de produção; regressão falha se a política do subprocesso for removida        | Unidade local + test:windows                                   |
-| Limites                | Linux valida contratos e UI; Windows CI valida powershell.exe 5.1 e instalador; GPO corporativa e aplicativos reais requerem sessão do cliente | check, test:desktop, format:check, job Windows                 |
+| Área                   | Cenário e aceite                                                                                                                               | Evidência prevista                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Caminho feliz          | Driver de produção executa script sintético com política herdada Restricted; JSON Unicode chega por stdin e o processo usa Bypass              | Unidade local + test:windows                                    |
+| Aprovação e isolamento | Consentimento da conversa e aprovação de cada operação continuam obrigatórios; recusa não inicia processo                                      | Unidade do serviço e E2E existentes                             |
+| Política do computador | CurrentUser, LocalMachine, UserPolicy e MachinePolicy permanecem iguais antes/depois; nenhuma alteração persistente ou elevação                | test:windows, com ambiente temporário e consulta das políticas  |
+| Falha e recuperação    | Bloqueio de política recebe mensagem legível, responde ao agente e incrementa falhas; nova tentativa exige aprovação e pode funcionar          | Unidade do driver e serviço                                     |
+| Integração             | Parser, dispatcher sintético e driver real compartilham o código de produção; regressão falha se a política do subprocesso for removida        | Unidade local + test:windows                                    |
+| Ambiente PowerShell    | PSModulePath do PowerShell 7 não passa ao filho powershell.exe; caminhos e política do processo pai permanecem iguais                          | Unidade do driver + test:windows sob o shell PowerShell 7 do CI |
+| Limites                | Linux valida contratos e UI; Windows CI valida powershell.exe 5.1 e instalador; GPO corporativa e aplicativos reais requerem sessão do cliente | check, test:desktop, format:check, job Windows                  |
 
 O harness anterior iniciava scripts diretamente com a política permissiva do runner Windows, sem exercitar o driver de produção sob Restricted. A regressão agora deve demonstrar o bloqueio sem a política de processo, o sucesso pelo driver e a preservação das políticas persistentes. Políticas de grupo continuam tendo precedência e não são contornadas.
 

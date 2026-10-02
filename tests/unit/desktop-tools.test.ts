@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DesktopTools,
   withoutAssistantWindow,
+  windowsPowerShellEnvironment,
   type DesktopArguments,
   type ToolResult,
 } from "../../src/main/desktop-tools";
@@ -18,10 +19,13 @@ const result: ToolResult = {
 const stdin = { on: vi.fn(), end: vi.fn() };
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("PSModulePath", "C:\\Program Files\\PowerShell\\7\\Modules");
+  vi.stubEnv("PSExecutionPolicyPreference", "Restricted");
   runScript.mockImplementation(() =>
     Object.assign(Promise.resolve({ stdout: '{"ok":true}' }), { child: { stdin } }),
   );
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("driver de desktop com processo simulado", () => {
   const inputs: DesktopArguments[] = [
@@ -35,18 +39,25 @@ describe("driver de desktop com processo simulado", () => {
   it.each(inputs)("executa $action com argumentos fixos e dados apenas em stdin", async (input) => {
     const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", async () => result, "win32");
     await expect(tools.execute(input)).resolves.toEqual(result);
-    expect(runScript).toHaveBeenCalledWith(
-      "powershell.exe",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        "C:\\STAG\\windows-control.ps1",
-      ],
-      { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 },
-    );
+    expect(runScript).toHaveBeenCalledOnce();
+    const [command, args, options] = runScript.mock.calls[0];
+    expect(command).toBe("powershell.exe");
+    expect(args).toEqual([
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      "C:\\STAG\\windows-control.ps1",
+    ]);
+    expect({
+      windowsHide: options.windowsHide,
+      timeout: options.timeout,
+      maxBuffer: options.maxBuffer,
+    }).toEqual({ windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 });
+    expect(Object.keys(options.env).map((key) => key.toUpperCase())).not.toContain("PSMODULEPATH");
+    expect(options.env.PSExecutionPolicyPreference).toBe("Restricted");
+    expect(process.env.PSModulePath).toBe("C:\\Program Files\\PowerShell\\7\\Modules");
     const encoded = stdin.end.mock.calls[0][0];
     expect(JSON.parse(Buffer.from(encoded, "base64").toString("utf8"))).toEqual(input);
   });
@@ -108,6 +119,21 @@ describe("driver de desktop com processo simulado", () => {
     expect(runScript).not.toHaveBeenCalled();
     expect(capture).not.toHaveBeenCalled();
   });
+});
+
+it("reconstrói módulos do PowerShell 5.1 sem alterar o ambiente ou a política do pai", () => {
+  const base = {
+    PSModulePath: "C:\\Program Files\\PowerShell\\7\\Modules",
+    PsModulePath: "C:\\PS7\\Modules",
+    PSExecutionPolicyPreference: "Restricted",
+    PATH: "C:\\Windows\\System32",
+  };
+  const original = { ...base };
+  expect(windowsPowerShellEnvironment(base)).toEqual({
+    PSExecutionPolicyPreference: "Restricted",
+    PATH: "C:\\Windows\\System32",
+  });
+  expect(base).toEqual(original);
 });
 
 describe("painel durante a captura e ações por coordenadas", () => {
