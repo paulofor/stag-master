@@ -1,0 +1,109 @@
+export type AccessMode = "read" | "project" | "windows";
+export type RpcId = number | string;
+export interface Model {
+  id: string;
+  model: string;
+  displayName: string;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: { reasoningEffort: string; description: string }[];
+  isDefault: boolean;
+}
+export interface Project {
+  path: string;
+  name: string;
+}
+export interface ThreadSummary {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
+export interface ChatItem {
+  id: string;
+  kind: "user" | "assistant" | "command" | "file" | "web" | "status";
+  text: string;
+  output?: string;
+  status?: string;
+  phase?: string;
+}
+export interface Question {
+  id: string;
+  question: string;
+  isSecret?: boolean;
+  options: { label: string; description: string }[];
+}
+export interface Approval {
+  id: string;
+  kind: "command" | "file" | "desktop" | "questions";
+  title: string;
+  detail: string;
+  questions?: Question[];
+}
+export interface Snapshot {
+  connection: "disconnected" | "connecting" | "ready" | "error";
+  error: string | null;
+  account: { email: string | null; plan: string | null } | null;
+  loginPending: boolean;
+  project: Project | null;
+  models: Model[];
+  model: string;
+  effort: string;
+  mode: AccessMode;
+  threads: ThreadSummary[];
+  threadId: string | null;
+  busy: boolean;
+  items: ChatItem[];
+  approvals: Approval[];
+  plan: { step: string; status: string }[];
+  diff: string;
+  metrics: { requests: number; failures: number; totalTokens: number; elapsedMs: number };
+  platform: string;
+}
+export const emptySnapshot: Snapshot = {
+  connection: "disconnected",
+  error: null,
+  account: null,
+  loginPending: false,
+  project: null,
+  models: [],
+  model: "",
+  effort: "",
+  mode: "project",
+  threads: [],
+  threadId: null,
+  busy: false,
+  items: [],
+  approvals: [],
+  plan: [],
+  diff: "",
+  metrics: { requests: 0, failures: 0, totalTokens: 0, elapsedMs: 0 },
+  platform: "browser",
+};
+export type Action =
+  | { type: "connect" }
+  | { type: "login" }
+  | { type: "cancelLogin" }
+  | { type: "logout" }
+  | { type: "selectProject" }
+  | {
+      type: "preferences";
+      model?: string;
+      effort?: string;
+      mode?: AccessMode;
+      windowsConsent?: boolean;
+    }
+  | { type: "newChat" }
+  | { type: "resume"; threadId: string }
+  | { type: "send"; text: string }
+  | { type: "stop" }
+  | { type: "answer"; id: string; accept?: boolean; answers?: Record<string, string> }
+  | { type: "openLink"; url: string };
+export interface DesktopBridge {
+  getSnapshot(): Promise<Snapshot>;
+  request(action: Action): Promise<Snapshot>;
+  onSnapshot(listener: (snapshot: Snapshot) => void): () => void;
+}
+declare global {
+  interface Window {
+    stag?: DesktopBridge;
+  }
+}

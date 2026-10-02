@@ -1,0 +1,9 @@
+node_modules
+dist
+release
+.local
+.codex
+package-lock.json
+playwright-report
+test-results
+native

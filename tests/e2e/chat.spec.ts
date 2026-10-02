@@ -1,0 +1,114 @@
+import { test, expect } from "@playwright/test";
+import { installBridge } from "../fixtures/browser-bridge";
+import { mkdir } from "node:fs/promises";
+
+test.beforeEach(async ({ page }) => {
+  await installBridge(page);
+  await page.goto("/");
+});
+async function ready(page: import("@playwright/test").Page) {
+  await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
+  await page.getByRole("button", { name: "Escolher meu projeto" }).click();
+}
+test("painel compacto, onboarding e conversa Markdown", async ({ page }, info) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await expect(page.getByRole("heading", { name: "Do que vamos cuidar hoje?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
+  await mkdir(".local/screenshots", { recursive: true });
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-welcome.png` });
+  await ready(page);
+  await expect(page.getByLabel("Modelo", { exact: true })).toHaveValue("fixture-model");
+  await page.getByLabel("Mensagem para o assistente").fill("Analise o projeto");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
+  await expect(page.locator("pre code")).toContainText("const ready = true");
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.locator(".metrics")).toContainText("1.234 tokens");
+  await expect(page.getByRole("button", { name: "Parar execução" })).toHaveCount(0);
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-conversation.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  expect(errors).toEqual([]);
+});
+test("Enter envia e Shift+Enter mantém o rascunho", async ({ page }) => {
+  await ready(page);
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("Primeira linha");
+  await input.press("Shift+Enter");
+  await input.pressSequentially("Segunda linha");
+  await expect(input).toHaveValue("Primeira linha\nSegunda linha");
+  await input.press("Enter");
+  await expect(page.locator(".user-message")).toContainText("Segunda linha");
+  await expect(input).toHaveValue("");
+});
+test("aprovação recusada e histórico restaurado", async ({ page }) => {
+  await ready(page);
+  await page.getByLabel("Mensagem para o assistente").fill("recusar comando");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toBeVisible();
+  await expect(page.getByText("npm test", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Recusar", exact: true }).click();
+  await expect(page.getByText("Ação recusada. Nenhum comando executado.")).toBeVisible();
+  await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+  await expect(page.locator(".user-message")).toHaveCount(0);
+  await page.getByRole("button", { name: "Histórico de conversas" }).click();
+  await page.getByRole("button", { name: "recusar comando", exact: true }).click();
+  await expect(page.getByText("Ação recusada. Nenhum comando executado.")).toBeVisible();
+});
+test("pergunta obrigatória e interrupção", async ({ page }) => {
+  await ready(page);
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("perguntar");
+  await input.press("Enter");
+  await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeDisabled();
+  await page.getByLabel("Qual stack deseja?", { exact: true }).selectOption("TypeScript");
+  await page.getByRole("button", { name: "Responder", exact: true }).click();
+  await expect(page.getByText("Resposta recebida. Fluxo concluído.")).toBeVisible();
+  await input.fill("lento");
+  await input.press("Enter");
+  await expect(page.getByLabel("Acesso", { exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Parar execução" }).click();
+  await expect(page.getByText("Execução interrompida.")).toBeVisible();
+});
+test("modo Windows exige consentimento e cancelamento preserva modo", async ({ page }) => {
+  await ready(page);
+  const mode = page.getByLabel("Acesso", { exact: true });
+  await mode.selectOption("windows");
+  await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect(mode).toHaveValue("project");
+  await mode.selectOption("windows");
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(mode).toHaveValue("windows");
+});
+test("erro permite reconectar e Markdown não executa HTML/imagens remotas", async ({ page }) => {
+  await ready(page);
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("erro");
+  await input.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("Reconecte");
+  await page.getByRole("button", { name: "Reconectar", exact: true }).click();
+  const remoteRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("example.invalid")) remoteRequests.push(request.url());
+  });
+  await input.fill("html");
+  await input.press("Enter");
+  await expect(page.getByText("Texto seguro.", { exact: false })).toBeVisible();
+  expect(
+    await page.evaluate(() => (window as Window & { hacked?: boolean }).hacked),
+  ).toBeUndefined();
+  expect(remoteRequests).toEqual([]);
+  await expect(page.locator(".markdown img")).toHaveCount(0);
+});
+test("layout amplo mantém um único painel sem overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await ready(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await expect(page.locator("main")).toHaveCount(1);
+  await expect(page.locator("aside")).toHaveCount(0);
+});
