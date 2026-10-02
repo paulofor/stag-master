@@ -89,6 +89,127 @@ async function approve(accept: boolean) {
   await complete();
 }
 describe("fluxo local do assistente", () => {
+  it("abre aplicação local no navegador integrado após consentimento, com desktop autorizado", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    const task = "abrir aplicação local http://localhost:4201/";
+    await send(task);
+    await complete();
+    const thread = service.snapshot().threadId;
+    expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar navegador");
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().approvals).toEqual([]);
+
+    await service.request({ type: "browserConsent", allow: true });
+    expect(service.snapshot().threadId).toBe(thread);
+    await send(task);
+    await complete();
+    expect(browser.execute.mock.calls.map(([args]) => args.action)).toEqual([
+      "navigate",
+      "snapshot",
+    ]);
+    expect(browser.execute).toHaveBeenCalledWith({
+      action: "navigate",
+      url: "http://localhost:4201/",
+      risk: "routine",
+      intent: "Conferir aplicação local no navegador do STAG",
+    });
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
+    expect(service.snapshot().items.at(-1)?.text).toContain("aplicação local conferida no STAG");
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().mode).toBe("windows");
+
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const start = calls.find((call) => call.method === "thread/start")!;
+    const resume = calls.find((call) => call.method === "thread/resume")!;
+    for (const call of [start, resume]) {
+      expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
+      expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
+      expect(call.params.sandbox).toBe("danger-full-access");
+    }
+    expect(start.params.developerInstructions).toContain("clicar em Autorizar navegador");
+    expect(resume.params.developerInstructions).toContain("O cliente autorizou stag_browser");
+    expect(resume.params).not.toHaveProperty("dynamicTools");
+  });
+  it("mantém o roteamento integrado ao reconectar, fechar, trocar e retomar conversa", async () => {
+    await ready();
+    const task = "abrir aplicação local http://127.0.0.1:4201/";
+    await service.request({ type: "browserConsent", allow: true });
+    await send(task);
+    await complete();
+    const first = service.snapshot().threadId!;
+    await service.request({ type: "connect" });
+    await send(task);
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(4);
+
+    await service.request({ type: "browserVisibility", visible: false });
+    await send(task);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar navegador");
+    await service.request({ type: "browserVisibility", visible: true });
+    await send(task);
+    await complete();
+    expect(service.snapshot().browser.authorized).toBe(false);
+    expect(browser.execute).toHaveBeenCalledTimes(4);
+
+    await service.request({ type: "newChat" });
+    await send(task);
+    await complete();
+    await service.request({ type: "resume", threadId: first });
+    await send(task);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar navegador");
+    expect(browser.execute).toHaveBeenCalledTimes(4);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    for (const call of calls.filter((c) => ["thread/start", "thread/resume"].includes(c.method))) {
+      expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
+      expect(call.params.sandbox).toBe("workspace-write");
+      if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
+    }
+    expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
+  });
+  it("orienta recuperação de navegador negado e histórico sem tool sem recorrer ao desktop", async () => {
+    await ready();
+    const reply = vi.spyOn(rpc, "respond");
+    await send("navegador forçar");
+    await complete();
+    expect(reply).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        success: false,
+        contentItems: [
+          expect.objectContaining({
+            text: expect.stringContaining("Autorizar navegador"),
+          }),
+        ],
+      }),
+    );
+    const refusal = JSON.stringify(reply.mock.calls);
+    expect(refusal).toContain("Não abra nem controle Chrome/Edge");
+    expect(refusal).toContain("Mostrar navegador");
+    const thread = service.snapshot().threadId!;
+    const settings = await store.load();
+    delete settings.threads[thread].browserTool;
+    await store.save(settings);
+    await service.init();
+    await service.request({ type: "resume", threadId: thread });
+    await send("abrir aplicação local http://localhost:4201/");
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("nova conversa");
+    await expect(service.request({ type: "browserConsent", allow: true })).rejects.toThrow(
+      "nova conversa",
+    );
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().mode).toBe("project");
+    expect((await store.load()).threads[thread].browserTool).toBeUndefined();
+  });
   it("revogação do navegador permanece efetiva quando a interrupção remota falha", async () => {
     await ready();
     await service.request({ type: "browserConsent", allow: true });
@@ -183,11 +304,13 @@ describe("fluxo local do assistente", () => {
   it("navegador rejeita argumentos, namespace e outro thread/turn sem prender o servidor", async () => {
     await ready();
     await service.request({ type: "browserConsent", allow: true });
+    const reply = vi.spyOn(rpc, "respond");
     for (const suffix of ["inválido", "namespace", "outro thread", "outro turno"]) {
       await send(`navegador ${suffix}`);
       await complete();
     }
     expect(browser.execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(reply.mock.calls)).not.toContain("Autorizar navegador");
   });
   it("navegador reconecta no mesmo thread, autoriza durante conversa e não transfere acesso", async () => {
     await ready();

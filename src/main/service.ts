@@ -801,13 +801,15 @@ export class AssistantService extends EventEmitter {
     }
     if (message.method === "item/tool/call") {
       const isBrowser = p.tool === "stag_browser";
+      const browserAccessDenied =
+        !this.options.browser ||
+        !this.state.browser.authorized ||
+        this.browserConsentThread !== this.state.threadId;
       if (
         (!isBrowser && p.tool !== "windows_desktop") ||
         (p.namespace !== undefined && p.namespace !== null) ||
         (isBrowser
-          ? !this.options.browser ||
-            !this.state.browser.authorized ||
-            this.browserConsentThread !== this.state.threadId
+          ? browserAccessDenied
           : this.state.platform !== "win32" ||
             this.state.mode !== "windows" ||
             !this.windowsConsent ||
@@ -816,7 +818,15 @@ export class AssistantService extends EventEmitter {
       ) {
         this.rpc.respond(message.id, {
           success: false,
-          contentItems: [{ type: "inputText", text: "Ferramenta não autorizada nesta conversa." }],
+          contentItems: [
+            {
+              type: "inputText",
+              text:
+                isBrowser && browserAccessDenied
+                  ? "stag_browser não autorizado nesta conversa. Peça ao cliente para clicar em Autorizar navegador no painel do STAG e aguarde. Se o painel estiver fechado, indique Mostrar navegador (ícone de globo); históricos sem stag_browser precisam de uma nova conversa. Não abra nem controle Chrome/Edge ou outro navegador por windows_desktop, shell ou automação externa como alternativa."
+                  : "Ferramenta não autorizada nesta conversa.",
+            },
+          ],
         });
         return;
       }

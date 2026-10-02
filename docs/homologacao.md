@@ -1,6 +1,25 @@
-# Matriz de homologação da versão 0.4.0
+# Matriz de homologação da versão 0.4.1
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Navegação pelo navegador do STAG — versão 0.4.1
+
+Matriz definida antes de executar os testes da correção. O relato mostrou o agente usando o desktop autorizado para abrir uma aba no Chrome enquanto o navegador integrado estava sem consentimento. As instruções anteriores só priorizavam o painel após sua autorização, e a fixture não preservava instruções em start/resume para verificar essa transição. A correção torna explícito o uso de `stag_browser` para páginas, inclusive localhost, sem mudar as permissões do histórico ou conceder acesso automaticamente.
+
+| Área                       | Cenário e aceite                                                                                                                                                                     | Evidência prevista                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| Caminho feliz              | Abrir aplicação local pelo navegador integrado; rotina segue sem cards mesmo com desktop autorizado; nenhum comando externo ou gesto no Chrome                                       | Serviço bidirecional + Electron com site loopback  |
+| Autorização e validações   | Sem consentimento, orientar Autorizar navegador; recusa de tool explica recuperação; Chrome/Edge e shell não são alternativas; histórico sem tool pede nova conversa                 | Contrato + serviço + fixture determinística        |
+| Recuperação e integração   | Start/resume recebem regra de navegação; autorizar, reconectar, revogar, fechar e trocar conversa atualizam capacidade sem transferir consentimento ou alterar sandbox/tools antigos | Serviço + smoke real do App Server isolado         |
+| Pontos críticos e falhas   | Confirmações críticas, referências expiradas, falhas e cancelamento continuam eficazes; bloqueios do navegador requerem ação manual, sem fallback automático externo                 | Regressões existentes de serviço/driver + Electron |
+| Observabilidade e métricas | Pedido de autorização legível na conversa; operação stag_browser visível; contadores locais preservados sem logs de autenticação ou valores sensíveis                                | Serviço + Electron + testes existentes             |
+| Segregação de dados        | URLs loopback, projeto/CODEX_HOME temporários, sem inferência paga ou contas/janelas do cliente                                                                                      | Fixture + smoke + Electron                         |
+| Interface e dispositivos   | Painel opcional e autorização preservados em Chromium 640×900, 1280×900 e Pixel 7; navegador real no Electron                                                                        | E2E existentes + test:desktop                      |
+| Windows e entrega          | Contratos nativos e instalador 0.4.1 aprovados no job Windows do HEAD; Linux não comprova interação real na sessão Windows do cliente                                                | CI Windows + conferência do artefato               |
+
+Evidência local: `npm run check` aprovado com 122 testes de contrato, build, handshake real e 24 cenários de interface; `xvfb-run -a npm run test:desktop` aprovado com o driver de navegador de produção e site loopback. A regressão usa um pedido de abertura de aplicação local, verifica a orientação de autorização após cancelamento, retoma o mesmo thread após consentimento e confirma navegação no painel sem abertura externa; apenas o OAuth sintético aparece no double de `shell.openExternal`. O smoke importa instruções e schemas de produção, injeta uma mensagem sintética por `thread/inject_items` para materializar o histórico e valida `thread/resume`: o App Server fixado não oferece rollout de uma conversa vazia. Não inicia inferência, lê credenciais ou usa dados do cliente. As fixtures verificam o contrato entregue e o fluxo determinístico, sem declarar uma avaliação de obediência de modelo real. Sintaxe JavaScript, `format:check` e revisão do diff também aprovados. Windows nativo e instalador precisam do job Windows do HEAD; o uso com a conta e os aplicativos do cliente continua exigindo sua sessão.
+
+## Fluxo base
 
 | Área            | Cenário e aceite                                                                                                                         | Evidência                                                          |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |

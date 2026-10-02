@@ -59,7 +59,10 @@ try {
     .toBe("ready");
   await application.evaluate(({ dialog, shell }, path) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
-    shell.openExternal = async () => {};
+    global.externalUrls = [];
+    shell.openExternal = async (url) => {
+      global.externalUrls.push(url);
+    };
   }, project);
   await page.getByRole("button", { name: "Selecionar projeto", exact: true }).click();
   await expect(page.getByRole("button", { name: "projeto-fixture", exact: true })).toBeVisible();
@@ -94,10 +97,35 @@ try {
       await page.evaluate(async () => (await window.stag.getSnapshot()).browser.authorized),
       false,
     );
+    await page.getByLabel("Mensagem para o assistente").fill(`abrir aplicação local ${site.url}`);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(
+      page.getByText("Clique em Autorizar navegador no painel do STAG.", { exact: true }),
+    ).toBeVisible();
+    assert.equal(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).browser.url),
+      "",
+    );
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
     await application.evaluate(({ dialog }) => {
       dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
     });
     await page.getByRole("button", { name: "Autorizar navegador", exact: true }).click();
+    await page.getByLabel("Mensagem para o assistente").fill(`abrir aplicação local ${site.url}`);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(
+      page.getByText("Navegador: aplicação local conferida no STAG.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Endereço do navegador")).toHaveValue(site.url);
+    assert.deepEqual(await application.evaluate(() => global.externalUrls), [
+      "https://auth.openai.com/fixture-login",
+    ]);
+    await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
     await page.getByLabel("Mensagem para o assistente").fill(`navegador fluxo real ${site.url}`);
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(

@@ -9,7 +9,12 @@ let rpc;
 try {
   await mkdir(join(dir, "home"), { recursive: true });
   await build({
-    entryPoints: ["src/main/rpc.ts", "src/main/desktop-tools.ts", "src/main/browser-tools.ts"],
+    entryPoints: [
+      "src/main/rpc.ts",
+      "src/main/desktop-tools.ts",
+      "src/main/browser-tools.ts",
+      "src/main/policy.ts",
+    ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
     bundle: true,
@@ -19,17 +24,13 @@ try {
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
   const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !/(TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL)/i.test(key) &&
-        !["NODE_OPTIONS", "CODEX_HOME", "ELECTRON_RUN_AS_NODE"].includes(key),
-    ),
+  const { assistantInstructions, threadPolicy, codexEnvironment } = await import(
+    pathToFileURL(join(dir, "policy.mjs")).href
   );
   rpc = new RpcClient({
     command: resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex"),
     args: ["app-server", "--listen", "stdio://"],
-    env: { ...env, CODEX_HOME: join(dir, "home") },
+    env: codexEnvironment(join(dir, "home")),
   });
   await rpc.start();
   const account = await rpc.call("account/read", { refreshToken: false });
@@ -40,14 +41,32 @@ try {
   // Verify experimental desktop-tool schema against the bundled binary without a turn/LLM call.
   const started = await rpc.call("thread/start", {
     cwd: dir,
-    ephemeral: true,
-    approvalPolicy: "on-request",
-    sandbox: "read-only",
+    ephemeral: false,
+    ...threadPolicy("read"),
+    developerInstructions: assistantInstructions("read", process.platform, false, true),
     dynamicTools: [desktopTool, browserTool],
   });
   assert.ok(started.thread.id);
+  // Materialize synthetic history without starting inference; empty threads have no rollout.
+  await rpc.call("thread/inject_items", {
+    threadId: started.thread.id,
+    items: [
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Histórico sintético para validar a retomada." }],
+      },
+    ],
+  });
+  const resumed = await rpc.call("thread/resume", {
+    threadId: started.thread.id,
+    cwd: dir,
+    ...threadPolicy("read"),
+    developerInstructions: assistantInstructions("read", process.platform, true, true),
+  });
+  assert.equal(resumed.thread.id, started.thread.id);
   console.log(
-    `Codex real: handshake, conta isolada, ${models.data.length} modelos e schemas de produção de desktop/browser OK. Nenhum turno/LLM executado.`,
+    `Codex real: handshake, conta isolada, ${models.data.length} modelos, schemas de produção de desktop/browser e instruções start/resume OK. Nenhum turno/LLM executado.`,
   );
 } finally {
   await rpc?.shutdown();
