@@ -480,7 +480,7 @@ export function App() {
             <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
               <Monitor size={14} />
               {state.mode === "windows"
-                ? "Desktop autorizado · ações com aprovação"
+                ? "Desktop autorizado · confirmação nos pontos críticos"
                 : "Controle do desktop"}
             </span>
             <button
@@ -632,8 +632,10 @@ export function App() {
             <h2 id="windows-title">Trabalhar no Windows</h2>
             <p>
               O STAG poderá ver a tela, controlar mouse e teclado e executar comandos com acesso ao
-              computador. Cada operação de desktop pede aprovação. Capturas e títulos de janelas
-              aprovados são enviados ao ChatGPT para realizar a tarefa.
+              computador. Capturas, navegação e edição local rotineiras seguem sem novas permissões.
+              Exclusão, envio externo, publicação, pagamentos, credenciais e mudanças no sistema
+              pedem confirmação, assim como interações sem contexto suficiente. Capturas e títulos
+              de janelas são enviados ao ChatGPT para realizar a tarefa.
             </p>
             <p className="muted small">
               A mudança inicia uma nova conversa. Seu projeto continua selecionado.

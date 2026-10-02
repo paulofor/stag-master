@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptPath = (Resolve-Path $ScriptPath).Path
 
 # These types have no P/Invoke. Run the real dispatcher against synthetic Windows APIs.
+Write-Output 'Native desktop harness: compiling synthetic types.'
 Add-Type @'
 using System;
 using System.Collections.Generic;
@@ -38,6 +39,7 @@ namespace System.Windows.Forms {
     }
 }
 '@
+Write-Output 'Native desktop harness: running production dispatcher against synthetic APIs.'
 
 # Shadow every desktop boundary, so this harness never loads user32 or Forms.
 function Add-Type {

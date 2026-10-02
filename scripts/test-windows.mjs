@@ -26,11 +26,13 @@ try {
   );
   const runPowerShell = (args, options = {}) =>
     execFileSync("powershell.exe", args, {
-      timeout: 15000,
+      // Test scripts include cold PowerShell startup and C# compilation, unlike a desktop action.
+      timeout: 60000,
       ...options,
       env: windowsPowerShellEnvironment(),
     });
   for (const validation of ["tests/fixtures/desktop-native.ps1", "native/validate.ps1"]) {
+    console.log(`Windows: validação ${validation} (inicialização/compilação, prazo 60 s).`);
     runPowerShell(
       [
         "-NoProfile",
@@ -56,11 +58,12 @@ try {
           "-Command",
           "Get-ExecutionPolicy -List | ConvertTo-Json -Compress",
         ],
-        { encoding: "utf8", timeout: 15000 },
+        { encoding: "utf8" },
       ).replace(/^\uFEFF/, ""),
     );
   // Restrict only this test process and its children, without Set-ExecutionPolicy or registry writes.
   process.env.PSExecutionPolicyPreference = "Restricted";
+  console.log("Windows: conferir Restricted e preservação das políticas pelo driver de produção.");
   // Compare scopes in separate diagnostic processes; the no-flag probe below remains Restricted.
   const before = policies();
   const fixture = resolve("tests/fixtures/desktop-process.ps1");
@@ -70,7 +73,6 @@ try {
       runPowerShell(["-NoProfile", "-NonInteractive", "-File", fixture], {
         input,
         encoding: "utf8",
-        timeout: 15000,
         stdio: "pipe",
       }),
     /UnauthorizedAccess|PSSecurityException/,
@@ -108,6 +110,9 @@ try {
   assert.deepEqual(policies(), before, "As políticas persistentes devem ser preservadas.");
   // CI Windows has no client windows. Outside CI, keep every operation synthetic.
   if (process.env.CI === "true") {
+    console.log(
+      "Windows: conferir list_windows pelo script empacotado, sem mouse/teclado/captura.",
+    );
     const result = await new DesktopTools(script, noCapture).execute({ action: "list_windows" });
     assert.ok(Array.isArray(JSON.parse(result.contentItems[0].text)));
   }

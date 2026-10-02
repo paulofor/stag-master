@@ -202,16 +202,15 @@ describe("fluxo local do assistente", () => {
     await service.request({ type: "connect" });
     expect(service.snapshot().connection).toBe("ready");
   });
-  it("exige consentimento Windows e aprovação antes do controle nativo", async () => {
+  it("exige consentimento Windows e usa esse acesso nas operações rotineiras", async () => {
     await ready();
     await expect(service.request({ type: "preferences", mode: "windows" })).rejects.toThrow(
       "Confirme",
     );
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
     await send("desktop");
-    await vi.waitFor(() => expect(service.snapshot().approvals.length).toBe(1));
-    expect(desktop.execute).not.toHaveBeenCalled();
-    await approve(true);
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
     expect(desktop.execute).toHaveBeenCalledWith({ action: "list_windows" });
     const id = service.snapshot().threadId!;
     await service.request({ type: "newChat" });
@@ -221,7 +220,7 @@ describe("fluxo local do assistente", () => {
   it("recusar ação Windows nunca executa o driver", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(false);
     expect(desktop.execute).not.toHaveBeenCalled();
   });
@@ -238,7 +237,7 @@ describe("fluxo local do assistente", () => {
     await complete();
     expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar desktop");
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(false);
     const calls =
       await rpc.call<{ method?: string; params?: Record<string, unknown> }[]>("_fixture/readCalls");
@@ -249,17 +248,44 @@ describe("fluxo local do assistente", () => {
       expect.objectContaining({ name: "windows_desktop" }),
     ]);
     expect(starts[1].params?.developerInstructions).toContain("cliente autorizou");
+    expect(starts[1].params?.developerInstructions).toContain("sem pedir permissão novamente");
+    expect(starts[1].params?.developerInstructions).toContain(
+      "critical e aguardam confirmação específica",
+    );
+    expect(starts[1].params?.developerInstructions).toContain(
+      "contornar uma confirmação ou recusa",
+    );
   });
-  it("controla tela, foco, mouse, texto, atalhos e rolagem com aprovação por operação", async () => {
+  it("controla tela, foco, mouse, texto, atalhos e rolagem rotineiros sem novas aprovações", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
     const expected: DesktopArguments[] = [
       { action: "list_windows" },
       { action: "screenshot" },
       { action: "focus_window", processId: 4242 },
-      { action: "click", x: 120, y: 180, button: "left", clicks: 2 },
-      { action: "type_text", processId: 4242, text: "Teste + ^ % {texto}" },
-      { action: "send_keys", processId: 4242, keys: "^s" },
+      {
+        action: "click",
+        x: 120,
+        y: 180,
+        button: "left",
+        clicks: 2,
+        risk: "routine",
+        intent: "Abrir editor local",
+      },
+      {
+        action: "type_text",
+        processId: 4242,
+        text: "Teste + ^ % {texto}",
+        risk: "routine",
+        intent: "Editar texto local",
+      },
+      {
+        action: "send_keys",
+        processId: 4242,
+        keys: "^s",
+        risk: "routine",
+        intent: "Salvar arquivo local",
+      },
       { action: "scroll", x: 120, y: 180, delta: -240 },
       { action: "screenshot" },
     ];
@@ -270,20 +296,19 @@ describe("fluxo local do assistente", () => {
           ? [{ type: "inputImage", imageUrl: "data:image/png;base64,SYNTHETIC_SCREEN" }]
           : [{ type: "inputText", text: "[]" }],
     }));
+    const approvals: number[] = [];
+    service.on("snapshot", (snapshot) => approvals.push(snapshot.approvals.length));
     await send("desktop sequência");
+    await complete();
     for (const [index, args] of expected.entries()) {
-      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
-      expect(desktop.execute).toHaveBeenCalledTimes(index);
-      const approval = service.snapshot().approvals[0];
-      if (args.action === "screenshot") expect(approval.detail).toContain("enviada ao ChatGPT");
-      await service.request({ type: "answer", id: approval.id, accept: true });
       expect(desktop.execute).toHaveBeenNthCalledWith(index + 1, args);
     }
-    await complete();
+    expect(approvals.every((count) => count === 0)).toBe(true);
+    expect(desktop.execute).toHaveBeenCalledTimes(expected.length);
     expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
     expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_SCREEN");
   });
-  it.each(["inválido", "namespace", "outro turno"])(
+  it.each(["inválido", "risco inválido", "namespace", "outro turno", "outro thread", "sem turno"])(
     "recusa request desktop %s e libera o agente",
     async (probe) => {
       await ready();
@@ -295,13 +320,126 @@ describe("fluxo local do assistente", () => {
     },
   );
   it.each([
+    "Excluir arquivo do cliente",
+    "Enviar mensagem externa",
+    "Publicar alteração em produção",
+    "Pagar compra",
+    "Digitar credencial",
+    "Alterar segurança do Windows",
+  ])("confirma o ponto crítico com intenção e alvo: %s", async (intent) => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send(`desktop crítico ${intent}`);
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().approvals[0].detail).toContain(intent);
+    expect(service.snapshot().approvals[0].detail).toContain("x=120, y=180");
+    expect(desktop.execute).not.toHaveBeenCalled();
+    await approve(true);
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    await send(`desktop crítico ${intent}`);
+    await approve(false);
+    expect(desktop.execute).toHaveBeenCalledOnce();
+  });
+  it.each(["legado", "enter", "quebra"])(
+    "confirma interação incerta ou que envia teclas: %s",
+    async (probe) => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send(`desktop ${probe}`);
+      await approve(false);
+      expect(desktop.execute).not.toHaveBeenCalled();
+    },
+  );
+  it("responde falha automática e recupera sem repetir nem pedir aprovação rotineira", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    desktop.execute.mockRejectedValueOnce(new Error("Falha da captura sintética."));
+    await send("desktop");
+    await complete();
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().error).toBe("Falha da captura sintética.");
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().approvals).toEqual([]);
+    await send("desktop");
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("responde controle automático mesmo quando o request precede o início do turno", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop sem início");
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().items.at(-1)?.text).toContain("executado");
+  });
+  it.each(["", "crítico"])("pedido repetido executa apenas uma vez: %s", async (risk) => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send(`desktop ${risk} duplicado`);
+    if (risk) await approve(true);
+    else await complete();
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().approvals).toEqual([]);
+  });
+  it.each([false, true])(
+    "serializa rotina concorrente e cancela a fila ao interromper=%s",
+    async (interrupt) => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const steps: string[] = [];
+      desktop.execute.mockImplementation(async (raw) => {
+        const action = (raw as DesktopArguments).action;
+        steps.push(`start:${action}`);
+        if (action === "screenshot") await blocked;
+        steps.push(`finish:${action}`);
+        if (interrupt) throw new Error("Falha antiga da captura sintética.");
+        return { success: true, contentItems: [] };
+      });
+      await send("desktop paralelo");
+      await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+      // Both requests are already handled locally; the second must remain queued.
+      const calls = await rpc.call<{ method?: string }[]>("_fixture/readCalls");
+      expect(calls.at(-1)?.method).toBe("_fixture/readCalls");
+      expect(steps).toEqual(["start:screenshot"]);
+      if (interrupt) {
+        await service.request({ type: "stop" });
+        await complete();
+        await service.request({ type: "newChat" });
+      }
+      release();
+      if (interrupt) {
+        // Drain the queue deterministically without sleeping or starting another native action.
+        await vi.waitFor(() => expect(steps).toEqual(["start:screenshot", "finish:screenshot"]));
+        await rpc.call("_fixture/readCalls");
+        expect(desktop.execute).toHaveBeenCalledOnce();
+        expect(service.snapshot().error).toBeNull();
+        expect(service.snapshot().items).toEqual([]);
+        expect(service.snapshot().metrics.failures).toBe(0);
+      } else {
+        await complete();
+        expect(steps).toEqual([
+          "start:screenshot",
+          "finish:screenshot",
+          "start:scroll",
+          "finish:scroll",
+        ]);
+      }
+    },
+  );
+  it.each([
     "Janela de teste indisponível.",
     "O Windows bloqueou o script de controle do STAG por uma política de execução.",
   ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
     desktop.execute.mockRejectedValueOnce(new Error(message));
-    await send("desktop");
+    await send("desktop crítico");
     await approve(true);
     expect(service.snapshot().metrics.failures).toBe(1);
     expect(service.snapshot().error).toBe(message);
@@ -311,7 +449,7 @@ describe("fluxo local do assistente", () => {
     expect(
       calls.some((call) => call.result?.contentItems?.some((item) => item.text === message)),
     ).toBe(true);
-    await send("desktop");
+    await send("desktop crítico");
     await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
     expect(desktop.execute).toHaveBeenCalledOnce();
     await approve(true);
@@ -321,7 +459,7 @@ describe("fluxo local do assistente", () => {
   it("interromper descarta aprovação e decisão repetida não executa duas vezes", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
     const stoppedId = service.snapshot().approvals[0].id;
     await service.request({ type: "stop" });
@@ -330,7 +468,7 @@ describe("fluxo local do assistente", () => {
       "resolvido",
     );
     expect(desktop.execute).not.toHaveBeenCalled();
-    await send("desktop");
+    await send("desktop crítico");
     await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
     const id = service.snapshot().approvals[0].id;
     const first = service.request({ type: "answer", id, accept: true });
@@ -341,18 +479,62 @@ describe("fluxo local do assistente", () => {
     await complete();
     expect(desktop.execute).toHaveBeenCalledTimes(1);
   });
+  it("parar descarta a aprovação antes de o servidor confirmar a interrupção", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    const id = service.snapshot().approvals[0].id;
+    const call = rpc.call.bind(rpc);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(rpc, "call").mockImplementation(async (method, params) => {
+      if (method === "turn/interrupt") await blocked;
+      return call(method, params);
+    });
+    const stopping = service.request({ type: "stop" });
+    expect(service.snapshot().approvals).toEqual([]);
+    await expect(service.request({ type: "answer", id, accept: true })).rejects.toThrow(
+      "resolvido",
+    );
+    expect(desktop.execute).not.toHaveBeenCalled();
+    release();
+    await stopping;
+    await complete();
+  });
+  it("falha ao interromper encerra a conexão e permite recuperar sem ação indevida", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    vi.spyOn(rpc, "call").mockRejectedValueOnce(new Error("Interrupção sintética falhou."));
+    await expect(service.request({ type: "stop" })).rejects.toThrow("Interrupção sintética falhou");
+    await vi.waitFor(() => expect(service.snapshot().connection).toBe("error"));
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().busy).toBe(false);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    await service.request({ type: "newChat" });
+    await service.request({ type: "connect" });
+    expect(service.snapshot().connection).toBe("ready");
+  });
   it("reconecta a mesma conversa Windows e restaura as tools sem renovar acesso", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(false);
     const threadId = service.snapshot().threadId!;
     await service.request({ type: "connect" });
     expect(service.snapshot().threadId).toBe(threadId);
     expect(service.snapshot().mode).toBe("windows");
-    await send("desktop");
+    await send("desktop crítico");
     await approve(true);
     expect(desktop.execute).toHaveBeenCalledTimes(1);
+    await send("desktop");
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(desktop.execute).toHaveBeenCalledTimes(2);
   });
   it("resultado de desktop interrompido não contamina uma nova conversa", async () => {
     await ready();
@@ -364,7 +546,7 @@ describe("fluxo local do assistente", () => {
           fail = reject;
         }),
     );
-    await send("desktop");
+    await send("desktop crítico");
     await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
     const answering = service.request({
       type: "answer",
@@ -384,18 +566,18 @@ describe("fluxo local do assistente", () => {
   it("consentimento não migra para outra conversa Windows", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(false);
     const first = service.snapshot().threadId!;
     await service.request({ type: "newChat" });
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(false);
     await expect(service.request({ type: "resume", threadId: first })).rejects.toThrow("confirme");
     await service.request({ type: "newChat" });
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
     await service.request({ type: "resume", threadId: first });
-    await send("desktop");
+    await send("desktop crítico");
     await approve(true);
     expect((await store.load()).threads[first].mode).toBe("windows");
   });
