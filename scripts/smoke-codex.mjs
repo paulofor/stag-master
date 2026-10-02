@@ -9,7 +9,7 @@ let rpc;
 try {
   await mkdir(join(dir, "home"), { recursive: true });
   await build({
-    entryPoints: ["src/main/rpc.ts", "src/main/desktop-tools.ts"],
+    entryPoints: ["src/main/rpc.ts", "src/main/desktop-tools.ts", "src/main/browser-tools.ts"],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
     bundle: true,
@@ -18,6 +18,7 @@ try {
   });
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
+  const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
@@ -42,11 +43,11 @@ try {
     ephemeral: true,
     approvalPolicy: "on-request",
     sandbox: "read-only",
-    dynamicTools: [desktopTool],
+    dynamicTools: [desktopTool, browserTool],
   });
   assert.ok(started.thread.id);
   console.log(
-    `Codex real: handshake, conta isolada, ${models.data.length} modelos e schema de produção do desktop OK. Nenhum turno/LLM executado.`,
+    `Codex real: handshake, conta isolada, ${models.data.length} modelos e schemas de produção de desktop/browser OK. Nenhum turno/LLM executado.`,
   );
 } finally {
   await rpc?.shutdown();

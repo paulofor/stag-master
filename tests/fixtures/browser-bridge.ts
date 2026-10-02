@@ -73,6 +73,32 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.diff = "";
               state.mode = "project";
               state.metrics.totalTokens = 0;
+              state.browser.authorized = false;
+              state.browser.url = "";
+              break;
+            case "browserVisibility":
+              state.browser.visible = action.visible;
+              if (!action.visible) {
+                state.browser.authorized = false;
+                state.browser.url = "";
+              }
+              break;
+            case "browserConsent":
+              state.browser.authorized = action.allow;
+              if (!action.allow) {
+                state.browser.url = "";
+                state.busy = false;
+                state.approvals = [];
+              }
+              break;
+            case "browserControl":
+              if (action.control.action === "navigate") {
+                state.browser.url = action.control.url;
+                state.browser.title = "Documentação sintética";
+                state.browser.canGoBack = true;
+              }
+              break;
+            case "browserBounds":
               break;
             case "resume":
               state.threadId = action.threadId;
@@ -89,7 +115,27 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 });
               }
               state.items.push({ id: `user-${++count}`, kind: "user", text: action.text });
-              if (action.text.includes("desktop") && state.mode === "windows") {
+              if (action.text.includes("navegador") && state.browser.authorized) {
+                if (action.text.includes("crítico"))
+                  state.approvals = [
+                    {
+                      id: "browser-approval",
+                      kind: "browser",
+                      title: "Confirmar ação no navegador?",
+                      detail: "Intenção: Enviar dados ao serviço externo\nElemento: e2",
+                    },
+                  ];
+                else {
+                  state.browser.url = "https://fixture.invalid/docs";
+                  state.browser.title = "Documentação sintética";
+                  state.items.push({
+                    id: `browser-${++count}`,
+                    kind: "assistant",
+                    text: "Navegador: documentação consultada.",
+                  });
+                  done();
+                }
+              } else if (action.text.includes("desktop") && state.mode === "windows") {
                 if (action.text.includes("crítico"))
                   state.approvals = [
                     {
@@ -160,17 +206,22 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
             }
             case "answer": {
               const desktop = state.approvals[0]?.kind === "desktop";
+              const browser = state.approvals[0]?.kind === "browser";
               state.approvals = [];
               state.items.push({
                 id: `assistant-${++count}`,
                 kind: "assistant",
-                text: desktop
+                text: browser
                   ? action.accept
-                    ? "Desktop: ação crítica sintética concluída."
-                    : "Desktop: ação recusada."
-                  : action.accept === false
-                    ? "Ação recusada. Nenhum comando executado."
-                    : "Resposta recebida. Fluxo concluído.",
+                    ? "Navegador: ação crítica concluída."
+                    : "Navegador: ação recusada."
+                  : desktop
+                    ? action.accept
+                      ? "Desktop: ação crítica sintética concluída."
+                      : "Desktop: ação recusada."
+                    : action.accept === false
+                      ? "Ação recusada. Nenhum comando executado."
+                      : "Resposta recebida. Fluxo concluído.",
               });
               done();
               break;
@@ -199,6 +250,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       ...structuredClone(emptySnapshot),
       connection: "ready",
       platform: "win32",
+      browser: { ...emptySnapshot.browser, available: true },
       ...overrides,
     } satisfies Snapshot,
   );

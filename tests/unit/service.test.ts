@@ -6,6 +6,7 @@ import { RpcClient } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment } from "../../src/main/policy";
 import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
+import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
 
 let dir: string;
 let service: AssistantService;
@@ -17,6 +18,17 @@ const desktop = {
     success: true,
     contentItems: [{ type: "inputText" as const, text: "[]" }],
   })),
+};
+const browser = {
+  execute: vi.fn(async (_args: BrowserArguments): Promise<ToolResult> => ({
+    success: true,
+    contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
+  })),
+  confirmationReason: vi.fn(async (args: BrowserArguments) => browserConfirmationReason(args)),
+  control: vi.fn(async () => {}),
+  reset: vi.fn(),
+  cancel: vi.fn(),
+  setVisible: vi.fn(),
 };
 beforeEach(async () => {
   await mkdir(resolve(".local"), { recursive: true });
@@ -39,6 +51,7 @@ beforeEach(async () => {
     openExternal,
     selectProject: async () => dir,
     desktop,
+    browser,
     platform: "win32",
   });
   await service.init();
@@ -52,6 +65,11 @@ afterEach(async () => {
     success: true,
     contentItems: [{ type: "inputText", text: "[]" }],
   });
+  browser.execute.mockResolvedValue({
+    success: true,
+    contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
+  });
+  browser.confirmationReason.mockImplementation(async (args) => browserConfirmationReason(args));
   await rm(dir, { recursive: true, force: true });
 });
 async function ready() {
@@ -71,6 +89,192 @@ async function approve(accept: boolean) {
   await complete();
 }
 describe("fluxo local do assistente", () => {
+  it("revogação do navegador permanece efetiva quando a interrupção remota falha", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    vi.spyOn(rpc, "call").mockRejectedValueOnce(new Error("Interrupção sintética falhou."));
+    await expect(service.request({ type: "browserVisibility", visible: false })).rejects.toThrow(
+      "Interrupção sintética falhou",
+    );
+    expect(service.snapshot().browser.authorized).toBe(false);
+    expect(service.snapshot().browser.visible).toBe(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(service.snapshot().connection).toBe("error"));
+    await service.request({ type: "connect" });
+    expect(service.snapshot().browser.authorized).toBe(false);
+  });
+  it("desktop e navegador compartilham a fila de execução", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await service.request({ type: "browserConsent", allow: true });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    desktop.execute.mockImplementationOnce(async () => {
+      await blocked;
+      return { success: true, contentItems: [] };
+    });
+    await send("navegador misto");
+    await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+    expect(browser.execute).not.toHaveBeenCalled();
+    release();
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(browser.execute).toHaveBeenCalledWith({ action: "scroll", delta: 200 });
+  });
+  it("navegador exige consentimento e segue sequência rotineira sem cards nem pixels públicos", async () => {
+    await ready();
+    await send("navegador forçar");
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    await service.request({ type: "browserConsent", allow: true });
+    browser.execute.mockImplementation(async (args) => ({
+      success: true,
+      contentItems:
+        args.action === "screenshot"
+          ? [{ type: "inputImage", imageUrl: "data:image/png;base64,SYNTHETIC_BROWSER_PIXELS" }]
+          : [{ type: "inputText", text: "synthetic-browser-result" }],
+    }));
+    await send("navegador sequência");
+    await complete();
+    expect(browser.execute.mock.calls.map(([args]) => args.action)).toEqual([
+      "navigate",
+      "snapshot",
+      "fill",
+      "click",
+      "scroll",
+      "screenshot",
+    ]);
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_BROWSER_PIXELS");
+    expect(service.snapshot().mode).toBe("project");
+  });
+  it("navegador confirma cada efeito crítico e recusa não executa", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador crítico");
+    await approve(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    await send("navegador crítico");
+    await approve(true);
+    expect(browser.execute).toHaveBeenCalledOnce();
+  });
+  it("navegador trata erros do probe/driver, recupera e não duplica pedidos", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    browser.confirmationReason.mockRejectedValueOnce(new Error("Alvo sintético mudou."));
+    await send("navegador crítico");
+    await complete();
+    expect(service.snapshot().error).toContain("Alvo sintético mudou");
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(browser.execute).not.toHaveBeenCalled();
+    browser.execute.mockRejectedValueOnce(new Error("Falha sintética do navegador."));
+    await send("navegador");
+    await complete();
+    expect(service.snapshot().metrics.failures).toBe(2);
+    await send("navegador duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("navegador rejeita argumentos, namespace e outro thread/turn sem prender o servidor", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    for (const suffix of ["inválido", "namespace", "outro thread", "outro turno"]) {
+      await send(`navegador ${suffix}`);
+      await complete();
+    }
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+  it("navegador reconecta no mesmo thread, autoriza durante conversa e não transfere acesso", async () => {
+    await ready();
+    await send("analise");
+    await complete();
+    const first = service.snapshot().threadId!;
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador");
+    await complete();
+    await service.request({ type: "connect" });
+    expect(service.snapshot().browser.authorized).toBe(true);
+    await send("navegador");
+    await complete();
+    await service.request({ type: "newChat" });
+    expect(service.snapshot().browser.authorized).toBe(false);
+    await service.request({ type: "browserConsent", allow: true });
+    await send("analise outra");
+    await complete();
+    await service.request({ type: "resume", threadId: first });
+    expect(service.snapshot().browser.authorized).toBe(false);
+    await send("navegador forçar");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+    expect((await store.load()).threads[first].browserTool).toBe(true);
+    expect(JSON.stringify(await store.load())).not.toContain("authorized");
+  });
+  it("navegador histórico antigo conserva tools e exige nova conversa para autorizar", async () => {
+    await ready();
+    await send("analise");
+    await complete();
+    const id = service.snapshot().threadId!;
+    const settings = await store.load();
+    delete settings.threads[id].browserTool;
+    await store.save(settings);
+    await service.init();
+    await expect(service.request({ type: "browserConsent", allow: true })).rejects.toThrow(
+      "nova conversa",
+    );
+    expect(service.snapshot().threadId).toBe(id);
+    expect(service.snapshot().mode).toBe("project");
+  });
+  it("navegador revoga enquanto aguarda aprovação e fechar não transfere autorização", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    const id = service.snapshot().approvals[0].id;
+    await service.request({ type: "browserVisibility", visible: false });
+    await complete();
+    expect(service.snapshot().browser.authorized).toBe(false);
+    expect(service.snapshot().browser.visible).toBe(false);
+    await expect(service.request({ type: "answer", id, accept: true })).rejects.toThrow(
+      "resolvido",
+    );
+    expect(browser.execute).not.toHaveBeenCalled();
+    await service.request({ type: "browserVisibility", visible: true });
+    expect(service.snapshot().browser.authorized).toBe(false);
+  });
+  it("navegador serializa operações e cancela fila/resultados antigos na interrupção", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    browser.execute.mockImplementationOnce(async () => {
+      await blocked;
+      return { success: true, contentItems: [{ type: "inputText", text: "OLD_BROWSER_RESULT" }] };
+    });
+    await send("navegador paralelo");
+    await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledOnce());
+    await expect(
+      service.request({
+        type: "browserControl",
+        control: { action: "navigate", url: "https://fixture.invalid" },
+      }),
+    ).rejects.toThrow("Pare");
+    await service.request({ type: "stop" });
+    await complete();
+    await service.request({ type: "newChat" });
+    release();
+    await vi.waitFor(() => expect(browser.confirmationReason).toHaveBeenCalledOnce());
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().items).toEqual([]);
+    expect(JSON.stringify(service.snapshot())).not.toContain("OLD_BROWSER_RESULT");
+    expect(browser.cancel).toHaveBeenCalled();
+  });
   it("autentica por ChatGPT e não transmite tokens", async () => {
     await ready();
     expect(openExternal).toHaveBeenCalledWith("https://auth.openai.com/fixture-login");
@@ -242,10 +446,13 @@ describe("fluxo local do assistente", () => {
     const calls =
       await rpc.call<{ method?: string; params?: Record<string, unknown> }[]>("_fixture/readCalls");
     const starts = calls.filter((call) => call.method === "thread/start");
-    expect(starts[0].params?.dynamicTools).toBeUndefined();
+    expect(starts[0].params?.dynamicTools).toEqual([
+      expect.objectContaining({ name: "stag_browser" }),
+    ]);
     expect(starts[0].params?.developerInstructions).toContain("Autorizar desktop");
     expect(starts[1].params?.dynamicTools).toEqual([
       expect.objectContaining({ name: "windows_desktop" }),
+      expect.objectContaining({ name: "stag_browser" }),
     ]);
     expect(starts[1].params?.developerInstructions).toContain("cliente autorizou");
     expect(starts[1].params?.developerInstructions).toContain("sem pedir permissão novamente");

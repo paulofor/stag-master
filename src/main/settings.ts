@@ -7,7 +7,11 @@ const settingsSchema = z.object({
   threads: z
     .record(
       z.string(),
-      z.object({ path: z.string(), mode: z.enum(["read", "project", "windows"]) }),
+      z.object({
+        path: z.string(),
+        mode: z.enum(["read", "project", "windows"]),
+        browserTool: z.boolean().optional(),
+      }),
     )
     .default({}),
 });

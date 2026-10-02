@@ -34,6 +34,30 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("openLink"), url: z.string().max(8000) }).strict(),
+  z.object({ type: z.literal("browserVisibility"), visible: z.boolean() }).strict(),
+  z.object({ type: z.literal("browserConsent"), allow: z.boolean() }).strict(),
+  z
+    .object({
+      type: z.literal("browserControl"),
+      control: z.discriminatedUnion("action", [
+        z.object({ action: z.literal("navigate"), url: z.string().min(1).max(8000) }).strict(),
+        z.object({ action: z.enum(["back", "forward", "reload"]) }).strict(),
+      ]),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("browserBounds"),
+      bounds: z
+        .object({
+          x: z.number().int().min(0).max(20000),
+          y: z.number().int().min(0).max(20000),
+          width: z.number().int().min(0).max(20000),
+          height: z.number().int().min(0).max(20000),
+        })
+        .strict(),
+    })
+    .strict(),
 ]);
 
 export function safeLink(raw: string, login = false): string {

@@ -33,7 +33,7 @@ export interface Question {
 }
 export interface Approval {
   id: string;
-  kind: "command" | "file" | "desktop" | "questions";
+  kind: "command" | "file" | "desktop" | "browser" | "questions";
   title: string;
   detail: string;
   questions?: Question[];
@@ -57,7 +57,20 @@ export interface Snapshot {
   diff: string;
   metrics: { requests: number; failures: number; totalTokens: number; elapsedMs: number };
   platform: string;
+  browser: BrowserState;
 }
+export interface BrowserState {
+  available: boolean;
+  visible: boolean;
+  authorized: boolean;
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  error: string | null;
+}
+export type BrowserInfo = Omit<BrowserState, "available" | "visible" | "authorized">;
 export const emptySnapshot: Snapshot = {
   connection: "disconnected",
   error: null,
@@ -77,6 +90,17 @@ export const emptySnapshot: Snapshot = {
   diff: "",
   metrics: { requests: 0, failures: 0, totalTokens: 0, elapsedMs: 0 },
   platform: "browser",
+  browser: {
+    available: false,
+    visible: true,
+    authorized: false,
+    url: "",
+    title: "",
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    error: null,
+  },
 };
 export type Action =
   | { type: "connect" }
@@ -96,7 +120,13 @@ export type Action =
   | { type: "send"; text: string }
   | { type: "stop" }
   | { type: "answer"; id: string; accept?: boolean; answers?: Record<string, string> }
-  | { type: "openLink"; url: string };
+  | { type: "openLink"; url: string }
+  | { type: "browserVisibility"; visible: boolean }
+  | { type: "browserConsent"; allow: boolean }
+  | { type: "browserControl"; control: BrowserControl }
+  | { type: "browserBounds"; bounds: { x: number; y: number; width: number; height: number } };
+export type BrowserControl =
+  { action: "navigate"; url: string } | { action: "back" | "forward" | "reload" };
 export interface DesktopBridge {
   getSnapshot(): Promise<Snapshot>;
   request(action: Action): Promise<Snapshot>;

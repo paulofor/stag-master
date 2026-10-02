@@ -20,6 +20,7 @@ import { desktopArguments, DesktopTools, withoutAssistantWindow } from "./deskto
 import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
+import { BrowserPanel } from "./browser-panel";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "stag", privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -27,6 +28,8 @@ protocol.registerSchemesAsPrivileged([
 app.setName("STAG");
 let window: BrowserWindow | null = null;
 let service: AssistantService | null = null;
+let browser: BrowserPanel | null = null;
+let authorizationRevision = 0;
 const devUrl = !app.isPackaged ? process.env.STAG_DEV_URL : undefined;
 if (devUrl && devUrl !== "http://127.0.0.1:5173")
   throw new Error("Origem de desenvolvimento inválida.");
@@ -49,7 +52,7 @@ async function start(): Promise<void> {
   session.defaultSession.setPermissionCheckHandler(() => false);
   session.defaultSession.on("will-download", (event) => event.preventDefault());
   window = new BrowserWindow({
-    width: 640,
+    width: 1280,
     height: 900,
     minWidth: 360,
     minHeight: 600,
@@ -68,6 +71,7 @@ async function start(): Promise<void> {
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.on("ready-to-show", () => window?.show());
+  browser = new BrowserPanel(window);
   const dataRoot = app.getPath("userData");
   const codexHome = join(dataRoot, "codex");
   await mkdir(codexHome, { recursive: true });
@@ -136,7 +140,10 @@ async function start(): Promise<void> {
           : desktop.execute(input);
       },
     },
+    browser,
   });
+  browser.on("state", (info) => service?.updateBrowser(info));
+  service.updateBrowser(browser.snapshot());
   service.on("snapshot", (snapshot) => {
     if (window && !window.isDestroyed()) window.webContents.send("stag:snapshot", snapshot);
   });
@@ -161,6 +168,41 @@ async function start(): Promise<void> {
   ipcMain.handle("stag:action", async (event, raw: unknown) => {
     trusted(event);
     const action = actionSchema.parse(raw) as Action;
+    if (action.type === "browserBounds") {
+      browser!.setBounds(action.bounds);
+      return service!.snapshot();
+    }
+    if (
+      [
+        "connect",
+        "logout",
+        "selectProject",
+        "preferences",
+        "newChat",
+        "resume",
+        "browserConsent",
+        "browserVisibility",
+      ].includes(action.type)
+    )
+      authorizationRevision++;
+    if (action.type === "browserConsent" && action.allow) {
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "question",
+        title: "Controle do navegador",
+        message: "Permitir que o modelo controle o navegador nesta conversa?",
+        detail:
+          "O modelo poderá navegar, ler páginas, clicar e preencher campos no navegador ao lado. Texto e capturas das páginas serão enviados ao ChatGPT. Ações rotineiras não pedirão confirmação; envio de dados, exclusão, publicação, pagamentos, credenciais e ações incertas terão confirmação específica. Revogar acesso, fechar o navegador ou abrir outra conversa encerra a autorização e descarta a sessão. O navegador usa uma sessão separada dos seus outros navegadores.",
+        buttons: ["Cancelar", "Autorizar navegador"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error(
+          "A conversa mudou durante a autorização. Autorize o navegador na conversa atual.",
+        );
+    }
     if (
       process.platform === "win32" &&
       action.type === "preferences" &&
@@ -193,4 +235,7 @@ app
     app.quit();
   });
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => service?.dispose());
+app.on("before-quit", () => {
+  service?.dispose();
+  browser?.dispose();
+});
