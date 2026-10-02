@@ -1,6 +1,25 @@
-# Matriz de homologação da versão 0.4.1
+# Matriz de homologação da versão 0.4.2
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Acesso à pasta de trabalho — versão 0.4.2
+
+Matriz definida antes dos testes desta alteração. A seleção de pasta mantinha o modo Leitura de uma conversa anterior; start/resume também dependiam apenas de cwd para definir as raízes de escrita. O smoke verificava o handshake, mas não executava leitura/escrita no sandbox. Selecionar uma pasta passa a autorizar o modo Projeto para essa pasta e suas subpastas, com raízes explícitas e instruções de capacidade em start/resume. O usuário pode escolher Leitura depois; históricos conservam seu modo original. Não há concessão de acesso ao desktop/navegador, alteração global de ACL ou elevação automática.
+
+| Área                       | Cenário e aceite                                                                                                                                                               | Evidência prevista                            |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------- |
+| Caminho feliz              | Selecionar pasta ativa Projeto, inclusive após Leitura; criar, ler e editar arquivo em subpastas sem aprovação adicional de rotina                                             | Serviço + Electron + smoke real do App Server |
+| Política e validações      | Start/resume/turn recebem somente a raiz escolhida; cancelamento ou caminho inválido preservam contexto; Leitura escolhida depois continua sem escrita                         | Contrato + serviço + smoke real               |
+| Isolamento                 | Pasta vizinha, caminho relativo com travessia e link para fora permanecem sem escrita em Projeto; troca de projeto não reutiliza raízes ou consentimentos de desktop/navegador | Smoke com diretórios temporários + serviço    |
+| Histórico e recuperação    | Reconectar mantém a mesma raiz; retomar histórico Leitura não amplia acesso; recusa de ação crítica e falha de comando liberam o agente e permitem continuar                   | Serviço bidirecional + regressões existentes  |
+| Windows e permissões       | Binário empacotado executa comandos sintéticos de arquivo pelo sandbox unelevated; escrita externa/Leitura é bloqueada; sem alteração global de ACL ou política pelo STAG      | Smoke Windows do HEAD + job de instalador     |
+| Interface e dispositivos   | Seletor explica leitura/escrita em pasta e subpastas; painel único e navegador opcional preservados em Chromium compacto/Pixel 7 e Electron                                    | E2E + test:desktop                            |
+| Observabilidade e métricas | Operações e erros continuam visíveis, contadores locais sem autenticação ou arquivos do cliente; teste falha se comando não rodar ou escapar da raiz                           | Serviço + smoke, sem inferência paga          |
+| Segregação de dados        | Projeto, pasta vizinha e CODEX_HOME temporários; apenas arquivos sintéticos; shutdown aguardado antes da limpeza; nenhuma janela/conta/credencial do cliente                   | Fixtures + smoke real                         |
+
+A sandbox Linux valida contratos, recuperação, interface e handshake real. A primeira execução do smoke ampliado comprovou que o App Server relata a raiz escolhida em runtimeWorkspaceRoots separadamente das raízes adicionais e que o kernel local bloqueia namespaces bwrap. O smoke declara somente essa limitação Linux; não a aceita no Windows nem trata erro de inicialização como evidência de negação de escrita. A execução nativa Windows e o instalador serão conferidos nos jobs do PR e da main. Arquivos protegidos pelo Codex e bloqueios NTFS/GPO continuam sujeitos às políticas efetivas; o aplicativo informa o acesso atual e não aplica icacls/takeown ou mudança de política do computador para contornar uma falha.
+
+Evidência local: `npm run check` aprovado com typecheck, 127 testes de contrato, build, handshake real e 26 cenários Chromium compacto/Pixel 7; `xvfb-run -a npm run test:desktop` aprovado com seleção após Leitura, preload/IPC e navegador de produção com site sintético. `format:check`, sintaxe dos scripts JavaScript e revisão do diff aprovados. O runtime local foi preparado com Node 22.12.0 para respeitar engines. O teste de arquivos continua obrigatório no job Windows, pois a sandbox local não possui sessão nativa Windows e seu kernel bloqueia o executor Linux.
 
 ## Navegação pelo navegador do STAG — versão 0.4.1
 

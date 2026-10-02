@@ -10,6 +10,21 @@ async function ready(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 }
+test("selecionar pasta autoriza leitura e escrita, e Leitura continua disponível", async ({
+  page,
+}) => {
+  await ready(page);
+  const access = page.getByLabel("Acesso", { exact: true });
+  await expect(access).toHaveValue("project");
+  await expect(access.locator("option:checked")).toHaveText("Projeto · leitura e escrita");
+  await access.selectOption("read");
+  await expect(access).toHaveValue("read");
+  await page.getByRole("button", { name: "Selecionar pasta do projeto", exact: true }).click();
+  await expect(access).toHaveValue("project");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
 test("painel compacto, onboarding e conversa Markdown", async ({ page }, info) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

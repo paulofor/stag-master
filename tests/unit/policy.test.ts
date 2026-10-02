@@ -1,7 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { assistantInstructions } from "../../src/main/policy";
+import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/policy";
 import { browserTool } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
+
+describe("autorização da pasta de trabalho", () => {
+  const path = "C:\\Projetos\\projeto com espaço\\ação";
+  it("explicita a raiz escolhida em start/resume e turn sem liberar todo o computador", () => {
+    expect(threadPolicy("project", path)).toMatchObject({
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      runtimeWorkspaceRoots: [path],
+      config: { sandbox_workspace_write: { writable_roots: [], network_access: true } },
+    });
+    expect(turnPolicy("project", path)).toMatchObject({
+      approvalPolicy: "on-request",
+      runtimeWorkspaceRoots: [path],
+      sandboxPolicy: { type: "workspaceWrite", writableRoots: [path] },
+    });
+    expect(threadPolicy("read", path)).toMatchObject({
+      sandbox: "read-only",
+      config: { sandbox_workspace_write: { writable_roots: [] } },
+    });
+    expect(turnPolicy("read", path)).toMatchObject({ sandboxPolicy: { type: "readOnly" } });
+  });
+  it("informa acesso recursivo já autorizado, mantendo confirmações críticas e bloqueios reais", () => {
+    const instructions = assistantInstructions("project", "win32", false, true, path);
+    expect(instructions).toContain(JSON.stringify(path));
+    expect(instructions).toContain("leitura e escrita nela e em suas subpastas");
+    expect(instructions).toContain("sem pedir nova permissão para cada operação rotineira");
+    expect(instructions).toContain("continuam exigindo confirmação específica");
+    expect(instructions).toContain("não altere ACLs, use icacls/takeown");
+    expect(instructions).toContain("não concede controle do desktop nem do navegador");
+    expect(assistantInstructions("read", "win32", false, true, path)).toContain(
+      "não crie nem altere arquivos",
+    );
+  });
+});
 
 describe("contrato de navegação do agente", () => {
   it("exige navegador integrado em todos os modos, plataformas e estados de consentimento", () => {

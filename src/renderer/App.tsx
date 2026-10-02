@@ -45,7 +45,7 @@ const effortLabels: Record<string, string> = {
   max: "Máximo",
   ultra: "Ultra",
 };
-const modeLabels = { read: "Leitura", project: "Projeto", windows: "Windows" };
+const modeLabels = { read: "Leitura", project: "Projeto · leitura e escrita", windows: "Windows" };
 const suggestions = [
   {
     icon: Code2,
@@ -542,7 +542,7 @@ export function App() {
               <button
                 className="attach-button icon-button"
                 aria-label="Selecionar pasta do projeto"
-                title="Adicionar contexto do projeto"
+                title="Selecionar pasta e autorizar leitura e escrita nela e nas subpastas"
                 disabled={disabledContext}
                 onClick={() => void run({ type: "selectProject" })}
               >
@@ -605,7 +605,16 @@ export function App() {
             </div>
           </section>
           <footer className="footer">
-            <label className={`mode-select ${state.mode === "windows" ? "windows-mode" : ""}`}>
+            <label
+              className={`mode-select ${state.mode === "windows" ? "windows-mode" : ""}`}
+              title={
+                state.mode === "read"
+                  ? "Somente leitura da pasta e subpastas"
+                  : state.mode === "project"
+                    ? "Leitura e escrita autorizadas na pasta e subpastas; confirmação nos pontos críticos"
+                    : "Desktop autorizado nesta conversa; confirmação nos pontos críticos"
+              }
+            >
               <ShieldCheck size={12} />
               <span className="sr-only">Acesso</span>
               <select

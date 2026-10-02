@@ -379,6 +379,7 @@ export class AssistantService extends EventEmitter {
     const path = await realpath(selected);
     if (!(await stat(path)).isDirectory()) throw new Error("Selecione uma pasta de projeto.");
     this.clearChat();
+    this.state.mode = "project";
     this.state.project = { path, name: basename(path) || path };
     this.settings.project = path;
     await this.options.store.save(this.settings);
@@ -511,12 +512,13 @@ export class AssistantService extends EventEmitter {
     const result = await this.call<{ thread: WireThread }>("thread/resume", {
       threadId: id,
       cwd: policy.path,
-      ...threadPolicy(policy.mode),
+      ...threadPolicy(policy.mode, policy.path),
       developerInstructions: assistantInstructions(
         policy.mode,
         this.state.platform,
         this.state.browser.authorized,
         !!policy.browserTool,
+        policy.path,
       ),
     });
     this.state.threadId = id;
@@ -568,12 +570,13 @@ export class AssistantService extends EventEmitter {
         const result = await this.call<{ thread: WireThread }>("thread/start", {
           cwd: this.state.project.path,
           model: this.state.model,
-          ...threadPolicy(this.state.mode),
+          ...threadPolicy(this.state.mode, this.state.project.path),
           developerInstructions: assistantInstructions(
             this.state.mode,
             this.state.platform,
             this.state.browser.authorized,
             !!this.options.browser,
+            this.state.project.path,
           ),
           serviceName: "stag_desktop",
           dynamicTools: [
