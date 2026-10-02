@@ -1,0 +1,53 @@
+name: Desktop CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Local contracts and UI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --include=dev
+      - run: npx playwright install --with-deps chromium
+      - run: npm run check
+      - run: xvfb-run -a npm run test:desktop
+      - run: npm run format:check
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-diagnostics
+          path: |
+            playwright-report
+            test-results
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --include=dev
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:windows
+      - run: npm run dist:win
+      - run: npm run test:codex
+      - run: npm run test:desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stag-windows-x64
+          path: release/*Setup.exe
+          if-no-files-found: error

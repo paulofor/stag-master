@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+.local/
+.codex/attachments/
+playwright-report/
+test-results/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
