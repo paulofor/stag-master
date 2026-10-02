@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Foco em programação: ler especificações, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a base funcional 0.1: conversa em tempo real, Markdown, projeto local, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, aprovações, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.2: conversa em tempo real, Markdown, projeto local, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, controle autorizado do desktop, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -16,7 +16,11 @@ npm run dev
 1. Clique em **Entrar com ChatGPT** e conclua o login no navegador.
 2. Use **Selecionar projeto** para escolher a pasta de trabalho.
 3. Escolha um modelo disponível e envie a tarefa. Arquivos, histórias de usuário e AGENTS.md dessa pasta ficam acessíveis ao agente.
-4. Use **Projeto** para programação ou **Windows** para controlar aplicativos, com consentimento por conversa e aprovação de ações.
+4. Para controlar aplicativos, clique em **Autorizar desktop** ao lado da mensagem e confirme **Continuar** e **Permitir acesso**. Isso abre uma nova conversa no modo Windows; repita a tarefa nela. O projeto e o rascunho continuam selecionados.
+5. O STAG pode listar/focar janelas, ver a tela principal, clicar (incluindo botão direito e clique duplo), digitar texto literal, enviar atalhos e rolar. Cada operação mostra o alvo ou os parâmetros e aguarda **Permitir esta ação**; **Recusar** devolve a recusa ao agente sem executar.
+6. **Revogar acesso** ou **Nova conversa** encerra o consentimento. Para retomar um histórico Windows, autorize antes de abri-lo; o consentimento não migra de outra conversa.
+
+Capturas aprovadas e títulos de janelas são enviados ao ChatGPT para a tarefa. O painel do STAG fica oculto brevemente durante capturas, cliques e rolagem, para não cobrir o alvo, e retorna sem tomar o foco. **Parar execução** descarta aprovações pendentes; uma operação nativa já aprovada pode terminar antes da interrupção.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
 
@@ -39,7 +43,7 @@ Para desenvolvimento de interface em Linux: `npm run dev:web`. Esse modo exibe o
 
 - A aplicação mostra apenas conversa e controles compactos; não inclui IDE, terminal embutido, voz ou edição de vídeo.
 - Programação e navegação web usam ferramentas nativas do Codex. A IDE pode ser aberta por comando autorizado no Windows.
-- Controle inicial de desktop: listar/focar janelas, teclas, clique e captura da tela principal; não inclui integração semântica com todas as IDEs.
+- Controle de desktop: listar/focar janelas, digitação literal, atalhos, clique, rolagem e captura da tela principal; não inclui integração semântica com todas as IDEs.
 - O modo Windows dá acesso amplo ao computador. Selecione-o só para tarefas que precisam desse acesso; a interface pede consentimento e aprovação das ações do tool de desktop.
 - OAuth e interações reais de desktop precisam da conta e da sessão Windows do cliente. A matriz documenta o que é simulado e o que exige Windows.
 - Integração local e de código aberto, conforme o escopo documentado do [App Server](https://learn.chatgpt.com/docs/app-server). Não é um serviço comercial hospedado.

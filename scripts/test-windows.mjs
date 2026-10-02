@@ -5,6 +5,18 @@ if (process.platform !== "win32")
 const script = resolve("native/windows-control.ps1");
 execFileSync(
   "powershell.exe",
+  [
+    "-NoProfile",
+    "-NonInteractive",
+    "-File",
+    resolve("tests/fixtures/desktop-native.ps1"),
+    "-ScriptPath",
+    script,
+  ],
+  { stdio: "inherit" },
+);
+execFileSync(
+  "powershell.exe",
   ["-NoProfile", "-NonInteractive", "-File", resolve("native/validate.ps1"), "-ScriptPath", script],
   { stdio: "inherit" },
 );

@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { RpcId } from "../shared/types";
+import { version } from "../../package.json";
 
 export interface RpcMessage {
   id?: RpcId;
@@ -59,7 +60,7 @@ export class RpcClient extends EventEmitter {
       ),
     );
     await this.call("initialize", {
-      clientInfo: { name: "stag_desktop", title: "STAG", version: "0.1.0" },
+      clientInfo: { name: "stag_desktop", title: "STAG", version },
       capabilities: {
         experimentalApi: true,
         optOutNotificationMethods: ["item/reasoning/textDelta"],
