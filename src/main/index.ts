@@ -172,7 +172,7 @@ async function start(): Promise<void> {
         title: "Acesso ao Windows",
         message: "Permitir que o assistente controle este computador nesta conversa?",
         detail:
-          "O agente poderá controlar mouse e teclado e executar comandos com acesso amplo. Cada operação de desktop terá aprovação própria. Capturas e títulos de janelas aprovados serão enviados ao ChatGPT para a tarefa. Autorizar inicia uma nova conversa; revogar ou abrir outra conversa encerra o acesso.",
+          "O agente poderá ver a tela, controlar mouse e teclado e executar comandos com acesso amplo. Capturas, foco, rolagem e interações rotineiras não pedirão nova aprovação. Exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações sem contexto suficiente terão confirmação específica. Capturas e títulos de janelas serão enviados ao ChatGPT para a tarefa. Autorizar inicia uma nova conversa; revogar ou abrir outra conversa encerra o acesso.",
         buttons: ["Cancelar", "Permitir acesso"],
         defaultId: 0,
         cancelId: 0,

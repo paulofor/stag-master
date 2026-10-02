@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DesktopTools,
+  desktopArguments,
+  desktopConfirmationReason,
   withoutAssistantWindow,
   windowsPowerShellEnvironment,
   type DesktopArguments,
@@ -26,6 +28,97 @@ beforeEach(() => {
   );
 });
 afterEach(() => vi.unstubAllEnvs());
+
+describe("confirmação pelo efeito da interação", () => {
+  it.each<DesktopArguments>([
+    { action: "list_windows" },
+    { action: "screenshot" },
+    { action: "focus_window", processId: 4242 },
+    { action: "scroll", x: 120, y: 180, delta: -120 },
+    { action: "click", x: 120, y: 180, risk: "routine", intent: "Abrir aba do editor" },
+    {
+      action: "type_text",
+      processId: 4242,
+      text: "literal + ^ % {x}",
+      risk: "routine",
+      intent: "Editar campo local",
+    },
+    {
+      action: "send_keys",
+      processId: 4242,
+      keys: "^s",
+      risk: "routine",
+      intent: "Salvar arquivo local",
+    },
+    {
+      action: "send_keys",
+      processId: 4242,
+      keys: "^{HOME}",
+      risk: "routine",
+      intent: "Navegar no editor",
+    },
+  ])("usa consentimento da conversa para $action: $intent", (input) => {
+    expect(desktopConfirmationReason(desktopArguments.parse(input))).toBeNull();
+  });
+  it.each<DesktopArguments>([
+    { action: "click", x: 120, y: 180 },
+    { action: "click", x: 120, y: 180, risk: "routine" },
+    { action: "click", x: 120, y: 180, intent: "Abrir editor" },
+    { action: "click", x: 120, y: 180, risk: "critical", intent: "Excluir arquivo" },
+    { action: "send_keys", processId: 4242, keys: "^s", risk: "critical", intent: "Salvar senha" },
+    {
+      action: "type_text",
+      processId: 4242,
+      text: "SYNTHETIC_SECRET",
+      risk: "critical",
+      intent: "Digitar credencial sintética",
+    },
+  ])("confirma contexto ausente ou efeito crítico em $action: $intent", (input) => {
+    expect(desktopConfirmationReason(desktopArguments.parse(input))).toBeTruthy();
+  });
+  it.each([
+    "~",
+    "{ENTER}",
+    "^{ENTER}",
+    "{DEL}",
+    "+{DELETE}",
+    "%{F4}",
+    "^s{ENTER}",
+    "^lhttps://example.invalid~",
+  ])("declaração routine não libera atalho que envia/exclui ou sequência complexa: %s", (keys) => {
+    expect(
+      desktopConfirmationReason({
+        action: "send_keys",
+        processId: 4242,
+        keys,
+        risk: "routine",
+        intent: "Interagir com editor",
+      }),
+    ).toBeTruthy();
+  });
+  it.each(["comando\n", "texto\r\n", "texto\r", "campo\tvalor"])(
+    "texto que envia teclas especiais exige confirmação: %j",
+    (text) => {
+      expect(
+        desktopConfirmationReason({
+          action: "type_text",
+          processId: 4242,
+          text,
+          risk: "routine",
+          intent: "Editar campo local",
+        }),
+      ).toBeTruthy();
+    },
+  );
+  it.each([
+    { action: "click", x: 0, y: 0, risk: "unknown", intent: "Abrir editor" },
+    { action: "click", x: 0, y: 0, risk: "routine", intent: "  " },
+    { action: "click", x: 0, y: 0, risk: "routine", intent: "x".repeat(501) },
+    { action: "screenshot", risk: "routine", intent: "Capturar" },
+  ])("recusa classificação inválida ou metadados em operação sem contexto: %j", (input) => {
+    expect(desktopArguments.safeParse(input).success).toBe(false);
+  });
+});
 
 describe("driver de desktop com processo simulado", () => {
   const inputs: DesktopArguments[] = [

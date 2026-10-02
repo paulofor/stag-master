@@ -90,15 +90,30 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               }
               state.items.push({ id: `user-${++count}`, kind: "user", text: action.text });
               if (action.text.includes("desktop") && state.mode === "windows") {
-                state.approvals = [
-                  {
-                    id: "desktop-approval",
-                    kind: "desktop",
-                    title: "Permitir captura de tela?",
-                    detail:
-                      "A imagem da tela principal será enviada ao ChatGPT para executar esta tarefa.",
-                  },
-                ];
+                if (action.text.includes("crítico"))
+                  state.approvals = [
+                    {
+                      id: "desktop-approval",
+                      kind: "desktop",
+                      title: "Confirmar ação no desktop?",
+                      detail:
+                        "Intenção: Enviar requisição ao serviço externo\nPosição física: x=120, y=180",
+                    },
+                  ];
+                else {
+                  state.items.push({
+                    id: `desktop-${++count}`,
+                    kind: "status",
+                    text: "windows_desktop",
+                    status: "completed",
+                  });
+                  state.items.push({
+                    id: `assistant-${++count}`,
+                    kind: "assistant",
+                    text: "Desktop: captura e navegação sintéticas concluídas.",
+                  });
+                  done();
+                }
               } else if (/aprovar|recusar/.test(action.text)) {
                 state.approvals = [
                   {
@@ -151,7 +166,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 kind: "assistant",
                 text: desktop
                   ? action.accept
-                    ? "Desktop: captura sintética concluída."
+                    ? "Desktop: ação crítica sintética concluída."
                     : "Desktop: ação recusada."
                   : action.accept === false
                     ? "Ação recusada. Nenhum comando executado."

@@ -5,6 +5,10 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Approval } from "../shared/types";
 
 const executeFile = promisify(execFile);
+const interactionContext = {
+  risk: z.enum(["routine", "critical"]).optional(),
+  intent: z.string().trim().min(1).max(500).optional(),
+};
 export const desktopArguments = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list_windows") }).strict(),
   z.object({ action: z.literal("screenshot") }).strict(),
@@ -14,6 +18,7 @@ export const desktopArguments = z.discriminatedUnion("action", [
       action: z.literal("send_keys"),
       processId: z.number().int().positive(),
       keys: z.string().min(1).max(2000),
+      ...interactionContext,
     })
     .strict(),
   z
@@ -21,6 +26,7 @@ export const desktopArguments = z.discriminatedUnion("action", [
       action: z.literal("type_text"),
       processId: z.number().int().positive(),
       text: z.string().min(1).max(2000),
+      ...interactionContext,
     })
     .strict(),
   z
@@ -30,6 +36,7 @@ export const desktopArguments = z.discriminatedUnion("action", [
       y: z.number().int().min(-30000).max(30000),
       button: z.enum(["left", "right", "middle"]).optional(),
       clicks: z.union([z.literal(1), z.literal(2)]).optional(),
+      ...interactionContext,
     })
     .strict(),
   z
@@ -55,7 +62,7 @@ export const desktopTool = {
   type: "function",
   name: "windows_desktop",
   description:
-    "Controla o desktop Windows do cliente após consentimento, com aprovação individual de cada operação. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture a tela principal antes de clicar ou rolar; use coordenadas físicas em pixels, incluindo sua origem. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta em unidades de roda (120 por passo, positivo sobe, negativo desce). Capture novamente para verificar o resultado. Não use para contornar recusa do usuário.",
+    "Controla o desktop Windows após autorização da conversa. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado.",
   inputSchema: {
     type: "object",
     properties: {
@@ -105,51 +112,75 @@ export const desktopTool = {
         maximum: 1200,
         description: "Obrigatório em scroll, não zero. 120 por passo; negativo desce.",
       },
+      risk: {
+        type: "string",
+        enum: ["routine", "critical"],
+        description:
+          "Em click/type_text/send_keys: routine para navegação/edição local reversível; critical para exclusão, envio externo, publicação, pagamentos, credenciais ou mudanças no sistema. Sem contexto há confirmação.",
+      },
+      intent: {
+        type: "string",
+        minLength: 1,
+        maxLength: 500,
+        description: "Em click/type_text/send_keys: efeito concreto esperado e alvo da interação.",
+      },
     },
     required: ["action"],
     additionalProperties: false,
   },
 };
 
+/** Coordinates alone cannot establish intent. Legacy or uncertain interactions still ask. */
+export function desktopConfirmationReason(input: DesktopArguments): string | null {
+  if (input.action !== "click" && input.action !== "type_text" && input.action !== "send_keys")
+    return null;
+  if (!input.risk || !input.intent)
+    return "O efeito desta interação não foi identificado. Confirme antes de executá-la.";
+  if (input.risk === "critical")
+    return "O agente identificou um efeito crítico. Esta confirmação vale somente para esta ação.";
+  if (input.action === "type_text" && /[\r\n\t]/.test(input.text))
+    return "O texto inclui Enter ou Tab e pode enviar, executar ou mudar o alvo da interação.";
+  // A single navigation/editing shortcut is predictable; submissions and arbitrary sequences are not.
+  if (
+    input.action === "send_keys" &&
+    !/^(?:\^[acsvxyz]|[+^]?\{(?:TAB|ESC|ESCAPE|UP|DOWN|LEFT|RIGHT|HOME|END|PGUP|PGDN)\})$/i.test(
+      input.keys,
+    )
+  )
+    return "Este atalho pode confirmar, excluir, executar ou enviar dados; confirme seu efeito.";
+  return null;
+}
+
 export function desktopApproval(input: DesktopArguments): Pick<Approval, "title" | "detail"> {
+  const reason = desktopConfirmationReason(input);
+  return {
+    title: "Confirmar ação no desktop?",
+    detail: [
+      reason,
+      "intent" in input ? `Intenção: ${input.intent || "não informada"}` : "",
+      desktopOperationDetail(input),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  };
+}
+
+function desktopOperationDetail(input: DesktopArguments): string {
   switch (input.action) {
     case "list_windows":
-      return {
-        title: "Permitir listar janelas?",
-        detail:
-          "Os títulos e processos das janelas abertas serão enviados ao ChatGPT para identificar o aplicativo da tarefa.",
-      };
+      return "Listar títulos e processos das janelas abertas.";
     case "screenshot":
-      return {
-        title: "Permitir captura de tela?",
-        detail:
-          "A imagem da tela principal será enviada ao ChatGPT para executar esta tarefa. Ela pode incluir informações de outros aplicativos abertos.",
-      };
+      return "Capturar a tela principal.";
     case "focus_window":
-      return {
-        title: "Permitir focar uma janela?",
-        detail: `Trazer a janela do processo ${input.processId} para frente.`,
-      };
+      return `Trazer a janela do processo ${input.processId} para frente.`;
     case "send_keys":
-      return {
-        title: "Permitir enviar teclas?",
-        detail: `Processo: ${input.processId}\nAtalho (SendKeys): ${input.keys}`,
-      };
+      return `Processo: ${input.processId}\nAtalho (SendKeys): ${input.keys}`;
     case "type_text":
-      return {
-        title: "Permitir digitar texto?",
-        detail: `Processo: ${input.processId}\nTexto literal:\n${input.text}`,
-      };
+      return `Processo: ${input.processId}\nTexto literal:\n${input.text}`;
     case "click":
-      return {
-        title: "Permitir clique no desktop?",
-        detail: `Posição física: x=${input.x}, y=${input.y}\nBotão: ${{ left: "esquerdo", right: "direito", middle: "meio" }[input.button || "left"]}\nCliques: ${input.clicks || 1}`,
-      };
+      return `Posição física: x=${input.x}, y=${input.y}\nBotão: ${{ left: "esquerdo", right: "direito", middle: "meio" }[input.button || "left"]}\nCliques: ${input.clicks || 1}`;
     case "scroll":
-      return {
-        title: "Permitir rolar no desktop?",
-        detail: `Posição física: x=${input.x}, y=${input.y}\nRoda: ${input.delta} (${input.delta > 0 ? "para cima" : "para baixo"})`,
-      };
+      return `Posição física: x=${input.x}, y=${input.y}\nRoda: ${input.delta} (${input.delta > 0 ? "para cima" : "para baixo"})`;
   }
 }
 

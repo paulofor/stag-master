@@ -83,7 +83,9 @@ test("modo Windows exige consentimento e cancelamento preserva modo", async ({ p
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(mode).toHaveValue("windows");
 });
-test("desktop autorizado pede aprovação por ação e pode ser revogado", async ({ page }, info) => {
+test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revogado", async ({
+  page,
+}, info) => {
   await ready(page);
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("capturar desktop");
@@ -97,20 +99,29 @@ test("desktop autorizado pede aprovação por ação e pode ser revogado", async
   await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(page.getByRole("region", { name: "Controle do desktop" })).toContainText(
-    "Desktop autorizado",
+    "confirmação nos pontos críticos",
   );
   await input.press("Enter");
-  await expect(page.getByText("Permitir captura de tela?", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Desktop: captura e navegação sintéticas concluídas.", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+  await input.fill("desktop crítico enviar requisição");
+  await input.press("Enter");
+  await expect(page.getByText("Confirmar ação no desktop?", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toContainText(
+    "Enviar requisição ao serviço externo",
+  );
   await expect(page.getByRole("button", { name: "Revogar acesso", exact: true })).toBeDisabled();
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-desktop-approval.png` });
   await page.getByRole("button", { name: "Recusar", exact: true }).click();
   await expect(page.getByText("Desktop: ação recusada.", { exact: true })).toBeVisible();
-  await input.fill("capturar desktop");
+  await input.fill("desktop crítico enviar requisição");
   await input.press("Enter");
-  await expect(page.getByText("Permitir captura de tela?", { exact: true })).toBeVisible();
+  await expect(page.getByText("Confirmar ação no desktop?", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Permitir esta ação", exact: true }).click();
   await expect(
-    page.getByText("Desktop: captura sintética concluída.", { exact: true }),
+    page.getByText("Desktop: ação crítica sintética concluída.", { exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
   await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("project");

@@ -13,7 +13,13 @@ import {
 import { actionSchema, safeLink } from "../shared/validation";
 import { RpcClient, type RpcMessage } from "./rpc";
 import { SettingsStore, type Settings } from "./settings";
-import { desktopArguments, desktopApproval, desktopTool, type ToolResult } from "./desktop-tools";
+import {
+  desktopArguments,
+  desktopApproval,
+  desktopConfirmationReason,
+  desktopTool,
+  type ToolResult,
+} from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 
 interface WireItem {
@@ -85,6 +91,10 @@ export class AssistantService extends EventEmitter {
   private settings: Settings = { threads: {} };
   private rpc: RpcClient | null = null;
   private pending = new Map<string, PendingApproval>();
+  private desktopRequests = new Set<string>();
+  private desktopQueue: Promise<void> = Promise.resolve();
+  private desktopEpoch = 0;
+  private stopping = false;
   private turnId: string | null = null;
   private loginId: string | null = null;
   private startedAt = 0;
@@ -201,6 +211,9 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.desktopEpoch++;
+    this.stopping = false;
+    this.desktopRequests.clear();
     this.rpc?.removeAllListeners();
     await this.rpc?.shutdown();
     this.pending.clear();
@@ -227,6 +240,7 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.desktopEpoch++;
       this.state.connection = "error";
       this.state.error = errorText(error);
       this.state.busy = false;
@@ -322,6 +336,9 @@ export class AssistantService extends EventEmitter {
   private clearChat(): void {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
+    this.desktopEpoch++;
+    this.desktopRequests.clear();
+    this.stopping = false;
     this.state.threadId = null;
     this.completedTurns.clear();
     this.turnId = null;
@@ -443,6 +460,8 @@ export class AssistantService extends EventEmitter {
         "O acesso ao projeto está sendo preparado. Aguarde alguns instantes e tente novamente.",
       );
     this.sending = true;
+    this.desktopRequests.clear();
+    this.stopping = false;
     this.state.busy = true;
     this.startedAt = Date.now();
     this.state.plan = [];
@@ -495,7 +514,18 @@ export class AssistantService extends EventEmitter {
     if (!this.state.busy) return;
     if (!this.turnId || !this.state.threadId)
       throw new Error("A execução está iniciando. Tente parar em instantes.");
-    await this.call("turn/interrupt", { threadId: this.state.threadId, turnId: this.turnId });
+    this.desktopEpoch++;
+    this.stopping = true;
+    this.pending.clear();
+    this.state.approvals = [];
+    this.publish();
+    try {
+      await this.call("turn/interrupt", { threadId: this.state.threadId, turnId: this.turnId });
+    } catch (error) {
+      // An uncertain interrupt must not leave an agent waiting on discarded requests.
+      this.rpc?.close();
+      throw error;
+    }
   }
   private upsert(item: WireItem): void {
     if (!item.id) return;
@@ -617,6 +647,7 @@ export class AssistantService extends EventEmitter {
       case "turn/completed": {
         const turn = object(p.turn) as unknown as WireTurn;
         if (this.turnId && turn.id !== this.turnId) return;
+        this.desktopEpoch++;
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -655,6 +686,7 @@ export class AssistantService extends EventEmitter {
     const id = String(message.id);
     if (
       !this.state.busy ||
+      this.stopping ||
       p.threadId !== this.state.threadId ||
       this.completedTurns.has(text(p.turnId)) ||
       (this.turnId && p.turnId && p.turnId !== this.turnId)
@@ -669,7 +701,8 @@ export class AssistantService extends EventEmitter {
         this.state.platform !== "win32" ||
         this.state.mode !== "windows" ||
         !this.windowsConsent ||
-        this.windowsConsentThread !== this.state.threadId
+        this.windowsConsentThread !== this.state.threadId ||
+        !text(p.turnId)
       ) {
         this.rpc.respond(message.id, {
           success: false,
@@ -684,19 +717,25 @@ export class AssistantService extends EventEmitter {
           contentItems: [
             {
               type: "inputText",
-              text: "Argumentos de desktop inválidos. Corrija a operação antes de solicitar aprovação.",
+              text: "Argumentos de desktop inválidos. Corrija a operação e seu contexto.",
             },
           ],
         });
         return;
       }
+      if (this.desktopRequests.has(id)) return;
+      this.desktopRequests.add(id);
+      // A reverse request can precede turn/started or the turn/start response.
+      // Its validated thread/turn establishes ownership just like turn/started.
+      if (!this.turnId) this.turnId = text(p.turnId);
       const args = parsed.data;
-      this.pending.set(id, { message, execute: () => this.options.desktop.execute(args) });
-      this.state.approvals.push({
-        id,
-        kind: "desktop",
-        ...desktopApproval(args),
-      });
+      const waiting = { message, execute: () => this.options.desktop.execute(args) };
+      if (desktopConfirmationReason(args)) {
+        this.pending.set(id, waiting);
+        this.state.approvals.push({ id, kind: "desktop", ...desktopApproval(args) });
+      } else {
+        await this.executeDesktop(waiting, true);
+      }
     } else if (
       ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].includes(
         message.method || "",
@@ -754,6 +793,49 @@ export class AssistantService extends EventEmitter {
     }
     this.publish();
   }
+  private async executeDesktop(waiting: PendingApproval, accept: boolean): Promise<void> {
+    const ownerRpc = this.rpc!;
+    const ownerThread = this.state.threadId;
+    const ownerTurn = text(waiting.message.params?.turnId);
+    const epoch = this.desktopEpoch;
+    const ownsTurn = () =>
+      !this.disposed &&
+      !this.stopping &&
+      this.state.busy &&
+      this.rpc === ownerRpc &&
+      this.state.threadId === ownerThread &&
+      this.turnId === ownerTurn &&
+      this.desktopEpoch === epoch &&
+      this.state.mode === "windows" &&
+      this.windowsConsent &&
+      this.windowsConsentThread === ownerThread;
+    const execution = this.desktopQueue.then(async () => {
+      if (!ownsTurn()) return;
+      let result: ToolResult = {
+        success: false,
+        contentItems: [{ type: "inputText", text: "Ação recusada pelo usuário." }],
+      };
+      if (accept) {
+        try {
+          result = await waiting.execute!();
+        } catch (error) {
+          if (ownsTurn()) {
+            this.state.error = errorText(error);
+            this.state.metrics.failures++;
+          }
+          result = {
+            success: false,
+            contentItems: [{ type: "inputText", text: errorText(error) }],
+          };
+        }
+      }
+      if (ownsTurn()) ownerRpc.respond(waiting.message.id!, result);
+      this.publish();
+    });
+    // A failed native operation must not poison the queue for the next request.
+    this.desktopQueue = execution.catch(() => {});
+    await execution;
+  }
   private async answer(action: Extract<Action, { type: "answer" }>): Promise<void> {
     const waiting = this.pending.get(action.id);
     if (!waiting || waiting.message.id === undefined || !this.rpc)
@@ -768,38 +850,11 @@ export class AssistantService extends EventEmitter {
       }
       this.rpc.respond(waiting.message.id, { answers });
     } else if (waiting.execute) {
-      const ownerRpc = this.rpc;
-      const ownerThread = this.state.threadId;
-      const ownerTurn = this.turnId;
-      const ownsTurn = () =>
-        !this.disposed &&
-        this.state.busy &&
-        this.rpc === ownerRpc &&
-        this.state.threadId === ownerThread &&
-        this.turnId === ownerTurn;
       // Remove first to prevent double-click executing a desktop action twice.
       this.pending.delete(action.id);
       this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
       this.publish();
-      let result: ToolResult = {
-        success: false,
-        contentItems: [{ type: "inputText", text: "Ação recusada pelo usuário." }],
-      };
-      if (action.accept === true) {
-        try {
-          result = await waiting.execute();
-        } catch (error) {
-          if (ownsTurn()) {
-            this.state.error = errorText(error);
-            this.state.metrics.failures++;
-          }
-          result = {
-            success: false,
-            contentItems: [{ type: "inputText", text: errorText(error) }],
-          };
-        }
-      }
-      if (ownsTurn()) ownerRpc.respond(waiting.message.id, result);
+      await this.executeDesktop(waiting, action.accept === true);
     } else {
       const available = waiting.message.params?.availableDecisions;
       const decision = action.accept === true ? "accept" : "decline";
@@ -812,6 +867,7 @@ export class AssistantService extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
+    this.desktopEpoch++;
     this.rpc?.removeAllListeners();
     this.rpc?.close();
     this.pending.clear();

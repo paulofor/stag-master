@@ -50,7 +50,7 @@ function finish(thread, turn, status = "completed", error) {
   });
 }
 
-function desktopCall(thread, turn, args, next, overrides = {}) {
+function desktopCall(thread, turn, args, next, overrides = {}, duplicate = false) {
   const requestId = ++serverId;
   const item = {
     id: `desktop-${requestId}`,
@@ -71,7 +71,7 @@ function desktopCall(thread, turn, args, next, overrides = {}) {
     if (success && next) next();
     else response(thread, turn, `Desktop: ${success ? "executado" : "recusado"}.`);
   });
-  send({
+  const request = {
     id: requestId,
     method: "item/tool/call",
     params: {
@@ -83,7 +83,9 @@ function desktopCall(thread, turn, args, next, overrides = {}) {
       arguments: args,
       ...overrides,
     },
-  });
+  };
+  send(request);
+  if (duplicate) send(request);
 }
 function response(
   thread,
@@ -246,7 +248,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       };
       thread.turns.push(turn);
       thread.preview = input;
-      notify("turn/started", { threadId: thread.id, turn });
+      if (!input.includes("desktop sem início"))
+        notify("turn/started", { threadId: thread.id, turn });
       notify("item/started", { threadId: thread.id, turnId: turn.id, item: turn.items[0] });
       notify("turn/plan/updated", {
         threadId: thread.id,
@@ -268,7 +271,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         turnId: turn.id,
         item: { id: "reasoning", type: "reasoning", content: ["PRIVATE_REASONING"] },
       });
-      if (!input.includes("rápido")) reply(id, { turn: { ...turn, items: [] } });
+      if (!input.includes("rápido") && !input.includes("desktop sem início"))
+        reply(id, { turn: { ...turn, items: [] } });
       if (input.includes("sair")) {
         setTimeout(() => process.exit(7), 20);
         break;
@@ -354,14 +358,41 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
           break;
         }
-        if (input.includes("sequência")) {
+        if (input.includes("desktop sem início")) {
+          // Hold both start signals until the reverse request is answered, without a short timeout.
+          desktopCall(thread, turn, { action: "list_windows" }, () => {
+            notify("turn/started", { threadId: thread.id, turn });
+            response(thread, turn, "Desktop: executado antes da resposta de início.");
+            reply(id, { turn: { id: turn.id, status: "inProgress", items: [] } });
+          });
+        } else if (input.includes("sequência")) {
           const operations = [
             { action: "list_windows" },
             { action: "screenshot" },
             { action: "focus_window", processId: 4242 },
-            { action: "click", x: 120, y: 180, button: "left", clicks: 2 },
-            { action: "type_text", processId: 4242, text: "Teste + ^ % {texto}" },
-            { action: "send_keys", processId: 4242, keys: "^s" },
+            {
+              action: "click",
+              x: 120,
+              y: 180,
+              button: "left",
+              clicks: 2,
+              risk: "routine",
+              intent: "Abrir editor local",
+            },
+            {
+              action: "type_text",
+              processId: 4242,
+              text: "Teste + ^ % {texto}",
+              risk: "routine",
+              intent: "Editar texto local",
+            },
+            {
+              action: "send_keys",
+              processId: 4242,
+              keys: "^s",
+              risk: "routine",
+              intent: "Salvar arquivo local",
+            },
             { action: "scroll", x: 120, y: 180, delta: -240 },
             { action: "screenshot" },
           ];
@@ -371,19 +402,66 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             else response(thread, turn, "Desktop: sequência concluída e resultado conferido.");
           };
           next();
+        } else if (input.includes("paralelo")) {
+          let remaining = 2;
+          const next = () => {
+            if (--remaining === 0) response(thread, turn, "Desktop: duas operações concluídas.");
+          };
+          desktopCall(thread, turn, { action: "screenshot" }, next);
+          desktopCall(thread, turn, { action: "scroll", x: 120, y: 180, delta: -120 }, next);
         } else {
           desktopCall(
             thread,
             turn,
-            input.includes("inválido")
+            input.includes("desktop inválido")
               ? { action: "click", x: "invalid", y: 0 }
-              : { action: "list_windows" },
+              : input.includes("crítico")
+                ? {
+                    action: "click",
+                    x: 120,
+                    y: 180,
+                    risk: "critical",
+                    intent:
+                      input.split("crítico")[1].trim() || "Enviar requisição ao serviço externo",
+                  }
+                : input.includes("legado")
+                  ? { action: "click", x: 120, y: 180 }
+                  : input.includes("enter")
+                    ? {
+                        action: "send_keys",
+                        processId: 4242,
+                        keys: "{ENTER}",
+                        risk: "routine",
+                        intent: "Confirmar entrada",
+                      }
+                    : input.includes("quebra")
+                      ? {
+                          action: "type_text",
+                          processId: 4242,
+                          text: "comando\n",
+                          risk: "routine",
+                          intent: "Digitar comando",
+                        }
+                      : input.includes("risco inválido")
+                        ? {
+                            action: "click",
+                            x: 120,
+                            y: 180,
+                            risk: "unknown",
+                            intent: "Abrir editor",
+                          }
+                        : { action: "list_windows" },
             null,
             input.includes("namespace")
               ? { namespace: "unknown" }
               : input.includes("outro turno")
                 ? { turnId: "wrong-turn" }
-                : {},
+                : input.includes("outro thread")
+                  ? { threadId: "wrong-thread" }
+                  : input.includes("sem turno")
+                    ? { turnId: null }
+                    : {},
+            input.includes("duplicado"),
           );
         }
         break;
