@@ -21,7 +21,7 @@
     "test:codex": "node scripts/smoke-codex.mjs",
     "test:windows": "node scripts/test-windows.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run test:codex && npm run test:e2e",
-    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
