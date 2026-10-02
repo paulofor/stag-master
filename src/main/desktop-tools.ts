@@ -178,6 +178,15 @@ export async function withoutAssistantWindow(
   }
 }
 
+/** Let Windows PowerShell rebuild its own module paths, even when launched through Node from PS7. */
+export function windowsPowerShellEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(base).filter(([key]) => key.toUpperCase() !== "PSMODULEPATH"),
+  );
+}
+
 export class DesktopTools {
   constructor(
     private script: string,
@@ -193,12 +202,36 @@ export class DesktopTools {
     const encoded = Buffer.from(JSON.stringify(input), "utf8").toString("base64");
     const invocation = executeFile(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-File", this.script],
-      { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 },
+      // Apply only to this approved subprocess; Group Policy still takes precedence.
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", this.script],
+      {
+        windowsHide: true,
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+        env: windowsPowerShellEnvironment(),
+      },
     );
     invocation.child.stdin?.on("error", () => {});
     invocation.child.stdin?.end(encoded);
-    const result = await invocation;
+    let result;
+    try {
+      result = await invocation;
+    } catch (error) {
+      const stderr = (error as { stderr?: unknown })?.stderr;
+      const detail =
+        typeof stderr === "string" ? stderr : error instanceof Error ? error.message : "";
+      if (
+        /PSSecurityException|FullyQualifiedErrorId\s*:\s*(UnauthorizedAccess|AuthorizationManagerCheckFailed)\b/i.test(
+          detail,
+        )
+      ) {
+        throw new Error(
+          "O Windows bloqueou o script de controle do STAG por uma política de execução. Esta ação não foi executada. Se o bloqueio persistir na versão atual, peça ao administrador para verificar a política corporativa de scripts do STAG. O aplicativo não altera essa política.",
+          { cause: error },
+        );
+      }
+      throw error;
+    }
     return {
       success: true,
       contentItems: [{ type: "inputText", text: result.stdout.trim() || "Ação concluída." }],

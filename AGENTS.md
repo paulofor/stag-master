@@ -10,6 +10,7 @@ Aplicação Windows local. Preserve o painel único de conversa da referência: 
 - `item/completed` é autoritativo. Não duplique texto já recebido em deltas. Filtre eventos pelo thread/turn correto. Não mostre raciocínio bruto.
 - Renderer sem Node, com CSP, sandbox e preload restrito. Valide entradas e origem IPC no main. Markdown nunca executa HTML ou imagens remotas.
 - Ferramentas do Windows só no modo Windows, sempre com aprovação específica, argumentos validados e processo sem shell interpolado. Não mude a política de acesso ao retomar histórico.
+- A política PowerShell do script empacotado fica somente no subprocesso aprovado. Não altere CurrentUser/LocalMachine, registro ou GPO para habilitar o controle. Não herde PSModulePath do PowerShell 7 no filho powershell.exe. A regressão Windows deve usar o driver de produção sob Restricted e conferir preservação das políticas e do ambiente pai.
 - Consentimento Windows pertence a uma conversa e fica em memória: não o transfira para outro thread. Informe ao agente a capacidade atual e o caminho de autorização. Capturas e ações por coordenadas ocultam o painel brevemente para não cobrir o alvo.
 - Testes usam App Server determinístico e CODEX_HOME temporário. Nunca execute teste com as credenciais, repositório ou janelas de trabalho do usuário.
 - Testes de timeout iniciam o subprocesso com o prazo normal e avançam um relógio controlado só após o handshake. Não imponha deadlines de milissegundos à inicialização do processo. Aguarde o shutdown nas limpezas.

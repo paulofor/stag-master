@@ -294,23 +294,28 @@ describe("fluxo local do assistente", () => {
       expect(service.snapshot().approvals).toEqual([]);
     },
   );
-  it("falha do driver é respondida e a próxima tarefa funciona", async () => {
+  it.each([
+    "Janela de teste indisponível.",
+    "O Windows bloqueou o script de controle do STAG por uma política de execução.",
+  ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    desktop.execute.mockRejectedValueOnce(new Error("Janela de teste indisponível."));
+    desktop.execute.mockRejectedValueOnce(new Error(message));
     await send("desktop");
     await approve(true);
     expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().error).toBe(message);
     expect(service.snapshot().items.at(-1)?.text).toContain("recusado");
     const calls =
       await rpc.call<{ result?: { contentItems?: { text?: string }[] } }[]>("_fixture/readCalls");
     expect(
-      calls.some((call) =>
-        call.result?.contentItems?.some((item) => item.text?.includes("indisponível")),
-      ),
+      calls.some((call) => call.result?.contentItems?.some((item) => item.text === message)),
     ).toBe(true);
-    await send("analise");
-    await complete();
+    await send("desktop");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    await approve(true);
+    expect(desktop.execute).toHaveBeenCalledTimes(2);
     expect(service.snapshot().error).toBeNull();
   });
   it("interromper descarta aprovação e decisão repetida não executa duas vezes", async () => {
