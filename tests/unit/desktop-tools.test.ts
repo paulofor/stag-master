@@ -37,7 +37,14 @@ describe("driver de desktop com processo simulado", () => {
     await expect(tools.execute(input)).resolves.toEqual(result);
     expect(runScript).toHaveBeenCalledWith(
       "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-File", "C:\\STAG\\windows-control.ps1"],
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\STAG\\windows-control.ps1",
+      ],
       { windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 },
     );
     const encoded = stdin.end.mock.calls[0][0];
@@ -53,6 +60,37 @@ describe("driver de desktop com processo simulado", () => {
     await expect(tools.execute({ action: "screenshot" })).resolves.toEqual(image);
     expect(capture).toHaveBeenCalledOnce();
     expect(runScript).not.toHaveBeenCalled();
+  });
+  it.each([
+    "CategoryInfo : SecurityError: (:) [], PSSecurityException",
+    "CategoryInfo : Erro de seguran�a: (:) [], ParentContainsErrorRecordException\nFullyQualifiedErrorId : UnauthorizedAccess",
+    "FullyQualifiedErrorId : AuthorizationManagerCheckFailed",
+  ])("explica bloqueio de política sem repassar stderr ilegível: %s", async (stderr) => {
+    const failure = Object.assign(
+      new Error("Command failed: powershell.exe C:\\STAG\\script.ps1"),
+      {
+        stderr,
+      },
+    );
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.reject(failure), { child: { stdin } }),
+    );
+    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", async () => result, "win32");
+    await expect(tools.execute({ action: "list_windows" })).rejects.toThrow("política de execução");
+    expect(runScript).toHaveBeenCalledOnce();
+    await expect(tools.execute({ action: "list_windows" })).resolves.toEqual(result);
+    expect(runScript).toHaveBeenCalledTimes(2);
+  });
+  it("preserva falhas que não são de política e não tenta executar novamente", async () => {
+    const failure = Object.assign(new Error("Janela sintética indisponível."), {
+      stderr: "FullyQualifiedErrorId : GetContentReaderUnauthorizedAccessError",
+    });
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.reject(failure), { child: { stdin } }),
+    );
+    const tools = new DesktopTools("unused", async () => result, "win32");
+    await expect(tools.execute({ action: "list_windows" })).rejects.toBe(failure);
+    expect(runScript).toHaveBeenCalledOnce();
   });
   it("não executa input inválido ou plataforma não Windows", async () => {
     const capture = vi.fn(async () => result);

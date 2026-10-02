@@ -1,4 +1,4 @@
-# Matriz de homologação da versão 0.2
+# Matriz de homologação da versão 0.2.1
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
 
@@ -34,5 +34,20 @@ Matriz definida antes de executar as validações deste fluxo. Os doubles só re
 | Windows nativo     | Parser e list_windows no CI Windows; foco, digitação, mouse e captura em sessão interativa continuam com homologação manual declarada                                | test:windows + instalador no job Windows                          |
 
 O teste `test:desktop` abre uma janela Electron real e valida protocolo local, preload isolado, origem IPC e seleção de projeto. No Linux (Xvfb), também exercita login, conversa e aprovação por um processo simulado; no Windows usa o Codex real isolado, sem OAuth.
+
+## Execução do controle sob política PowerShell restritiva
+
+Matriz definida antes dos testes desta correção. A política é definida somente no processo filho que executa o script empacotado, após aprovação da operação. Os testes não alteram políticas persistentes nem usam as janelas do cliente.
+
+| Área                   | Cenário e aceite                                                                                                                               | Evidência prevista                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Caminho feliz          | Driver de produção executa script sintético com política herdada Restricted; JSON Unicode chega por stdin e o processo usa Bypass              | Unidade local + test:windows                                   |
+| Aprovação e isolamento | Consentimento da conversa e aprovação de cada operação continuam obrigatórios; recusa não inicia processo                                      | Unidade do serviço e E2E existentes                            |
+| Política do computador | CurrentUser, LocalMachine, UserPolicy e MachinePolicy permanecem iguais antes/depois; nenhuma alteração persistente ou elevação                | test:windows, com ambiente temporário e consulta das políticas |
+| Falha e recuperação    | Bloqueio de política recebe mensagem legível, responde ao agente e incrementa falhas; nova tentativa exige aprovação e pode funcionar          | Unidade do driver e serviço                                    |
+| Integração             | Parser, dispatcher sintético e driver real compartilham o código de produção; regressão falha se a política do subprocesso for removida        | Unidade local + test:windows                                   |
+| Limites                | Linux valida contratos e UI; Windows CI valida powershell.exe 5.1 e instalador; GPO corporativa e aplicativos reais requerem sessão do cliente | check, test:desktop, format:check, job Windows                 |
+
+O harness anterior iniciava scripts diretamente com a política permissiva do runner Windows, sem exercitar o driver de produção sob Restricted. A regressão agora deve demonstrar o bloqueio sem a política de processo, o sucesso pelo driver e a preservação das políticas persistentes. Políticas de grupo continuam tendo precedência e não são contornadas.
 
 O OAuth real requer ação do cliente no navegador da sua máquina. A interação nativa com aplicativos Windows requer homologação manual em sessão Windows interativa; não é declarada como testada em Linux. Não há backend hospedado ou deploy web: a entrega desktop gera um instalador como artefato do workflow, sem certificado de assinatura nesta versão.
