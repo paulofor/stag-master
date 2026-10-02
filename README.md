@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Foco em programação: ler especificações, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.3.0: conversa em tempo real, Markdown, projeto local, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, controle autorizado do desktop com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.0: conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, projeto local, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, controle autorizado do desktop com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -19,6 +19,9 @@ npm run dev
 4. Para controlar aplicativos, clique em **Autorizar desktop** ao lado da mensagem e confirme **Continuar** e **Permitir acesso**. Isso abre uma nova conversa no modo Windows; repita a tarefa nela. O projeto e o rascunho continuam selecionados.
 5. O STAG pode listar/focar janelas, ver a tela principal, clicar, digitar texto literal, enviar atalhos e rolar. Capturas, foco, rolagem, navegação e edição local rotineiras seguem sem novas permissões. Exclusão, envio externo, publicação, pagamentos, credenciais e mudanças no sistema aguardam **Permitir esta ação**, com intenção e alvo visíveis; **Recusar** devolve a recusa sem executar. Interações sem contexto suficiente, Enter/Delete, atalhos desconhecidos/compostos e texto com Enter/Tab também pedem confirmação.
 6. **Revogar acesso** ou **Nova conversa** encerra o consentimento. Para retomar um histórico Windows, autorize antes de abri-lo; o consentimento não migra de outra conversa.
+7. O **Navegador** aparece à direita. Use a barra de endereço ou clique em **Autorizar navegador** uma vez na conversa e peça ao STAG para pesquisar, abrir páginas ou trabalhar nelas. O modelo pode ler, capturar, clicar, preencher campos, selecionar opções e rolar; ações críticas exigem **Permitir esta ação**. **Revogar navegador**, fechar o painel ou abrir outra conversa descarta a autorização e a sessão de sites. Em janelas compactas, use o ícone de globo e **Voltar à conversa**.
+
+O navegador usa uma sessão separada por conversa, sem importar cookies dos seus outros navegadores. Conteúdo e capturas de páginas autorizadas vão ao ChatGPT. Campos de senha/pagamento e controles de envio têm confirmação adicional; valores preenchidos não aparecem nos cards. Downloads, uploads, popups, permissões nativas e protocolos locais ficam bloqueados e requerem ação manual fora desse painel. Sites que bloqueiam navegadores embutidos ou exigem popups podem precisar do navegador externo. Históricos anteriores à versão 0.4 precisam de uma nova conversa para registrar a ferramenta; o aplicativo preserva a política original do histórico.
 
 Capturas e títulos de janelas são enviados ao ChatGPT para a tarefa conforme a autorização inicial. O painel do STAG fica oculto brevemente durante capturas, cliques e rolagem, para não cobrir o alvo, e retorna sem tomar o foco. As ações executam em sequência. **Parar execução** descarta aprovações pendentes e ações enfileiradas; uma operação nativa já iniciada pode terminar antes da interrupção.
 
@@ -45,8 +48,8 @@ Para desenvolvimento de interface em Linux: `npm run dev:web`. Esse modo exibe o
 
 ## Escopo inicial e limites
 
-- A aplicação mostra apenas conversa e controles compactos; não inclui IDE, terminal embutido, voz ou edição de vídeo.
-- Programação e navegação web usam ferramentas nativas do Codex. A IDE pode ser aberta por comando autorizado no Windows.
+- A aplicação mostra conversa e navegador lateral opcional, com controles compactos; não inclui IDE, terminal embutido, voz ou edição de vídeo.
+- Programação e pesquisa usam ferramentas nativas do Codex; interação com páginas usa o navegador integrado autorizado. A IDE pode ser aberta por comando autorizado no Windows.
 - Controle de desktop: listar/focar janelas, digitação literal, atalhos, clique, rolagem e captura da tela principal; não inclui integração semântica com todas as IDEs.
 - O modo Windows dá acesso amplo ao computador. A autorização vale somente para a conversa; operações rotineiras usam esse consentimento e pontos críticos exigem confirmação. Aprovações de comandos/arquivos solicitadas pelo Codex continuam sendo apresentadas.
 - OAuth e interações reais de desktop precisam da conta e da sessão Windows do cliente. A matriz documenta o que é simulado e o que exige Windows.

@@ -50,12 +50,20 @@ function finish(thread, turn, status = "completed", error) {
   });
 }
 
-function desktopCall(thread, turn, args, next, overrides = {}, duplicate = false) {
+function desktopCall(
+  thread,
+  turn,
+  args,
+  next,
+  overrides = {},
+  duplicate = false,
+  tool = "windows_desktop",
+) {
   const requestId = ++serverId;
   const item = {
     id: `desktop-${requestId}`,
     type: "dynamicToolCall",
-    tool: "windows_desktop",
+    tool,
     arguments: args,
     status: "inProgress",
   };
@@ -68,8 +76,13 @@ function desktopCall(thread, turn, args, next, overrides = {}, duplicate = false
     item.contentItems = answer.result?.contentItems || [];
     notify("serverRequest/resolved", { threadId: thread.id, turnId: turn.id, requestId });
     notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
-    if (success && next) next();
-    else response(thread, turn, `Desktop: ${success ? "executado" : "recusado"}.`);
+    if (success && next) next(answer);
+    else
+      response(
+        thread,
+        turn,
+        `${tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}.`,
+      );
   });
   const request = {
     id: requestId,
@@ -79,7 +92,7 @@ function desktopCall(thread, turn, args, next, overrides = {}, duplicate = false
       turnId: turn.id,
       callId: item.id,
       namespace: null,
-      tool: "windows_desktop",
+      tool,
       arguments: args,
       ...overrides,
     },
@@ -461,6 +474,118 @@ createInterface({ input: process.stdin }).on("line", (line) => {
                   : input.includes("sem turno")
                     ? { turnId: null }
                     : {},
+            input.includes("duplicado"),
+          );
+        }
+        break;
+      }
+      if (input.includes("navegador")) {
+        if (
+          !thread.dynamicTools.some((tool) => tool.name === "stag_browser") &&
+          !input.includes("forçar")
+        ) {
+          response(thread, turn, "Abra uma nova conversa e clique em Autorizar navegador.");
+          break;
+        }
+        const call = (args, next = null, duplicate = false) =>
+          desktopCall(
+            thread,
+            turn,
+            args,
+            next,
+            input.includes("outro thread")
+              ? { threadId: "other-thread" }
+              : input.includes("outro turno")
+                ? { turnId: "other-turn" }
+                : input.includes("namespace")
+                  ? { namespace: "unknown" }
+                  : {},
+            duplicate,
+            "stag_browser",
+          );
+        if (input.includes("sequência")) {
+          const operations = [
+            {
+              action: "navigate",
+              url: "https://fixture.invalid/",
+              risk: "routine",
+              intent: "Ler documentação sintética",
+            },
+            { action: "snapshot" },
+            {
+              action: "fill",
+              pageId: "fixture-page",
+              ref: "e1",
+              text: "teste local",
+              risk: "routine",
+              intent: "Editar campo local de teste",
+            },
+            {
+              action: "click",
+              pageId: "fixture-page",
+              ref: "e2",
+              risk: "routine",
+              intent: "Expandir documentação",
+            },
+            { action: "scroll", delta: 300 },
+            { action: "screenshot" },
+          ];
+          const next = () => {
+            const args = operations.shift();
+            if (args) call(args, next);
+            else response(thread, turn, "Navegador: sequência concluída.");
+          };
+          next();
+        } else if (input.includes("paralelo") || input.includes("misto")) {
+          let remaining = 2;
+          const next = () => {
+            if (--remaining === 0) response(thread, turn, "Navegador: operações concluídas.");
+          };
+          if (input.includes("misto")) desktopCall(thread, turn, { action: "list_windows" }, next);
+          else call({ action: "snapshot" }, next);
+          call({ action: "scroll", delta: 200 }, next);
+        } else if (/fluxo real|envio real|senha real/.test(input)) {
+          const url = input.split(/fluxo real|envio real|senha real/)[1].trim();
+          call({ action: "navigate", url, risk: "routine", intent: "Ler site sintético" }, () => {
+            call({ action: "snapshot" }, (answer) => {
+              const doc = JSON.parse(answer.result?.contentItems?.[0]?.text || "{}");
+              const label = input.includes("envio real")
+                ? "Enviar sintético"
+                : input.includes("senha real")
+                  ? "Senha sintética"
+                  : "Texto local";
+              const ref = doc.elements?.find((el) => el.label === label)?.ref;
+              if (!ref) {
+                response(thread, turn, "Navegador: campo não encontrado.");
+                return;
+              }
+              call(
+                {
+                  action: input.includes("envio real") ? "click" : "fill",
+                  pageId: doc.pageId,
+                  ref,
+                  ...(!input.includes("envio real") ? { text: "feito pelo modelo" } : {}),
+                  risk: "routine",
+                  intent: `Interagir com ${label} no site sintético`,
+                },
+                () => response(thread, turn, "Navegador: campo preenchido pelo modelo."),
+              );
+            });
+          });
+        } else {
+          call(
+            input.includes("inválido")
+              ? { action: "evaluate", script: "unsafe" }
+              : input.includes("crítico")
+                ? {
+                    action: "click",
+                    pageId: "fixture-page",
+                    ref: "e2",
+                    risk: "critical",
+                    intent: "Enviar dados ao serviço externo",
+                  }
+                : { action: "snapshot" },
+            null,
             input.includes("duplicado"),
           );
         }

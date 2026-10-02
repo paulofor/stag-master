@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, cp, readFile, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { _electron, expect } from "@playwright/test";
-import electron from "electron";
+import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
+import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
 const project = join(dir, "projeto-fixture");
 const data = join(dir, "data");
 let application;
+let site;
 try {
+  site = await startBrowserSite();
+  await buildBrowserHarness(dir);
   await mkdir(project);
   await mkdir(data);
   await cp("dist", join(dir, "dist"), { recursive: true });
@@ -20,7 +24,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app} = require('electron'); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -42,7 +46,6 @@ try {
     ),
   );
   application = await _electron.launch({
-    executablePath: electron,
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
     timeout: 30000,
@@ -83,7 +86,101 @@ try {
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
     await mkdir(".local/screenshots", { recursive: true });
     await page.screenshot({ path: ".local/screenshots/electron-conversation.png" });
+    await application.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0, checkboxChecked: false });
+    });
+    await page.getByRole("button", { name: "Autorizar navegador", exact: true }).click();
+    assert.equal(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).browser.authorized),
+      false,
+    );
+    await application.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+    });
+    await page.getByRole("button", { name: "Autorizar navegador", exact: true }).click();
+    await page.getByLabel("Mensagem para o assistente").fill(`navegador fluxo real ${site.url}`);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(
+      page.getByText("Navegador: campo preenchido pelo modelo.", { exact: true }),
+    ).toBeVisible();
+    const contentsResult = await application.evaluate(async ({ BrowserWindow }) => {
+      const parent = BrowserWindow.getAllWindows()[0];
+      const view = parent.contentView.children.find(
+        (view) => view.webContents && view.webContents !== parent.webContents,
+      );
+      return {
+        value: await view.webContents.executeJavaScript("document.querySelector('#local').value"),
+        visible: view.getVisible(),
+        bounds: view.getBounds(),
+        screenshot: (await view.webContents.capturePage()).toDataURL(),
+      };
+    });
+    assert.equal(contentsResult.value, "feito pelo modelo");
+    assert.equal(contentsResult.visible, true);
+    const viewport = await page.locator(".browser-viewport").boundingBox();
+    assert.ok(Math.abs(contentsResult.bounds.x - viewport.x) <= 1);
+    assert.ok(Math.abs(contentsResult.bounds.width - viewport.width) <= 1);
+    await writeFile(
+      ".local/screenshots/electron-browser-content.png",
+      Buffer.from(contentsResult.screenshot.split(",")[1], "base64"),
+    );
+    await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+    await page.screenshot({ path: ".local/screenshots/electron-browser-panel.png" });
+    const input = page.getByLabel("Mensagem para o assistente");
+    await input.fill(`navegador envio real ${site.url}`);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    assert.equal(site.effects.submissions, 0);
+    await page.getByRole("button", { name: "Recusar", exact: true }).click();
+    await expect(page.getByText("Navegador: recusado.", { exact: true })).toBeVisible();
+    assert.equal(site.effects.submissions, 0);
+    await input.fill(`navegador envio real ${site.url}`);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Permitir esta ação" }).click();
+    await expect.poll(() => site.effects.submissions).toBe(1);
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await input.fill(`navegador senha real ${site.url}`);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Solicitação do assistente" })).not.toContainText(
+      "feito pelo modelo",
+    );
+    await page.getByRole("button", { name: "Recusar", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    const thread = await page.evaluate(async () => (await window.stag.getSnapshot()).threadId);
+    await application.evaluate(({ dialog }) => {
+      global.consentWaiting = false;
+      dialog.showMessageBox = () =>
+        new Promise((resolve) => {
+          global.consentWaiting = true;
+          global.resolveConsent = resolve;
+        });
+    });
+    const authorization = page
+      .evaluate(() => window.stag.request({ type: "browserConsent", allow: true }))
+      .then(
+        () => null,
+        (error) => error,
+      );
+    await expect.poll(() => application.evaluate(() => global.consentWaiting)).toBe(true);
+    await page.evaluate(() => window.stag.request({ type: "newChat" }));
+    await application.evaluate(() => global.resolveConsent({ response: 1 }));
+    assert.match((await authorization).message, /conversa mudou/);
+    assert.notEqual(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).threadId),
+      thread,
+    );
+    assert.equal(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).browser.authorized),
+      false,
+    );
   }
+  await validateBrowser(application, dir, site);
   assert.deepEqual(errors, []);
   console.log(
     process.platform === "win32"
@@ -92,5 +189,6 @@ try {
   );
 } finally {
   await application?.close();
+  await site?.close();
   await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

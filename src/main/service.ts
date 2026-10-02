@@ -9,6 +9,8 @@ import {
   type ChatItem,
   type Model,
   type Snapshot,
+  type BrowserControl,
+  type BrowserInfo,
 } from "../shared/types";
 import { actionSchema, safeLink } from "../shared/validation";
 import { RpcClient, type RpcMessage } from "./rpc";
@@ -21,6 +23,12 @@ import {
   type ToolResult,
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
+import {
+  browserArguments,
+  browserApproval,
+  browserTool,
+  type BrowserArguments,
+} from "./browser-tools";
 
 interface WireItem {
   id: string;
@@ -52,6 +60,9 @@ interface WireThread {
 interface PendingApproval {
   message: RpcMessage;
   execute?: () => Promise<ToolResult>;
+  tool?: "desktop" | "browser";
+  confirmation?: () => Promise<string | null>;
+  approval?: (reason: string) => { title: string; detail: string };
 }
 interface Options {
   createRpc: () => RpcClient;
@@ -59,6 +70,14 @@ interface Options {
   selectProject: () => Promise<string | null>;
   openExternal: (url: string) => Promise<void>;
   desktop: { execute: (args: unknown) => Promise<ToolResult> };
+  browser?: {
+    execute: (args: BrowserArguments) => Promise<ToolResult>;
+    confirmationReason: (args: BrowserArguments) => Promise<string | null>;
+    control: (args: BrowserControl) => Promise<void>;
+    reset: () => void;
+    cancel: () => void;
+    setVisible: (visible: boolean) => void;
+  };
   platform?: string;
 }
 const modelSchema = z.object({
@@ -91,9 +110,9 @@ export class AssistantService extends EventEmitter {
   private settings: Settings = { threads: {} };
   private rpc: RpcClient | null = null;
   private pending = new Map<string, PendingApproval>();
-  private desktopRequests = new Set<string>();
-  private desktopQueue: Promise<void> = Promise.resolve();
-  private desktopEpoch = 0;
+  private toolRequests = new Set<string>();
+  private toolQueue: Promise<void> = Promise.resolve();
+  private toolEpoch = 0;
   private stopping = false;
   private turnId: string | null = null;
   private loginId: string | null = null;
@@ -102,6 +121,8 @@ export class AssistantService extends EventEmitter {
   private changing = false;
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
+  private browserConsentThread: string | null = null;
+  private browserInstructionsDirty = false;
   private disposed = false;
   private sandboxReady = false;
   private completedTurns = new Set<string>();
@@ -109,9 +130,14 @@ export class AssistantService extends EventEmitter {
     super();
     this.state = structuredClone(emptySnapshot);
     this.state.platform = options.platform || process.platform;
+    this.state.browser.available = !!options.browser;
   }
   snapshot(): Snapshot {
     return structuredClone(this.state);
+  }
+  updateBrowser(info: BrowserInfo): void {
+    Object.assign(this.state.browser, info);
+    this.publish();
   }
   private publish(): void {
     if (!this.disposed) this.emit("snapshot", this.snapshot());
@@ -131,16 +157,17 @@ export class AssistantService extends EventEmitter {
   }
   async request(raw: Action): Promise<Snapshot> {
     const action = actionSchema.parse(raw) as Action;
-    if (this.changing && !["stop", "answer"].includes(action.type))
+    const revokingBrowser =
+      (action.type === "browserConsent" && !action.allow) ||
+      (action.type === "browserVisibility" && !action.visible);
+    if (this.changing && !["stop", "answer"].includes(action.type) && !revokingBrowser)
       throw new Error("Aguarde a ação em andamento.");
-    const changesContext = [
-      "connect",
-      "logout",
-      "selectProject",
-      "preferences",
-      "newChat",
-      "resume",
-    ].includes(action.type);
+    const changesContext =
+      ["connect", "logout", "selectProject", "preferences", "newChat", "resume"].includes(
+        action.type,
+      ) ||
+      (action.type === "browserConsent" && action.allow) ||
+      action.type === "browserControl";
     if (changesContext && (this.state.busy || this.sending) && action.type !== "connect")
       throw new Error("Pare a execução antes de mudar a conversa.");
     if (changesContext) this.changing = true;
@@ -190,6 +217,28 @@ export class AssistantService extends EventEmitter {
         case "openLink":
           await this.options.openExternal(safeLink(action.url));
           break;
+        case "browserConsent":
+          await this.browserConsent(action.allow);
+          break;
+        case "browserVisibility":
+          this.state.browser.visible = action.visible;
+          this.options.browser?.setVisible(action.visible);
+          if (!action.visible) await this.browserConsent(false);
+          break;
+        case "browserControl": {
+          if (!this.options.browser)
+            throw new Error("Navegador disponível somente no STAG desktop.");
+          if (this.state.busy || this.sending)
+            throw new Error("Pare o modelo antes de navegar manualmente.");
+          const execution = this.toolQueue.then(() =>
+            this.options.browser!.control(action.control),
+          );
+          this.toolQueue = execution.catch(() => {});
+          await execution;
+          break;
+        }
+        case "browserBounds":
+          throw new Error("Limites do navegador são tratados pelo main.");
       }
     } catch (error) {
       this.state.error = errorText(error);
@@ -211,9 +260,10 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
-    this.desktopEpoch++;
+    this.toolEpoch++;
+    this.options.browser?.cancel();
     this.stopping = false;
-    this.desktopRequests.clear();
+    this.toolRequests.clear();
     this.rpc?.removeAllListeners();
     await this.rpc?.shutdown();
     this.pending.clear();
@@ -240,7 +290,8 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
-      this.desktopEpoch++;
+      this.toolEpoch++;
+      this.options.browser?.cancel();
       this.state.connection = "error";
       this.state.error = errorText(error);
       this.state.busy = false;
@@ -336,8 +387,8 @@ export class AssistantService extends EventEmitter {
   private clearChat(): void {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
-    this.desktopEpoch++;
-    this.desktopRequests.clear();
+    this.toolEpoch++;
+    this.toolRequests.clear();
     this.stopping = false;
     this.state.threadId = null;
     this.completedTurns.clear();
@@ -349,9 +400,37 @@ export class AssistantService extends EventEmitter {
     this.state.approvals = [];
     this.windowsConsent = false;
     this.windowsConsentThread = null;
+    this.state.browser.authorized = false;
+    this.browserConsentThread = null;
+    this.browserInstructionsDirty = false;
+    this.options.browser?.reset();
     if (this.state.mode === "windows") this.state.mode = "project";
     this.state.metrics.totalTokens = 0;
     this.state.metrics.elapsedMs = 0;
+  }
+  private async browserConsent(allow: boolean): Promise<void> {
+    if (!this.options.browser) throw new Error("Navegador disponível somente no STAG desktop.");
+    if (allow && (this.state.busy || this.sending))
+      throw new Error("Pare a execução antes de autorizar o navegador.");
+    if (allow && this.state.threadId && !this.settings.threads[this.state.threadId]?.browserTool)
+      throw new Error(
+        "Abra uma nova conversa para usar o navegador neste histórico anterior à versão 0.4.",
+      );
+    this.toolEpoch++;
+    this.state.browser.authorized = allow;
+    this.browserInstructionsDirty = true;
+    this.browserConsentThread = allow ? this.state.threadId : null;
+    if (!allow) this.options.browser.reset();
+    if (!allow && this.state.busy) await this.stop();
+    if (this.state.threadId && !this.state.busy) {
+      try {
+        await this.resume(this.state.threadId);
+      } catch (error) {
+        this.state.browser.authorized = false;
+        this.browserConsentThread = null;
+        throw error;
+      }
+    }
   }
   private async preferences(action: Extract<Action, { type: "preferences" }>): Promise<void> {
     const model = this.state.models.find((m) => m.model === (action.model || this.state.model));
@@ -422,13 +501,26 @@ export class AssistantService extends EventEmitter {
       throw new Error(
         "Selecione o modo Windows e confirme o acesso antes de retomar essa conversa.",
       );
+    if (this.state.threadId !== id) {
+      this.toolEpoch++;
+      this.toolRequests.clear();
+      this.state.browser.authorized = false;
+      this.browserConsentThread = null;
+      this.options.browser?.reset();
+    }
     const result = await this.call<{ thread: WireThread }>("thread/resume", {
       threadId: id,
       cwd: policy.path,
       ...threadPolicy(policy.mode),
-      developerInstructions: assistantInstructions(policy.mode, this.state.platform),
+      developerInstructions: assistantInstructions(
+        policy.mode,
+        this.state.platform,
+        this.state.browser.authorized,
+        !!policy.browserTool,
+      ),
     });
     this.state.threadId = id;
+    this.browserInstructionsDirty = false;
     this.completedTurns = new Set(
       (result.thread.turns || []).filter((t) => t.status !== "inProgress").map((t) => t.id),
     );
@@ -459,8 +551,10 @@ export class AssistantService extends EventEmitter {
       throw new Error(
         "O acesso ao projeto está sendo preparado. Aguarde alguns instantes e tente novamente.",
       );
+    if (this.state.threadId && this.browserInstructionsDirty)
+      await this.resume(this.state.threadId);
     this.sending = true;
-    this.desktopRequests.clear();
+    this.toolRequests.clear();
     this.stopping = false;
     this.state.busy = true;
     this.startedAt = Date.now();
@@ -475,15 +569,25 @@ export class AssistantService extends EventEmitter {
           cwd: this.state.project.path,
           model: this.state.model,
           ...threadPolicy(this.state.mode),
-          developerInstructions: assistantInstructions(this.state.mode, this.state.platform),
+          developerInstructions: assistantInstructions(
+            this.state.mode,
+            this.state.platform,
+            this.state.browser.authorized,
+            !!this.options.browser,
+          ),
           serviceName: "stag_desktop",
-          ...(this.state.mode === "windows" ? { dynamicTools: [desktopTool] } : {}),
+          dynamicTools: [
+            ...(this.state.mode === "windows" ? [desktopTool] : []),
+            ...(this.options.browser ? [browserTool] : []),
+          ],
         });
         this.state.threadId = result.thread.id;
         if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
+        if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
         this.settings.threads[result.thread.id] = {
           path: this.state.project.path,
           mode: this.state.mode,
+          browserTool: !!this.options.browser,
         };
         await this.options.store.save(this.settings);
       }
@@ -514,7 +618,8 @@ export class AssistantService extends EventEmitter {
     if (!this.state.busy) return;
     if (!this.turnId || !this.state.threadId)
       throw new Error("A execução está iniciando. Tente parar em instantes.");
-    this.desktopEpoch++;
+    this.toolEpoch++;
+    this.options.browser?.cancel();
     this.stopping = true;
     this.pending.clear();
     this.state.approvals = [];
@@ -647,7 +752,7 @@ export class AssistantService extends EventEmitter {
       case "turn/completed": {
         const turn = object(p.turn) as unknown as WireTurn;
         if (this.turnId && turn.id !== this.turnId) return;
-        this.desktopEpoch++;
+        this.toolEpoch++;
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -695,13 +800,18 @@ export class AssistantService extends EventEmitter {
       return;
     }
     if (message.method === "item/tool/call") {
+      const isBrowser = p.tool === "stag_browser";
       if (
-        p.tool !== "windows_desktop" ||
+        (!isBrowser && p.tool !== "windows_desktop") ||
         (p.namespace !== undefined && p.namespace !== null) ||
-        this.state.platform !== "win32" ||
-        this.state.mode !== "windows" ||
-        !this.windowsConsent ||
-        this.windowsConsentThread !== this.state.threadId ||
+        (isBrowser
+          ? !this.options.browser ||
+            !this.state.browser.authorized ||
+            this.browserConsentThread !== this.state.threadId
+          : this.state.platform !== "win32" ||
+            this.state.mode !== "windows" ||
+            !this.windowsConsent ||
+            this.windowsConsentThread !== this.state.threadId) ||
         !text(p.turnId)
       ) {
         this.rpc.respond(message.id, {
@@ -710,32 +820,44 @@ export class AssistantService extends EventEmitter {
         });
         return;
       }
-      const parsed = desktopArguments.safeParse(p.arguments);
+      const parsed = isBrowser
+        ? browserArguments.safeParse(p.arguments)
+        : desktopArguments.safeParse(p.arguments);
       if (!parsed.success) {
         this.rpc.respond(message.id, {
           success: false,
           contentItems: [
             {
               type: "inputText",
-              text: "Argumentos de desktop inválidos. Corrija a operação e seu contexto.",
+              text: `Argumentos de ${isBrowser ? "navegador" : "desktop"} inválidos. Corrija a operação e seu contexto.`,
             },
           ],
         });
         return;
       }
-      if (this.desktopRequests.has(id)) return;
-      this.desktopRequests.add(id);
+      if (this.toolRequests.has(id)) return;
+      this.toolRequests.add(id);
       // A reverse request can precede turn/started or the turn/start response.
       // Its validated thread/turn establishes ownership just like turn/started.
       if (!this.turnId) this.turnId = text(p.turnId);
       const args = parsed.data;
-      const waiting = { message, execute: () => this.options.desktop.execute(args) };
-      if (desktopConfirmationReason(args)) {
-        this.pending.set(id, waiting);
-        this.state.approvals.push({ id, kind: "desktop", ...desktopApproval(args) });
-      } else {
-        await this.executeDesktop(waiting, true);
-      }
+      const waiting: PendingApproval = isBrowser
+        ? {
+            message,
+            tool: "browser",
+            execute: () => this.options.browser!.execute(args as BrowserArguments),
+            confirmation: () => this.options.browser!.confirmationReason(args as BrowserArguments),
+            approval: (reason) => browserApproval(args as BrowserArguments, reason),
+          }
+        : {
+            message,
+            tool: "desktop",
+            execute: () => this.options.desktop.execute(args),
+            confirmation: async () =>
+              desktopConfirmationReason(args as Parameters<typeof desktopConfirmationReason>[0]),
+            approval: () => desktopApproval(args as Parameters<typeof desktopApproval>[0]),
+          };
+      await this.executeTool(waiting, null);
     } else if (
       ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].includes(
         message.method || "",
@@ -793,11 +915,11 @@ export class AssistantService extends EventEmitter {
     }
     this.publish();
   }
-  private async executeDesktop(waiting: PendingApproval, accept: boolean): Promise<void> {
+  private async executeTool(waiting: PendingApproval, accept: boolean | null): Promise<void> {
     const ownerRpc = this.rpc!;
     const ownerThread = this.state.threadId;
     const ownerTurn = text(waiting.message.params?.turnId);
-    const epoch = this.desktopEpoch;
+    const epoch = this.toolEpoch;
     const ownsTurn = () =>
       !this.disposed &&
       !this.stopping &&
@@ -805,18 +927,31 @@ export class AssistantService extends EventEmitter {
       this.rpc === ownerRpc &&
       this.state.threadId === ownerThread &&
       this.turnId === ownerTurn &&
-      this.desktopEpoch === epoch &&
-      this.state.mode === "windows" &&
-      this.windowsConsent &&
-      this.windowsConsentThread === ownerThread;
-    const execution = this.desktopQueue.then(async () => {
+      this.toolEpoch === epoch &&
+      (waiting.tool === "browser"
+        ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+        : this.state.mode === "windows" &&
+          this.windowsConsent &&
+          this.windowsConsentThread === ownerThread);
+    const execution = this.toolQueue.then(async () => {
       if (!ownsTurn()) return;
       let result: ToolResult = {
         success: false,
         contentItems: [{ type: "inputText", text: "Ação recusada pelo usuário." }],
       };
-      if (accept) {
+      if (accept !== false) {
         try {
+          if (accept === null) {
+            const reason = await waiting.confirmation!();
+            if (!ownsTurn()) return;
+            if (reason) {
+              const id = String(waiting.message.id);
+              this.pending.set(id, waiting);
+              this.state.approvals.push({ id, kind: waiting.tool!, ...waiting.approval!(reason) });
+              this.publish();
+              return;
+            }
+          }
           result = await waiting.execute!();
         } catch (error) {
           if (ownsTurn()) {
@@ -832,8 +967,8 @@ export class AssistantService extends EventEmitter {
       if (ownsTurn()) ownerRpc.respond(waiting.message.id!, result);
       this.publish();
     });
-    // A failed native operation must not poison the queue for the next request.
-    this.desktopQueue = execution.catch(() => {});
+    // Desktop and browser actions share one queue, including approved operations.
+    this.toolQueue = execution.catch(() => {});
     await execution;
   }
   private async answer(action: Extract<Action, { type: "answer" }>): Promise<void> {
@@ -854,7 +989,7 @@ export class AssistantService extends EventEmitter {
       this.pending.delete(action.id);
       this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
       this.publish();
-      await this.executeDesktop(waiting, action.accept === true);
+      await this.executeTool(waiting, action.accept === true);
     } else {
       const available = waiting.message.params?.availableDecisions;
       const decision = action.accept === true ? "accept" : "decline";
@@ -867,7 +1002,8 @@ export class AssistantService extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
-    this.desktopEpoch++;
+    this.toolEpoch++;
+    this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();
     this.pending.clear();
