@@ -231,6 +231,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         updatedAt: 100,
         preview: "",
         dynamicTools: p.dynamicTools || [],
+        developerInstructions: p.developerInstructions || "",
       };
       threads.set(thread.id, thread);
       persist();
@@ -241,7 +242,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/resume": {
       const thread = threads.get(p.threadId);
       if (!thread) failure(id, "Missing thread");
-      else reply(id, { thread });
+      else {
+        if (p.developerInstructions !== undefined)
+          thread.developerInstructions = p.developerInstructions;
+        persist();
+        reply(id, { thread });
+      }
       break;
     }
     case "thread/list":
@@ -293,6 +299,45 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (input.includes("lento")) break;
       if (input.includes("erro")) {
         finish(thread, turn, "failed", { message: "Falha de teste recuperável." });
+        break;
+      }
+      // Deterministic routing contract probe, not a simulation of model reasoning.
+      if (input.startsWith("abrir aplicação local ")) {
+        if (!thread.developerInstructions.includes("use exclusivamente stag_browser")) {
+          response(thread, turn, "Fixture: contrato de navegação integrado ausente.");
+          break;
+        }
+        if (thread.developerInstructions.includes("stag_browser não está registrado")) {
+          response(thread, turn, "Abra uma nova conversa e clique em Autorizar navegador.");
+          break;
+        }
+        if (!thread.developerInstructions.includes("O cliente autorizou stag_browser")) {
+          response(thread, turn, "Clique em Autorizar navegador no painel do STAG.");
+          break;
+        }
+        desktopCall(
+          thread,
+          turn,
+          {
+            action: "navigate",
+            url: input.slice("abrir aplicação local ".length),
+            risk: "routine",
+            intent: "Conferir aplicação local no navegador do STAG",
+          },
+          () =>
+            desktopCall(
+              thread,
+              turn,
+              { action: "snapshot" },
+              () => response(thread, turn, "Navegador: aplicação local conferida no STAG."),
+              {},
+              false,
+              "stag_browser",
+            ),
+          {},
+          false,
+          "stag_browser",
+        );
         break;
       }
       if (/aprovar|recusar/.test(input)) {
