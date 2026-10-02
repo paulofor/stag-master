@@ -56,6 +56,8 @@ try {
         [
           "-NoProfile",
           "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
           "-Command",
           "Get-ExecutionPolicy -List | ConvertTo-Json -Compress",
         ],
@@ -64,13 +66,9 @@ try {
     );
   // Restrict only this test process and its children, without Set-ExecutionPolicy or registry writes.
   process.env.PSExecutionPolicyPreference = "Restricted";
+  // Diagnostics need the Security module; Restricted may block its autoload in Windows PowerShell.
+  // Compare scopes in separate Bypass processes; the no-flag probe below remains Restricted.
   const before = policies();
-  const effective = execFileSync(
-    "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"],
-    { encoding: "utf8", timeout: 15000 },
-  ).trim();
-  assert.equal(effective, "Restricted", "O teste precisa iniciar com scripts bloqueados.");
   const fixture = resolve("tests/fixtures/desktop-process.ps1");
   const input = Buffer.from(JSON.stringify({ action: "list_windows" })).toString("base64");
   assert.throws(
@@ -103,11 +101,12 @@ try {
     assert.deepEqual(output.request, args);
     assert.equal(output.windows[0].processId, 4242);
   }
-  assert.deepEqual(
-    policies(),
-    before,
-    "As políticas do processo pai e persistentes devem ser preservadas.",
+  assert.equal(
+    process.env.PSExecutionPolicyPreference,
+    "Restricted",
+    "A política herdada do processo pai deve ser preservada.",
   );
+  assert.deepEqual(policies(), before, "As políticas persistentes devem ser preservadas.");
   // CI Windows has no client windows. Outside CI, keep every operation synthetic.
   if (process.env.CI === "true") {
     const result = await new DesktopTools(script, noCapture).execute({ action: "list_windows" });
