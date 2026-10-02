@@ -40,6 +40,12 @@ describe("fronteiras do cliente", () => {
       { action: "click", x: Infinity, y: 0 },
       { action: "list_windows", script: "anything" },
       { action: "focus_window", processId: -1 },
+      { action: "type_text", text: "literal" },
+      { action: "type_text", processId: 42, text: "literal", keys: "^a" },
+      { action: "click", x: 0, y: 0, button: "unknown" },
+      { action: "click", x: 0, y: 0, clicks: 3 },
+      { action: "scroll", x: 0, y: 0, delta: 0 },
+      { action: "scroll", x: 0, y: 0, delta: -1201 },
     ])
       expect(() => desktopArguments.parse(args)).toThrow();
     const tools = new DesktopTools(

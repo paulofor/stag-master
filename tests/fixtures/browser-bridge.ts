@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { emptySnapshot, type Action, type Model, type Snapshot } from "../../src/shared/types";
 
-export async function installBridge(page: Page) {
+export async function installBridge(page: Page, overrides: Partial<Snapshot> = {}) {
   await page.addInitScript(
     (initial: Snapshot) => {
       let state = initial;
@@ -89,7 +89,17 @@ export async function installBridge(page: Page) {
                 });
               }
               state.items.push({ id: `user-${++count}`, kind: "user", text: action.text });
-              if (/aprovar|recusar/.test(action.text)) {
+              if (action.text.includes("desktop") && state.mode === "windows") {
+                state.approvals = [
+                  {
+                    id: "desktop-approval",
+                    kind: "desktop",
+                    title: "Permitir captura de tela?",
+                    detail:
+                      "A imagem da tela principal será enviada ao ChatGPT para executar esta tarefa.",
+                  },
+                ];
+              } else if (/aprovar|recusar/.test(action.text)) {
                 state.approvals = [
                   {
                     id: "approval",
@@ -133,18 +143,23 @@ export async function installBridge(page: Page) {
               }
               break;
             }
-            case "answer":
+            case "answer": {
+              const desktop = state.approvals[0]?.kind === "desktop";
               state.approvals = [];
               state.items.push({
                 id: `assistant-${++count}`,
                 kind: "assistant",
-                text:
-                  action.accept === false
+                text: desktop
+                  ? action.accept
+                    ? "Desktop: captura sintética concluída."
+                    : "Desktop: ação recusada."
+                  : action.accept === false
                     ? "Ação recusada. Nenhum comando executado."
                     : "Resposta recebida. Fluxo concluído.",
               });
               done();
               break;
+            }
             case "stop":
               state.approvals = [];
               state.items.push({
@@ -169,6 +184,7 @@ export async function installBridge(page: Page) {
       ...structuredClone(emptySnapshot),
       connection: "ready",
       platform: "win32",
+      ...overrides,
     } satisfies Snapshot,
   );
 }

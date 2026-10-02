@@ -2,8 +2,8 @@ import { test, expect } from "@playwright/test";
 import { installBridge } from "../fixtures/browser-bridge";
 import { mkdir } from "node:fs/promises";
 
-test.beforeEach(async ({ page }) => {
-  await installBridge(page);
+test.beforeEach(async ({ page }, info) => {
+  await installBridge(page, info.tags.includes("@linux") ? { platform: "linux" } : {});
   await page.goto("/");
 });
 async function ready(page: import("@playwright/test").Page) {
@@ -82,6 +82,60 @@ test("modo Windows exige consentimento e cancelamento preserva modo", async ({ p
   await mode.selectOption("windows");
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(mode).toHaveValue("windows");
+});
+test("desktop autorizado pede aprovação por ação e pode ser revogado", async ({ page }, info) => {
+  await ready(page);
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("capturar desktop");
+  await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
+    "enviados ao ChatGPT",
+  );
+  await page.getByRole("button", { name: "Cancelar", exact: true }).click();
+  await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("project");
+  await expect(input).toHaveValue("capturar desktop");
+  await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Controle do desktop" })).toContainText(
+    "Desktop autorizado",
+  );
+  await input.press("Enter");
+  await expect(page.getByText("Permitir captura de tela?", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revogar acesso", exact: true })).toBeDisabled();
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-desktop-approval.png` });
+  await page.getByRole("button", { name: "Recusar", exact: true }).click();
+  await expect(page.getByText("Desktop: ação recusada.", { exact: true })).toBeVisible();
+  await input.fill("capturar desktop");
+  await input.press("Enter");
+  await expect(page.getByText("Permitir captura de tela?", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Permitir esta ação", exact: true }).click();
+  await expect(
+    page.getByText("Desktop: captura sintética concluída.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
+  await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("project");
+  await expect(page.getByRole("button", { name: "Autorizar desktop", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
+test("nova conversa encerra acesso ao desktop", async ({ page }) => {
+  await ready(page);
+  await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Autorizar desktop", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("project");
+});
+test("Linux não oferece autorização de desktop", { tag: "@linux" }, async ({ page }) => {
+  await ready(page);
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag!.getSnapshot()).platform))
+    .toBe("linux");
+  await expect(page.getByRole("region", { name: "Controle do desktop" })).toHaveCount(0);
+  await expect(
+    page.getByLabel("Acesso", { exact: true }).locator('option[value="windows"]'),
+  ).toHaveJSProperty("disabled", true);
 });
 test("erro permite reconectar e Markdown não executa HTML/imagens remotas", async ({ page }) => {
   await ready(page);

@@ -475,6 +475,26 @@ export function App() {
             answer={(action) => run(action)}
           />
         )}
+        {state.platform === "win32" && (
+          <section className="desktop-access" aria-label="Controle do desktop">
+            <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
+              <Monitor size={14} />
+              {state.mode === "windows"
+                ? "Desktop autorizado · ações com aprovação"
+                : "Controle do desktop"}
+            </span>
+            <button
+              className="text-button"
+              disabled={disabledContext || !state.account || !state.project}
+              onClick={() => {
+                if (state.mode === "windows") void run({ type: "preferences", mode: "project" });
+                else setWindowsDialog(true);
+              }}
+            >
+              {state.mode === "windows" ? "Revogar acesso" : "Autorizar desktop"}
+            </button>
+          </section>
+        )}
         <section className="composer" aria-label="Escrever mensagem">
           <textarea
             ref={input}
@@ -611,8 +631,9 @@ export function App() {
             </div>
             <h2 id="windows-title">Trabalhar no Windows</h2>
             <p>
-              O assistente poderá executar comandos com acesso ao computador. Cliques, teclado e
-              capturas de tela terão aprovação individual.
+              O STAG poderá ver a tela, controlar mouse e teclado e executar comandos com acesso ao
+              computador. Cada operação de desktop pede aprovação. Capturas e títulos de janelas
+              aprovados são enviados ao ChatGPT para realizar a tarefa.
             </p>
             <p className="muted small">
               A mudança inicia uma nova conversa. Seu projeto continua selecionado.
@@ -621,12 +642,14 @@ export function App() {
               <button
                 className="secondary-button"
                 autoFocus
+                disabled={pending}
                 onClick={() => setWindowsDialog(false)}
               >
                 Cancelar
               </button>
               <button
                 className="primary-button"
+                disabled={pending}
                 onClick={async () => {
                   if (await run({ type: "preferences", mode: "windows", windowsConsent: true }))
                     setWindowsDialog(false);

@@ -13,7 +13,7 @@ import {
 import { actionSchema, safeLink } from "../shared/validation";
 import { RpcClient, type RpcMessage } from "./rpc";
 import { SettingsStore, type Settings } from "./settings";
-import { desktopArguments, desktopTool, type ToolResult } from "./desktop-tools";
+import { desktopArguments, desktopApproval, desktopTool, type ToolResult } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 
 interface WireItem {
@@ -91,6 +91,7 @@ export class AssistantService extends EventEmitter {
   private sending = false;
   private changing = false;
   private windowsConsent = false;
+  private windowsConsentThread: string | null = null;
   private disposed = false;
   private sandboxReady = false;
   private completedTurns = new Set<string>();
@@ -330,6 +331,7 @@ export class AssistantService extends EventEmitter {
     this.pending.clear();
     this.state.approvals = [];
     this.windowsConsent = false;
+    this.windowsConsentThread = null;
     if (this.state.mode === "windows") this.state.mode = "project";
     this.state.metrics.totalTokens = 0;
     this.state.metrics.elapsedMs = 0;
@@ -395,7 +397,11 @@ export class AssistantService extends EventEmitter {
     const policy = this.settings.threads[id];
     if (!policy || policy.path !== this.state.project?.path)
       throw new Error("Conversa indisponível para este projeto.");
-    if (policy.mode === "windows" && !this.windowsConsent)
+    if (
+      policy.mode === "windows" &&
+      (!this.windowsConsent ||
+        (this.windowsConsentThread !== null && this.windowsConsentThread !== id))
+    )
       throw new Error(
         "Selecione o modo Windows e confirme o acesso antes de retomar essa conversa.",
       );
@@ -403,13 +409,15 @@ export class AssistantService extends EventEmitter {
       threadId: id,
       cwd: policy.path,
       ...threadPolicy(policy.mode),
-      developerInstructions: assistantInstructions,
+      developerInstructions: assistantInstructions(policy.mode, this.state.platform),
     });
     this.state.threadId = id;
     this.completedTurns = new Set(
       (result.thread.turns || []).filter((t) => t.status !== "inProgress").map((t) => t.id),
     );
     this.state.mode = policy.mode;
+    this.windowsConsent = policy.mode === "windows";
+    this.windowsConsentThread = this.windowsConsent ? id : null;
     this.state.items = [];
     this.state.plan = [];
     this.state.diff = "";
@@ -448,11 +456,12 @@ export class AssistantService extends EventEmitter {
           cwd: this.state.project.path,
           model: this.state.model,
           ...threadPolicy(this.state.mode),
-          developerInstructions: assistantInstructions,
+          developerInstructions: assistantInstructions(this.state.mode, this.state.platform),
           serviceName: "stag_desktop",
           ...(this.state.mode === "windows" ? { dynamicTools: [desktopTool] } : {}),
         });
         this.state.threadId = result.thread.id;
+        if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
         this.settings.threads[result.thread.id] = {
           path: this.state.project.path,
           mode: this.state.mode,
@@ -647,26 +656,46 @@ export class AssistantService extends EventEmitter {
     if (
       !this.state.busy ||
       p.threadId !== this.state.threadId ||
+      this.completedTurns.has(text(p.turnId)) ||
       (this.turnId && p.turnId && p.turnId !== this.turnId)
     ) {
       this.rpc.rejectRequest(message.id, "Pedido fora da conversa ativa.");
       return;
     }
     if (message.method === "item/tool/call") {
-      if (p.tool !== "windows_desktop" || this.state.mode !== "windows" || !this.windowsConsent) {
+      if (
+        p.tool !== "windows_desktop" ||
+        (p.namespace !== undefined && p.namespace !== null) ||
+        this.state.platform !== "win32" ||
+        this.state.mode !== "windows" ||
+        !this.windowsConsent ||
+        this.windowsConsentThread !== this.state.threadId
+      ) {
         this.rpc.respond(message.id, {
           success: false,
           contentItems: [{ type: "inputText", text: "Ferramenta não autorizada nesta conversa." }],
         });
         return;
       }
-      const args = desktopArguments.parse(p.arguments);
+      const parsed = desktopArguments.safeParse(p.arguments);
+      if (!parsed.success) {
+        this.rpc.respond(message.id, {
+          success: false,
+          contentItems: [
+            {
+              type: "inputText",
+              text: "Argumentos de desktop inválidos. Corrija a operação antes de solicitar aprovação.",
+            },
+          ],
+        });
+        return;
+      }
+      const args = parsed.data;
       this.pending.set(id, { message, execute: () => this.options.desktop.execute(args) });
       this.state.approvals.push({
         id,
         kind: "desktop",
-        title: "Permitir ação no Windows?",
-        detail: JSON.stringify(args, null, 2),
+        ...desktopApproval(args),
       });
     } else if (
       ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"].includes(
@@ -742,6 +771,12 @@ export class AssistantService extends EventEmitter {
       const ownerRpc = this.rpc;
       const ownerThread = this.state.threadId;
       const ownerTurn = this.turnId;
+      const ownsTurn = () =>
+        !this.disposed &&
+        this.state.busy &&
+        this.rpc === ownerRpc &&
+        this.state.threadId === ownerThread &&
+        this.turnId === ownerTurn;
       // Remove first to prevent double-click executing a desktop action twice.
       this.pending.delete(action.id);
       this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
@@ -754,19 +789,17 @@ export class AssistantService extends EventEmitter {
         try {
           result = await waiting.execute();
         } catch (error) {
+          if (ownsTurn()) {
+            this.state.error = errorText(error);
+            this.state.metrics.failures++;
+          }
           result = {
             success: false,
             contentItems: [{ type: "inputText", text: errorText(error) }],
           };
         }
       }
-      if (
-        this.state.busy &&
-        this.rpc === ownerRpc &&
-        this.state.threadId === ownerThread &&
-        this.turnId === ownerTurn
-      )
-        ownerRpc.respond(waiting.message.id, result);
+      if (ownsTurn()) ownerRpc.respond(waiting.message.id, result);
     } else {
       const available = waiting.message.params?.availableDecisions;
       const decision = action.accept === true ? "accept" : "decline";

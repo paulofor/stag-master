@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 import { AssistantService } from "../../src/main/service";
 import { RpcClient } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
+import { codexEnvironment } from "../../src/main/policy";
+import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
 
 let dir: string;
 let service: AssistantService;
@@ -11,7 +13,7 @@ let rpc: RpcClient;
 let store: SettingsStore;
 const openExternal = vi.fn(async (_url: string) => {});
 const desktop = {
-  execute: vi.fn(async () => ({
+  execute: vi.fn(async (_args: unknown): Promise<ToolResult> => ({
     success: true,
     contentItems: [{ type: "inputText" as const, text: "[]" }],
   })),
@@ -25,6 +27,11 @@ beforeEach(async () => {
       rpc = new RpcClient({
         command: process.execPath,
         args: [resolve("tests/fixtures/app-server.mjs")],
+        cwd: dir,
+        env: {
+          ...codexEnvironment(resolve(dir, "home")),
+          STAG_FIXTURE_STATE: resolve(dir, "server-state.json"),
+        },
       });
       return rpc;
     },
@@ -39,7 +46,12 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   service.dispose();
-  vi.clearAllMocks();
+  await rpc.shutdown();
+  vi.resetAllMocks();
+  desktop.execute.mockResolvedValue({
+    success: true,
+    contentItems: [{ type: "inputText", text: "[]" }],
+  });
   await rm(dir, { recursive: true, force: true });
 });
 async function ready() {
@@ -215,9 +227,171 @@ describe("fluxo local do assistente", () => {
   });
   it("recusa ferramenta desktop fora do modo Windows", async () => {
     await ready();
-    await send("desktop");
+    await send("desktop forçar");
     await complete();
     expect(desktop.execute).not.toHaveBeenCalled();
     expect(service.snapshot().items.at(-1)?.text).toContain("recusado");
+  });
+  it("oferece instruções de autorização e registra tools só após consentimento", async () => {
+    await ready();
+    await send("acessar desktop");
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar desktop");
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop");
+    await approve(false);
+    const calls =
+      await rpc.call<{ method?: string; params?: Record<string, unknown> }[]>("_fixture/readCalls");
+    const starts = calls.filter((call) => call.method === "thread/start");
+    expect(starts[0].params?.dynamicTools).toBeUndefined();
+    expect(starts[0].params?.developerInstructions).toContain("Autorizar desktop");
+    expect(starts[1].params?.dynamicTools).toEqual([
+      expect.objectContaining({ name: "windows_desktop" }),
+    ]);
+    expect(starts[1].params?.developerInstructions).toContain("cliente autorizou");
+  });
+  it("controla tela, foco, mouse, texto, atalhos e rolagem com aprovação por operação", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    const expected: DesktopArguments[] = [
+      { action: "list_windows" },
+      { action: "screenshot" },
+      { action: "focus_window", processId: 4242 },
+      { action: "click", x: 120, y: 180, button: "left", clicks: 2 },
+      { action: "type_text", processId: 4242, text: "Teste + ^ % {texto}" },
+      { action: "send_keys", processId: 4242, keys: "^s" },
+      { action: "scroll", x: 120, y: 180, delta: -240 },
+      { action: "screenshot" },
+    ];
+    desktop.execute.mockImplementation(async (raw) => ({
+      success: true,
+      contentItems:
+        (raw as DesktopArguments).action === "screenshot"
+          ? [{ type: "inputImage", imageUrl: "data:image/png;base64,SYNTHETIC_SCREEN" }]
+          : [{ type: "inputText", text: "[]" }],
+    }));
+    await send("desktop sequência");
+    for (const [index, args] of expected.entries()) {
+      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+      expect(desktop.execute).toHaveBeenCalledTimes(index);
+      const approval = service.snapshot().approvals[0];
+      if (args.action === "screenshot") expect(approval.detail).toContain("enviada ao ChatGPT");
+      await service.request({ type: "answer", id: approval.id, accept: true });
+      expect(desktop.execute).toHaveBeenNthCalledWith(index + 1, args);
+    }
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
+    expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_SCREEN");
+  });
+  it.each(["inválido", "namespace", "outro turno"])(
+    "recusa request desktop %s e libera o agente",
+    async (probe) => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send(`desktop ${probe}`);
+      await complete();
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(service.snapshot().approvals).toEqual([]);
+    },
+  );
+  it("falha do driver é respondida e a próxima tarefa funciona", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    desktop.execute.mockRejectedValueOnce(new Error("Janela de teste indisponível."));
+    await send("desktop");
+    await approve(true);
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().items.at(-1)?.text).toContain("recusado");
+    const calls =
+      await rpc.call<{ result?: { contentItems?: { text?: string }[] } }[]>("_fixture/readCalls");
+    expect(
+      calls.some((call) =>
+        call.result?.contentItems?.some((item) => item.text?.includes("indisponível")),
+      ),
+    ).toBe(true);
+    await send("analise");
+    await complete();
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("interromper descarta aprovação e decisão repetida não executa duas vezes", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    const stoppedId = service.snapshot().approvals[0].id;
+    await service.request({ type: "stop" });
+    await complete();
+    await expect(service.request({ type: "answer", id: stoppedId, accept: true })).rejects.toThrow(
+      "resolvido",
+    );
+    expect(desktop.execute).not.toHaveBeenCalled();
+    await send("desktop");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    const id = service.snapshot().approvals[0].id;
+    const first = service.request({ type: "answer", id, accept: true });
+    await expect(service.request({ type: "answer", id, accept: true })).rejects.toThrow(
+      "resolvido",
+    );
+    await first;
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledTimes(1);
+  });
+  it("reconecta a mesma conversa Windows e restaura as tools sem renovar acesso", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop");
+    await approve(false);
+    const threadId = service.snapshot().threadId!;
+    await service.request({ type: "connect" });
+    expect(service.snapshot().threadId).toBe(threadId);
+    expect(service.snapshot().mode).toBe("windows");
+    await send("desktop");
+    await approve(true);
+    expect(desktop.execute).toHaveBeenCalledTimes(1);
+  });
+  it("resultado de desktop interrompido não contamina uma nova conversa", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    let fail!: (error: Error) => void;
+    desktop.execute.mockImplementationOnce(
+      () =>
+        new Promise<ToolResult>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    await send("desktop");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    const answering = service.request({
+      type: "answer",
+      id: service.snapshot().approvals[0].id,
+      accept: true,
+    });
+    await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+    await service.request({ type: "stop" });
+    await complete();
+    await service.request({ type: "newChat" });
+    fail(new Error("Falha antiga de desktop."));
+    await answering;
+    expect(service.snapshot().error).toBeNull();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().items).toEqual([]);
+  });
+  it("consentimento não migra para outra conversa Windows", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop");
+    await approve(false);
+    const first = service.snapshot().threadId!;
+    await service.request({ type: "newChat" });
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop");
+    await approve(false);
+    await expect(service.request({ type: "resume", threadId: first })).rejects.toThrow("confirme");
+    await service.request({ type: "newChat" });
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await service.request({ type: "resume", threadId: first });
+    await send("desktop");
+    await approve(true);
+    expect((await store.load()).threads[first].mode).toBe("windows");
   });
 });

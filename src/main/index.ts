@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 import { RpcClient } from "./rpc";
 import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
-import { DesktopTools } from "./desktop-tools";
+import { desktopArguments, DesktopTools, withoutAssistantWindow } from "./desktop-tools";
 import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
@@ -128,7 +128,14 @@ async function start(): Promise<void> {
     openExternal: async (url) => {
       await shell.openExternal(url);
     },
-    desktop,
+    desktop: {
+      execute: (raw) => {
+        const input = desktopArguments.parse(raw);
+        return ["screenshot", "click", "scroll"].includes(input.action)
+          ? withoutAssistantWindow(window, () => desktop.execute(input))
+          : desktop.execute(input);
+      },
+    },
   });
   service.on("snapshot", (snapshot) => {
     if (window && !window.isDestroyed()) window.webContents.send("stag:snapshot", snapshot);
@@ -154,13 +161,18 @@ async function start(): Promise<void> {
   ipcMain.handle("stag:action", async (event, raw: unknown) => {
     trusted(event);
     const action = actionSchema.parse(raw) as Action;
-    if (action.type === "preferences" && action.mode === "windows" && action.windowsConsent) {
+    if (
+      process.platform === "win32" &&
+      action.type === "preferences" &&
+      action.mode === "windows" &&
+      action.windowsConsent
+    ) {
       const result = await dialog.showMessageBox(window!, {
         type: "warning",
         title: "Acesso ao Windows",
         message: "Permitir que o assistente controle este computador nesta conversa?",
         detail:
-          "O agente poderá executar comandos com acesso amplo. Capturas de tela, cliques e teclado terão aprovações próprias. Use apenas para tarefas necessárias.",
+          "O agente poderá controlar mouse e teclado e executar comandos com acesso amplo. Cada operação de desktop terá aprovação própria. Capturas e títulos de janelas aprovados serão enviados ao ChatGPT para a tarefa. Autorizar inicia uma nova conversa; revogar ou abrir outra conversa encerra o acesso.",
         buttons: ["Cancelar", "Permitir acesso"],
         defaultId: 0,
         cancelId: 0,

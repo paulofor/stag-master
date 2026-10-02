@@ -331,6 +331,28 @@ h1 {
   box-shadow: 0 4px 15px #35443307;
   transition: border-color 0.2s;
 }
+.desktop-access {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 3px 9px;
+  font-size: 10px;
+  color: #89917f;
+}
+.desktop-access > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.desktop-access .text-button {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.desktop-access .desktop-authorized {
+  color: #587448;
+}
 .composer:focus-within {
   border-color: #9caf92;
 }

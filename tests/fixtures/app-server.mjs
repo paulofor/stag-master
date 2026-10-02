@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { readFileSync, writeFileSync } from "node:fs";
 
 // Strict bidirectional fake, no account/LLM/network/desktop dependencies.
 let initialized = false;
@@ -7,6 +8,20 @@ let count = 0;
 let serverId = 500;
 const calls = [];
 const threads = new Map();
+// Recovery tests opt into a file in their temporary directory; never use the user's Codex home.
+const stateFile = process.env.STAG_FIXTURE_STATE;
+if (stateFile) {
+  try {
+    const stored = JSON.parse(readFileSync(stateFile, "utf8"));
+    loggedIn = stored.loggedIn;
+    count = stored.count;
+    for (const thread of stored.threads) threads.set(thread.id, thread);
+  } catch {}
+}
+const persist = () => {
+  if (stateFile)
+    writeFileSync(stateFile, JSON.stringify({ loggedIn, count, threads: [...threads.values()] }));
+};
 const waiting = new Map();
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const notify = (method, params) => send({ method, params });
@@ -16,6 +31,7 @@ const failure = (id, message) => send({ id, error: { code: -32601, message } });
 function finish(thread, turn, status = "completed", error) {
   turn.status = status;
   turn.error = error || null;
+  persist();
   notify("thread/tokenUsage/updated", {
     threadId: thread.id,
     turnId: turn.id,
@@ -31,6 +47,42 @@ function finish(thread, turn, status = "completed", error) {
     turnId: turn.id,
     itemId: `assistant-${turn.id}`,
     delta: "STALE_COMPLETED_TURN",
+  });
+}
+
+function desktopCall(thread, turn, args, next, overrides = {}) {
+  const requestId = ++serverId;
+  const item = {
+    id: `desktop-${requestId}`,
+    type: "dynamicToolCall",
+    tool: "windows_desktop",
+    arguments: args,
+    status: "inProgress",
+  };
+  turn.items.push(item);
+  notify("item/started", { threadId: thread.id, turnId: turn.id, item });
+  waiting.set(requestId, (answer) => {
+    const success = answer.result?.success === true;
+    item.status = success ? "completed" : "failed";
+    item.success = success;
+    item.contentItems = answer.result?.contentItems || [];
+    notify("serverRequest/resolved", { threadId: thread.id, turnId: turn.id, requestId });
+    notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+    if (success && next) next();
+    else response(thread, turn, `Desktop: ${success ? "executado" : "recusado"}.`);
+  });
+  send({
+    id: requestId,
+    method: "item/tool/call",
+    params: {
+      threadId: thread.id,
+      turnId: turn.id,
+      callId: item.id,
+      namespace: null,
+      tool: "windows_desktop",
+      arguments: args,
+      ...overrides,
+    },
   });
 }
 function response(
@@ -116,6 +168,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
       setTimeout(() => {
         loggedIn = true;
+        persist();
         notify("account/login/completed", { loginId: "fixture-login", success: true, error: null });
         notify("account/updated", { authMode: "chatgpt", planType: "test" });
       }, 20);
@@ -125,6 +178,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       break;
     case "account/logout":
       loggedIn = false;
+      persist();
       reply(id, {});
       notify("account/updated", { authMode: null, planType: null });
       break;
@@ -161,8 +215,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         turns: [],
         updatedAt: 100,
         preview: "",
+        dynamicTools: p.dynamicTools || [],
       };
       threads.set(thread.id, thread);
+      persist();
       reply(id, { thread });
       notify("thread/started", { thread });
       break;
@@ -287,22 +343,49 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         break;
       }
       if (input.includes("desktop")) {
-        const requestId = ++serverId;
-        waiting.set(requestId, (answer) =>
-          response(thread, turn, `Desktop: ${answer.result?.success ? "executado" : "recusado"}.`),
-        );
-        send({
-          id: requestId,
-          method: "item/tool/call",
-          params: {
-            threadId: thread.id,
-            turnId: turn.id,
-            callId: "desktop-call",
-            namespace: null,
-            tool: "windows_desktop",
-            arguments: { action: "list_windows" },
-          },
-        });
+        if (
+          !thread.dynamicTools.some((tool) => tool.name === "windows_desktop") &&
+          !input.includes("forçar")
+        ) {
+          response(
+            thread,
+            turn,
+            "Clique em Autorizar desktop e confirme o acesso para controlar o Windows em uma nova conversa.",
+          );
+          break;
+        }
+        if (input.includes("sequência")) {
+          const operations = [
+            { action: "list_windows" },
+            { action: "screenshot" },
+            { action: "focus_window", processId: 4242 },
+            { action: "click", x: 120, y: 180, button: "left", clicks: 2 },
+            { action: "type_text", processId: 4242, text: "Teste + ^ % {texto}" },
+            { action: "send_keys", processId: 4242, keys: "^s" },
+            { action: "scroll", x: 120, y: 180, delta: -240 },
+            { action: "screenshot" },
+          ];
+          const next = () => {
+            const args = operations.shift();
+            if (args) desktopCall(thread, turn, args, next);
+            else response(thread, turn, "Desktop: sequência concluída e resultado conferido.");
+          };
+          next();
+        } else {
+          desktopCall(
+            thread,
+            turn,
+            input.includes("inválido")
+              ? { action: "click", x: "invalid", y: 0 }
+              : { action: "list_windows" },
+            null,
+            input.includes("namespace")
+              ? { namespace: "unknown" }
+              : input.includes("outro turno")
+                ? { turnId: "wrong-turn" }
+                : {},
+          );
+        }
         break;
       }
       if (input.includes("desconhecido")) {
