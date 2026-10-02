@@ -29,7 +29,7 @@ npm run test:windows
 npm run dist:win
 ```
 
-O instalador fica em `release/`. O workflow **Desktop CI** valida cada PR e gera o instalador Windows em PRs e na main; baixe o artefato `stag-windows-x64` da execução. O build é reproduzível pelo código do repositório. Ainda não há certificado de assinatura: o Windows pode mostrar o aviso de aplicativo desconhecido.
+O instalador fica em `release/`. O workflow **Desktop CI** valida cada PR e gera o instalador Windows em PRs e na main; baixe o artefato `stag-windows-x64` da execução. O comando usa `--publish never`: gera o arquivo, sem publicar releases automaticamente nem exigir token de release. O build é reproduzível pelo código do repositório. Ainda não há certificado de assinatura: o Windows pode mostrar o aviso de aplicativo desconhecido.
 
 O aplicativo prepara o sandbox nativo Windows no modo unelevated ao conectar. No Linux, o teste da janela real usa `xvfb-run -a npm run test:desktop`.
 
