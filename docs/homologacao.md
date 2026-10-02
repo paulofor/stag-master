@@ -21,6 +21,10 @@ A sandbox Linux valida contratos, recuperação, interface e handshake real. A p
 
 Evidência local: `npm run check` aprovado com typecheck, 127 testes de contrato, build, handshake real e 26 cenários Chromium compacto/Pixel 7; `xvfb-run -a npm run test:desktop` aprovado com seleção após Leitura, preload/IPC e navegador de produção com site sintético. `format:check`, sintaxe dos scripts JavaScript e revisão do diff aprovados. O runtime local foi preparado com Node 22.12.0 para respeitar engines. O teste de arquivos continua obrigatório no job Windows, pois a sandbox local não possui sessão nativa Windows e seu kernel bloqueia o executor Linux.
 
+O primeiro job Linux do PR encontrou a variante `bwrap: setting up uid map: Permission denied` da mesma restrição de namespaces, após aprovar os 127 contratos e o build. O harness reconhece apenas essas mensagens de inicialização do bwrap no Linux, além do código de saída esperado; não aceita erros genéricos de arquivo, de protocolo ou qualquer limitação no Windows. O ajuste é validado localmente antes de atualizar o mesmo PR.
+
+O job Windows dessa rodada aprovou os 127 contratos, PowerShell sob Restricted, instalador 0.4.2 e Electron. O smoke real executou criação/leitura/edição em subpastas pelo sandbox unelevated e comprovou bloqueio de escrita externa, travessia, junctions e Leitura, sem inferência ou conta real. O HEAD atualizado volta a exigir ambos os jobs antes do merge.
+
 ## Navegação pelo navegador do STAG — versão 0.4.1
 
 Matriz definida antes de executar os testes da correção. O relato mostrou o agente usando o desktop autorizado para abrir uma aba no Chrome enquanto o navegador integrado estava sem consentimento. As instruções anteriores só priorizavam o painel após sua autorização, e a fixture não preservava instruções em start/resume para verificar essa transição. A correção torna explícito o uso de `stag_browser` para páginas, inclusive localhost, sem mudar as permissões do histórico ou conceder acesso automaticamente.

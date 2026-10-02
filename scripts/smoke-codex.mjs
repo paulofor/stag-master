@@ -119,7 +119,9 @@ try {
   const kernelUnavailable =
     process.platform === "linux" &&
     probe.exitCode === 1 &&
-    probe.stderr.startsWith("bwrap: No permissions to create a new namespace");
+    /^bwrap: (No permissions to create a new namespace|setting up uid map: Permission denied)/.test(
+      probe.stderr,
+    );
   if (kernelUnavailable) {
     console.log(
       "Limitação Linux: o kernel desta sandbox bloqueia namespaces do bwrap. Operações nativas de arquivo não homologadas aqui; Windows exige execução completa, sem este desvio, no job Windows installer.",
