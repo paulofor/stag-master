@@ -13,6 +13,7 @@ let service: AssistantService;
 let rpc: RpcClient;
 let store: SettingsStore;
 const openExternal = vi.fn(async (_url: string) => {});
+const selectProject = vi.fn<() => Promise<string | null>>();
 const desktop = {
   execute: vi.fn(async (_args: unknown): Promise<ToolResult> => ({
     success: true,
@@ -34,6 +35,7 @@ beforeEach(async () => {
   await mkdir(resolve(".local"), { recursive: true });
   dir = await mkdtemp(resolve(".local/service-test-"));
   store = new SettingsStore(resolve(dir, "settings.json"));
+  selectProject.mockResolvedValue(dir);
   service = new AssistantService({
     createRpc: () => {
       rpc = new RpcClient({
@@ -49,7 +51,7 @@ beforeEach(async () => {
     },
     store,
     openExternal,
-    selectProject: async () => dir,
+    selectProject,
     desktop,
     browser,
     platform: "win32",
@@ -89,6 +91,94 @@ async function approve(accept: boolean) {
   await complete();
 }
 describe("fluxo local do assistente", () => {
+  it("selecionar pasta ativa escrita recursiva e reconectar conserva somente a raiz escolhida", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await send("analise em Leitura");
+    await complete();
+    const readThread = service.snapshot().threadId!;
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().mode).toBe("project");
+    expect(service.snapshot().threadId).toBeNull();
+    await send("trabalhe nas subpastas");
+    await complete();
+    const projectThread = service.snapshot().threadId!;
+    await service.request({ type: "connect" });
+    expect(service.snapshot().threadId).toBe(projectThread);
+    expect(service.snapshot().approvals).toEqual([]);
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const resume = calls.find((call) => call.method === "thread/resume")!;
+    expect(resume.params.runtimeWorkspaceRoots).toEqual([dir]);
+    expect(resume.params.config).toMatchObject({ sandbox_workspace_write: { writable_roots: [] } });
+    expect(resume.params.developerInstructions).toContain(
+      "leitura e escrita nela e em suas subpastas",
+    );
+    expect(resume.params.developerInstructions).toContain(JSON.stringify(dir));
+    await send("continue nas subpastas");
+    await complete();
+    const continued =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const turn = continued.find((call) => call.method === "turn/start")!;
+    expect(turn.params.runtimeWorkspaceRoots).toEqual([dir]);
+    expect(turn.params.sandboxPolicy).toMatchObject({
+      type: "workspaceWrite",
+      writableRoots: [dir],
+    });
+    await service.request({ type: "resume", threadId: readThread });
+    expect(service.snapshot().mode).toBe("read");
+    expect((await store.load()).threads[readThread].mode).toBe("read");
+    await send("leia sem editar");
+    await complete();
+  });
+  it("trocar pasta não reutiliza raízes, históricos ou consentimentos de desktop/navegador", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await service.request({ type: "browserConsent", allow: true });
+    await send("analise");
+    await complete();
+    const oldThread = service.snapshot().threadId!;
+    const other = resolve(dir, "pasta vizinha-ação");
+    await mkdir(other);
+    selectProject.mockResolvedValueOnce(other);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().project?.path).toBe(other);
+    expect(service.snapshot().mode).toBe("project");
+    expect(service.snapshot().browser.authorized).toBe(false);
+    expect(service.snapshot().threadId).toBeNull();
+    await expect(service.request({ type: "resume", threadId: oldThread })).rejects.toThrow(
+      "indisponível",
+    );
+    await send("trabalhe na nova pasta");
+    await complete();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const start = calls.filter((call) => call.method === "thread/start").at(-1)!;
+    expect(start.params.runtimeWorkspaceRoots).toEqual([other]);
+    expect(start.params.config).toMatchObject({ sandbox_workspace_write: { writable_roots: [] } });
+    expect(start.params.dynamicTools).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "windows_desktop" })]),
+    );
+    expect(start.params.developerInstructions).toContain(JSON.stringify(other));
+    expect(start.params.developerInstructions).not.toContain(
+      `Pasta de trabalho selecionada: ${JSON.stringify(dir)}.`,
+    );
+  });
+  it("cancelamento ou seleção inválida preservam a pasta, modo e histórico ativos", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await send("analise");
+    await complete();
+    const before = service.snapshot();
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    selectProject.mockResolvedValueOnce(resolve(dir, "não existe"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    expect(service.snapshot().project).toEqual(before.project);
+    expect(service.snapshot().threadId).toBe(before.threadId);
+    expect(service.snapshot().mode).toBe("read");
+    expect(service.snapshot().items).toEqual(before.items);
+  });
   it("abre aplicação local no navegador integrado após consentimento, com desktop autorizado", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });

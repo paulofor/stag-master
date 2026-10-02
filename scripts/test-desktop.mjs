@@ -64,8 +64,13 @@ try {
       global.externalUrls.push(url);
     };
   }, project);
+  await page.getByLabel("Acesso", { exact: true }).selectOption("read");
   await page.getByRole("button", { name: "Selecionar projeto", exact: true }).click();
   await expect(page.getByRole("button", { name: "projeto-fixture", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("project");
+  await expect(page.getByLabel("Acesso", { exact: true }).locator("option:checked")).toHaveText(
+    "Projeto · leitura e escrita",
+  );
   const rejected = await page.evaluate(async () => {
     try {
       await window.stag.request({ type: "openLink", url: "javascript:alert(1)" });

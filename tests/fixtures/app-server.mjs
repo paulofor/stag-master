@@ -28,6 +28,17 @@ const notify = (method, params) => send({ method, params });
 const reply = (id, result) => send({ id, result });
 const failure = (id, message) => send({ id, error: { code: -32601, message } });
 
+function validWorkspacePolicy(params, sandbox = params.sandbox) {
+  const roots = params.config?.sandbox_workspace_write?.writable_roots;
+  return (
+    params.cwd &&
+    params.approvalPolicy === "on-request" &&
+    ["read-only", "workspace-write", "danger-full-access"].includes(sandbox) &&
+    JSON.stringify(params.runtimeWorkspaceRoots) === JSON.stringify([params.cwd]) &&
+    JSON.stringify(roots) === JSON.stringify([])
+  );
+}
+
 function finish(thread, turn, status = "completed", error) {
   turn.status = status;
   turn.error = error || null;
@@ -216,17 +227,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
       break;
     case "thread/start": {
-      if (
-        !p.cwd ||
-        p.approvalPolicy !== "on-request" ||
-        !["read-only", "workspace-write", "danger-full-access"].includes(p.sandbox)
-      ) {
+      if (!validWorkspacePolicy(p)) {
         failure(id, "Invalid thread policy");
         break;
       }
       const thread = {
         id: `fixture-thread-${++count}`,
         cwd: p.cwd,
+        sandbox: p.sandbox,
         turns: [],
         updatedAt: 100,
         preview: "",
@@ -242,6 +250,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "thread/resume": {
       const thread = threads.get(p.threadId);
       if (!thread) failure(id, "Missing thread");
+      else if (p.sandbox !== thread.sandbox || !validWorkspacePolicy(p))
+        failure(id, "Invalid resumed workspace policy");
       else {
         if (p.developerInstructions !== undefined)
           thread.developerInstructions = p.developerInstructions;
@@ -257,6 +267,22 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       const thread = threads.get(p.threadId);
       if (!thread) {
         failure(id, "Missing thread");
+        break;
+      }
+      const expectedType = {
+        "read-only": "readOnly",
+        "workspace-write": "workspaceWrite",
+        "danger-full-access": "dangerFullAccess",
+      }[thread.sandbox];
+      if (
+        p.cwd !== thread.cwd ||
+        p.approvalPolicy !== "on-request" ||
+        JSON.stringify(p.runtimeWorkspaceRoots) !== JSON.stringify([thread.cwd]) ||
+        p.sandboxPolicy?.type !== expectedType ||
+        (expectedType === "workspaceWrite" &&
+          JSON.stringify(p.sandboxPolicy.writableRoots) !== JSON.stringify([thread.cwd]))
+      ) {
+        failure(id, "Invalid turn workspace policy");
         break;
       }
       const input = p.input[0].text;

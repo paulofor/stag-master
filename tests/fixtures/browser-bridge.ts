@@ -56,6 +56,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             case "selectProject":
               state.project = { path: "C:\\Projetos\\exemplo", name: "exemplo" };
+              state.mode = "project";
+              state.threadId = null;
+              state.items = [];
+              state.plan = [];
+              state.diff = "";
+              state.browser.authorized = false;
+              state.browser.url = "";
               break;
             case "preferences":
               if (action.mode) {
