@@ -16,16 +16,31 @@ export async function buildBrowserHarness(dir) {
 
 export async function validateBrowser(application, dir, site) {
   const initialSubmissions = site.effects.submissions;
-  await application.evaluate(({ BrowserWindow }) => {
+  const oversizedRejected = await application.evaluate(async ({ BrowserWindow }) => {
     const host = new BrowserWindow({
-      width: 900,
-      height: 800,
+      width: 640,
+      height: 600,
       show: true,
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
+    await host.loadURL("about:blank");
     global.browserHarness = { host, browser: new global.BrowserHarnessDriver(host) };
-    global.browserHarness.browser.setBounds({ x: 0, y: 0, width: 850, height: 700 });
+    const [width, height] = host.getContentSize();
+    let rejected = false;
+    try {
+      global.browserHarness.browser.setBounds({ x: 0, y: 0, width: width + 10, height });
+    } catch {
+      rejected = true;
+    }
+    global.browserHarness.browser.setBounds({
+      x: 0,
+      y: 0,
+      width: Math.min(850, width),
+      height: Math.min(700, height),
+    });
+    return rejected;
   });
+  assert.ok(oversizedRejected, "O navegador deve permanecer dentro da área útil da janela.");
   const execute = (args) =>
     application.evaluate(
       async (_electron, input) => global.browserHarness.browser.execute(input),
