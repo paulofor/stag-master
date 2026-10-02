@@ -11,6 +11,7 @@ Aplicação Windows local. Preserve o painel único de conversa da referência: 
 - Renderer sem Node, com CSP, sandbox e preload restrito. Valide entradas e origem IPC no main. Markdown nunca executa HTML ou imagens remotas.
 - Ferramentas do Windows só no modo Windows, sempre com aprovação específica, argumentos validados e processo sem shell interpolado. Não mude a política de acesso ao retomar histórico.
 - Testes usam App Server determinístico e CODEX_HOME temporário. Nunca execute teste com as credenciais, repositório ou janelas de trabalho do usuário.
+- Testes de timeout iniciam o subprocesso com o prazo normal e avançam um relógio controlado só após o handshake. Não imponha deadlines de milissegundos à inicialização do processo. Aguarde o shutdown nas limpezas.
 
 ## Validação e entrega
 

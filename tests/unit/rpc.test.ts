@@ -1,16 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolve } from "node:path";
 import { RpcClient } from "../../src/main/rpc";
 
 const clients: RpcClient[] = [];
-afterEach(() => {
-  clients.forEach((c) => c.close());
+afterEach(async () => {
+  vi.useRealTimers();
+  await Promise.all(clients.map((c) => c.shutdown()));
   clients.length = 0;
 });
-async function client(timeout = 1000) {
+const requestTimeout = 30000;
+async function client() {
   const rpc = new RpcClient(
     { command: process.execPath, args: [resolve("tests/fixtures/app-server.mjs")] },
-    timeout,
+    requestTimeout,
   );
   clients.push(rpc);
   await rpc.start();
@@ -37,9 +39,16 @@ describe("JSONL bidirecional", () => {
     await expect(rpc.call("_fixture/malformed")).rejects.toThrow("inválida");
   });
   it("limita o tempo de espera sem repetir a operação", async () => {
-    const rpc = await client(100);
-    await expect(rpc.call("_fixture/timeout")).rejects.toThrow("demorou");
+    const rpc = await client();
+    // The handshake uses real time; only the unanswered request uses a controlled clock.
+    vi.useFakeTimers();
+    const timedOut = expect(rpc.call("_fixture/timeout")).rejects.toThrow("demorou");
+    await vi.advanceTimersByTimeAsync(requestTimeout);
+    await timedOut;
+    vi.useRealTimers();
     expect(await rpc.call("account/read")).toHaveProperty("account", null);
+    const calls = await rpc.call<{ method?: string }[]>("_fixture/readCalls");
+    expect(calls.filter((call) => call.method === "_fixture/timeout")).toHaveLength(1);
   });
   it("entrega erro RPC como falha", async () => {
     const rpc = await client();
