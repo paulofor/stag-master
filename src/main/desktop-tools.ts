@@ -5,14 +5,15 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Approval } from "../shared/types";
 
 const executeFile = promisify(execFile);
+const targetProcess = z.number().int().positive();
 const interactionContext = {
   risk: z.enum(["routine", "critical"]).optional(),
   intent: z.string().trim().min(1).max(500).optional(),
 };
 export const desktopArguments = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list_windows") }).strict(),
-  z.object({ action: z.literal("screenshot") }).strict(),
-  z.object({ action: z.literal("focus_window"), processId: z.number().int().positive() }).strict(),
+  z.object({ action: z.literal("screenshot"), processId: targetProcess }).strict(),
+  z.object({ action: z.literal("focus_window"), processId: targetProcess }).strict(),
   z
     .object({
       action: z.literal("send_keys"),
@@ -32,6 +33,7 @@ export const desktopArguments = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("click"),
+      processId: targetProcess,
       x: z.number().int().min(-30000).max(30000),
       y: z.number().int().min(-30000).max(30000),
       button: z.enum(["left", "right", "middle"]).optional(),
@@ -42,6 +44,7 @@ export const desktopArguments = z.discriminatedUnion("action", [
   z
     .object({
       action: z.literal("scroll"),
+      processId: targetProcess,
       x: z.number().int().min(-30000).max(30000),
       y: z.number().int().min(-30000).max(30000),
       delta: z
@@ -62,7 +65,7 @@ export const desktopTool = {
   type: "function",
   name: "windows_desktop",
   description:
-    "Controla aplicativos nativos no desktop Windows após autorização da conversa. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado.",
+    "Controla exclusivamente Postman, IntelliJ IDEA e Visual Studio Code no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado.",
   inputSchema: {
     type: "object",
     properties: {
@@ -81,7 +84,8 @@ export const desktopTool = {
       processId: {
         type: "integer",
         minimum: 1,
-        description: "Obrigatório para foco, texto e atalhos; obtido em list_windows.",
+        description:
+          "Obrigatório em toda ação exceto list_windows. Processo permitido obtido em list_windows; validado novamente antes da execução.",
       },
       keys: { type: "string", description: "Obrigatório para send_keys; sintaxe SendKeys .NET." },
       text: {
@@ -126,6 +130,7 @@ export const desktopTool = {
       },
     },
     required: ["action"],
+    anyOf: [{ properties: { action: { const: "list_windows" } } }, { required: ["processId"] }],
     additionalProperties: false,
   },
 };
@@ -168,9 +173,9 @@ export function desktopApproval(input: DesktopArguments): Pick<Approval, "title"
 function desktopOperationDetail(input: DesktopArguments): string {
   switch (input.action) {
     case "list_windows":
-      return "Listar títulos e processos das janelas abertas.";
+      return "Listar somente janelas de Postman, IntelliJ IDEA e Visual Studio Code.";
     case "screenshot":
-      return "Capturar a tela principal.";
+      return `Capturar somente a janela do processo ${input.processId}.`;
     case "focus_window":
       return `Trazer a janela do processo ${input.processId} para frente.`;
     case "send_keys":
@@ -178,9 +183,9 @@ function desktopOperationDetail(input: DesktopArguments): string {
     case "type_text":
       return `Processo: ${input.processId}\nTexto literal:\n${input.text}`;
     case "click":
-      return `Posição física: x=${input.x}, y=${input.y}\nBotão: ${{ left: "esquerdo", right: "direito", middle: "meio" }[input.button || "left"]}\nCliques: ${input.clicks || 1}`;
+      return `Processo: ${input.processId}\nPosição física: x=${input.x}, y=${input.y}\nBotão: ${{ left: "esquerdo", right: "direito", middle: "meio" }[input.button || "left"]}\nCliques: ${input.clicks || 1}`;
     case "scroll":
-      return `Posição física: x=${input.x}, y=${input.y}\nRoda: ${input.delta} (${input.delta > 0 ? "para cima" : "para baixo"})`;
+      return `Processo: ${input.processId}\nPosição física: x=${input.x}, y=${input.y}\nRoda: ${input.delta} (${input.delta > 0 ? "para cima" : "para baixo"})`;
   }
 }
 
@@ -221,14 +226,12 @@ export function windowsPowerShellEnvironment(
 export class DesktopTools {
   constructor(
     private script: string,
-    private capture: () => Promise<ToolResult>,
     private platform = process.platform,
   ) {}
   async execute(raw: unknown): Promise<ToolResult> {
     const input = desktopArguments.parse(raw);
     if (this.platform !== "win32")
       throw new Error("Controle de desktop disponível somente no Windows.");
-    if (input.action === "screenshot") return this.capture();
     // JSON goes through stdin, never interpolated in shell or PowerShell code.
     const encoded = Buffer.from(JSON.stringify(input), "utf8").toString("base64");
     const invocation = executeFile(
@@ -238,7 +241,7 @@ export class DesktopTools {
       {
         windowsHide: true,
         timeout: 15000,
-        maxBuffer: 1024 * 1024,
+        maxBuffer: 16 * 1024 * 1024,
         env: windowsPowerShellEnvironment(),
       },
     );
@@ -261,7 +264,43 @@ export class DesktopTools {
           { cause: error },
         );
       }
+      if (/STAG_DESKTOP_DENIED/.test(detail)) {
+        throw new Error(
+          "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
+          { cause: error },
+        );
+      }
       throw error;
+    }
+    if (input.action === "screenshot") {
+      const capture = z
+        .object({
+          processId: targetProcess,
+          bounds: z.object({
+            x: z.number().int(),
+            y: z.number().int(),
+            width: z.number().int().positive().max(8192),
+            height: z.number().int().positive().max(8192),
+          }),
+          imageBase64: z
+            .string()
+            .min(1)
+            .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+        })
+        .parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
+      if (capture.processId !== input.processId)
+        throw new Error("A captura não pertence ao processo solicitado.");
+      const { x, y, width, height } = capture.bounds;
+      return {
+        success: true,
+        contentItems: [
+          {
+            type: "inputText",
+            text: `Janela do processo ${capture.processId}: ${width}×${height} pixels. Origem física: x=${x}, y=${y}. Para clicar/rolar, some a origem às coordenadas na imagem e use processId=${capture.processId}. Somente Postman, IntelliJ IDEA e Visual Studio Code são permitidos.`,
+          },
+          { type: "inputImage", imageUrl: `data:image/png;base64,${capture.imageBase64}` },
+        ],
+      };
     }
     return {
       success: true,

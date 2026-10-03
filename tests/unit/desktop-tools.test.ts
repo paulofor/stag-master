@@ -32,10 +32,17 @@ afterEach(() => vi.unstubAllEnvs());
 describe("confirmação pelo efeito da interação", () => {
   it.each<DesktopArguments>([
     { action: "list_windows" },
-    { action: "screenshot" },
+    { action: "screenshot", processId: 4242 },
     { action: "focus_window", processId: 4242 },
-    { action: "scroll", x: 120, y: 180, delta: -120 },
-    { action: "click", x: 120, y: 180, risk: "routine", intent: "Abrir aba do editor" },
+    { action: "scroll", processId: 4242, x: 120, y: 180, delta: -120 },
+    {
+      action: "click",
+      processId: 4242,
+      x: 120,
+      y: 180,
+      risk: "routine",
+      intent: "Abrir aba do editor",
+    },
     {
       action: "type_text",
       processId: 4242,
@@ -61,10 +68,17 @@ describe("confirmação pelo efeito da interação", () => {
     expect(desktopConfirmationReason(desktopArguments.parse(input))).toBeNull();
   });
   it.each<DesktopArguments>([
-    { action: "click", x: 120, y: 180 },
-    { action: "click", x: 120, y: 180, risk: "routine" },
-    { action: "click", x: 120, y: 180, intent: "Abrir editor" },
-    { action: "click", x: 120, y: 180, risk: "critical", intent: "Excluir arquivo" },
+    { action: "click", processId: 4242, x: 120, y: 180 },
+    { action: "click", processId: 4242, x: 120, y: 180, risk: "routine" },
+    { action: "click", processId: 4242, x: 120, y: 180, intent: "Abrir editor" },
+    {
+      action: "click",
+      processId: 4242,
+      x: 120,
+      y: 180,
+      risk: "critical",
+      intent: "Excluir arquivo",
+    },
     { action: "send_keys", processId: 4242, keys: "^s", risk: "critical", intent: "Salvar senha" },
     {
       action: "type_text",
@@ -111,10 +125,10 @@ describe("confirmação pelo efeito da interação", () => {
     },
   );
   it.each([
-    { action: "click", x: 0, y: 0, risk: "unknown", intent: "Abrir editor" },
-    { action: "click", x: 0, y: 0, risk: "routine", intent: "  " },
-    { action: "click", x: 0, y: 0, risk: "routine", intent: "x".repeat(501) },
-    { action: "screenshot", risk: "routine", intent: "Capturar" },
+    { action: "click", processId: 4242, x: 0, y: 0, risk: "unknown", intent: "Abrir editor" },
+    { action: "click", processId: 4242, x: 0, y: 0, risk: "routine", intent: "  " },
+    { action: "click", processId: 4242, x: 0, y: 0, risk: "routine", intent: "x".repeat(501) },
+    { action: "screenshot", processId: 4242, risk: "routine", intent: "Capturar" },
   ])("recusa classificação inválida ou metadados em operação sem contexto: %j", (input) => {
     expect(desktopArguments.safeParse(input).success).toBe(false);
   });
@@ -126,11 +140,11 @@ describe("driver de desktop com processo simulado", () => {
     { action: "focus_window", processId: 4242 },
     { action: "send_keys", processId: 4242, keys: "^s" },
     { action: "type_text", processId: 4242, text: "Texto + ^ % {x}; $(dummy); `literal`" },
-    { action: "click", x: -100, y: 120, button: "right", clicks: 2 },
-    { action: "scroll", x: 10, y: 20, delta: -240 },
+    { action: "click", processId: 4242, x: -100, y: 120, button: "right", clicks: 2 },
+    { action: "scroll", processId: 4242, x: 10, y: 20, delta: -240 },
   ];
   it.each(inputs)("executa $action com argumentos fixos e dados apenas em stdin", async (input) => {
-    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", async () => result, "win32");
+    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", "win32");
     await expect(tools.execute(input)).resolves.toEqual(result);
     expect(runScript).toHaveBeenCalledOnce();
     const [command, args, options] = runScript.mock.calls[0];
@@ -147,23 +161,86 @@ describe("driver de desktop com processo simulado", () => {
       windowsHide: options.windowsHide,
       timeout: options.timeout,
       maxBuffer: options.maxBuffer,
-    }).toEqual({ windowsHide: true, timeout: 15000, maxBuffer: 1024 * 1024 });
+    }).toEqual({ windowsHide: true, timeout: 15000, maxBuffer: 16 * 1024 * 1024 });
     expect(Object.keys(options.env).map((key) => key.toUpperCase())).not.toContain("PSMODULEPATH");
     expect(options.env.PSExecutionPolicyPreference).toBe("Restricted");
     expect(process.env.PSModulePath).toBe("C:\\Program Files\\PowerShell\\7\\Modules");
     const encoded = stdin.end.mock.calls[0][0];
     expect(JSON.parse(Buffer.from(encoded, "base64").toString("utf8"))).toEqual(input);
   });
-  it("captura imagem sem iniciar PowerShell", async () => {
-    const image: ToolResult = {
-      success: true,
-      contentItems: [{ type: "inputImage", imageUrl: "data:image/png;base64,SYNTHETIC" }],
-    };
-    const capture = vi.fn(async () => image);
-    const tools = new DesktopTools("unused", capture, "win32");
-    await expect(tools.execute({ action: "screenshot" })).resolves.toEqual(image);
-    expect(capture).toHaveBeenCalledOnce();
-    expect(runScript).not.toHaveBeenCalled();
+  it("captura somente a janela validada pelo driver e informa sua origem física", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.resolve({
+          stdout: JSON.stringify({
+            processId: 4242,
+            bounds: { x: -200, y: 20, width: 800, height: 600 },
+            imageBase64: "aW1hZ2VtLXNpbnRldGljYQ==",
+          }),
+        }),
+        { child: { stdin } },
+      ),
+    );
+    const tools = new DesktopTools("unused", "win32");
+    const capture = await tools.execute({ action: "screenshot", processId: 4242 });
+    expect(capture.success).toBe(true);
+    expect(capture.contentItems[0]).toMatchObject({
+      type: "inputText",
+      text: expect.stringContaining("x=-200, y=20"),
+    });
+    expect(capture.contentItems[1]).toEqual({
+      type: "inputImage",
+      imageUrl: "data:image/png;base64,aW1hZ2VtLXNpbnRldGljYQ==",
+    });
+    expect(runScript).toHaveBeenCalledOnce();
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      action: "screenshot",
+      processId: 4242,
+    });
+  });
+  it.each([
+    { processId: 9001, bounds: { x: 0, y: 0, width: 800, height: 600 }, imageBase64: "aW1hZ2Vt" },
+    { processId: 4242, bounds: { x: 0, y: 0, width: 0, height: 600 }, imageBase64: "aW1hZ2Vt" },
+    { processId: 4242, bounds: { x: 0, y: 0, width: 9000, height: 600 }, imageBase64: "aW1hZ2Vt" },
+    {
+      processId: 4242,
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+      imageBase64: "https://fixture.invalid/image",
+    },
+  ])("não retorna imagem com alvo/dimensões/conteúdo inválidos", async (capture) => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: JSON.stringify(capture) }), { child: { stdin } }),
+    );
+    await expect(
+      new DesktopTools("unused", "win32").execute({ action: "screenshot", processId: 4242 }),
+    ).rejects.toThrow();
+  });
+  it.each(["screenshot", "click", "scroll"])(
+    "recusa %s sem processo alvo antes de executar",
+    async (action) => {
+      await expect(
+        new DesktopTools("unused", "win32").execute({ action, x: 10, y: 20, delta: 120 }),
+      ).rejects.toThrow();
+      expect(runScript).not.toHaveBeenCalled();
+    },
+  );
+  it("explica bloqueio de aplicativo sem tentativa alternativa e permite recuperação", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.reject(
+          Object.assign(new Error("denied"), { stderr: "STAG_DESKTOP_DENIED: synthetic target" }),
+        ),
+        { child: { stdin } },
+      ),
+    );
+    const tools = new DesktopTools("unused", "win32");
+    await expect(tools.execute({ action: "focus_window", processId: 9001 })).rejects.toThrow(
+      "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code",
+    );
+    expect(runScript).toHaveBeenCalledOnce();
+    await expect(tools.execute({ action: "focus_window", processId: 4242 })).resolves.toEqual(
+      result,
+    );
   });
   it.each([
     "CategoryInfo : SecurityError: (:) [], PSSecurityException",
@@ -179,7 +256,7 @@ describe("driver de desktop com processo simulado", () => {
     runScript.mockImplementationOnce(() =>
       Object.assign(Promise.reject(failure), { child: { stdin } }),
     );
-    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", async () => result, "win32");
+    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", "win32");
     await expect(tools.execute({ action: "list_windows" })).rejects.toThrow("política de execução");
     expect(runScript).toHaveBeenCalledOnce();
     await expect(tools.execute({ action: "list_windows" })).resolves.toEqual(result);
@@ -192,25 +269,24 @@ describe("driver de desktop com processo simulado", () => {
     runScript.mockImplementationOnce(() =>
       Object.assign(Promise.reject(failure), { child: { stdin } }),
     );
-    const tools = new DesktopTools("unused", async () => result, "win32");
+    const tools = new DesktopTools("unused", "win32");
     await expect(tools.execute({ action: "list_windows" })).rejects.toBe(failure);
     expect(runScript).toHaveBeenCalledOnce();
   });
   it("não executa input inválido ou plataforma não Windows", async () => {
-    const capture = vi.fn(async () => result);
     await expect(
-      new DesktopTools("unused", capture, "win32").execute({
+      new DesktopTools("unused", "win32").execute({
         action: "click",
+        processId: 4242,
         x: 0,
         y: 0,
         clicks: 3,
       }),
     ).rejects.toThrow();
     await expect(
-      new DesktopTools("unused", capture, "linux").execute({ action: "screenshot" }),
+      new DesktopTools("unused", "linux").execute({ action: "screenshot", processId: 4242 }),
     ).rejects.toThrow("Windows");
     expect(runScript).not.toHaveBeenCalled();
-    expect(capture).not.toHaveBeenCalled();
   });
 });
 

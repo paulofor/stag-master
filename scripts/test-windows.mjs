@@ -78,10 +78,7 @@ try {
     /UnauthorizedAccess|PSSecurityException/,
     "Sem política de processo, o script deve ser bloqueado.",
   );
-  const noCapture = async () => {
-    throw new Error("Captura não permitida neste teste.");
-  };
-  const driver = new DesktopTools(fixture, noCapture);
+  const driver = new DesktopTools(fixture);
   for (const args of [
     { action: "list_windows" },
     {
@@ -113,7 +110,7 @@ try {
     console.log(
       "Windows: conferir list_windows pelo script empacotado, sem mouse/teclado/captura.",
     );
-    const result = await new DesktopTools(script, noCapture).execute({ action: "list_windows" });
+    const result = await new DesktopTools(script).execute({ action: "list_windows" });
     assert.ok(Array.isArray(JSON.parse(result.contentItems[0].text)));
   }
   console.log(

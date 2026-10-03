@@ -7,6 +7,18 @@ if ($parseErrors.Count -gt 0) {
     $parseErrors | ForEach-Object { Write-Error $_ }
     exit 1
 }
+# Compile the production native type without invoking any Windows API. Synthetic dispatch tests
+# replace that type, so compilation must be checked separately as well.
+$nativeDefinition = $ast.Find({ param($node)
+    $node -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+    $node.Value.Contains('public static class StagWindow')
+}, $true)
+if ($null -eq $nativeDefinition) { throw 'Native window type missing.' }
+$references = @('System', 'System.Drawing')
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    $references += @('System.Drawing.Common', 'System.Drawing.Primitives', 'System.Runtime', 'System.ComponentModel.Primitives', 'System.Private.Windows.GdiPlus', 'System.Private.Windows.Core')
+}
+Add-Type -TypeDefinition $nativeDefinition.Value -ReferencedAssemblies $references
 # Execute only the pure escaping function extracted from the parsed, versioned script.
 # No user32, windows, cursor, keyboard or screenshot is touched by these assertions.
 $literalFunction = $ast.Find({ param($node)
@@ -23,4 +35,4 @@ if ((ConvertTo-StagLiteralKeys "line1`r`nline2`t3") -cne 'line1{ENTER}line2{TAB}
 if ((ConvertTo-StagLiteralKeys '{ENTER}') -cne '{{}ENTER{}}') {
     throw 'Literal key tokens were interpreted as shortcuts.'
 }
-Write-Output 'PowerShell parser and literal text contracts OK; no desktop automation executed.'
+Write-Output 'PowerShell parser, native C# compilation and literal text contracts OK; no desktop automation executed.'

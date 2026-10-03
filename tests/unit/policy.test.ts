@@ -3,6 +3,26 @@ import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/
 import { browserTool } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
 
+describe("contrato do desktop limitado", () => {
+  it("informa a lista em todos os estados e proíbe contorno mesmo após aprovação", () => {
+    for (const mode of ["read", "project", "windows"] as const) {
+      const instructions = assistantInstructions(mode, "win32", false, true);
+      expect(instructions).toContain(
+        "restrito exclusivamente a Postman, IntelliJ IDEA e Visual Studio Code",
+      );
+      expect(instructions).toContain("não é ampliada por confirmação crítica");
+      expect(instructions).toContain("terminal de IDE, scripts, bibliotecas ou outra automação");
+      expect(instructions).toContain("nunca da tela inteira");
+      expect(instructions).toContain("incluindo screenshot, click e scroll");
+    }
+    expect(desktopTool.description).toContain(
+      "Controla exclusivamente Postman, IntelliJ IDEA e Visual Studio Code",
+    );
+    expect(desktopTool.description).toContain("mesmo após aprovação");
+    expect(desktopTool.inputSchema.anyOf).toContainEqual({ required: ["processId"] });
+  });
+});
+
 describe("autorização da pasta de trabalho", () => {
   const path = "C:\\Projetos\\projeto com espaço\\ação";
   it("explicita a raiz escolhida em start/resume e turn sem liberar todo o computador", () => {

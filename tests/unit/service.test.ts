@@ -681,10 +681,11 @@ describe("fluxo local do assistente", () => {
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
     const expected: DesktopArguments[] = [
       { action: "list_windows" },
-      { action: "screenshot" },
+      { action: "screenshot", processId: 4242 },
       { action: "focus_window", processId: 4242 },
       {
         action: "click",
+        processId: 4242,
         x: 120,
         y: 180,
         button: "left",
@@ -706,8 +707,8 @@ describe("fluxo local do assistente", () => {
         risk: "routine",
         intent: "Salvar arquivo local",
       },
-      { action: "scroll", x: 120, y: 180, delta: -240 },
-      { action: "screenshot" },
+      { action: "scroll", processId: 4242, x: 120, y: 180, delta: -240 },
+      { action: "screenshot", processId: 4242 },
     ];
     desktop.execute.mockImplementation(async (raw) => ({
       success: true,
@@ -728,17 +729,22 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
     expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_SCREEN");
   });
-  it.each(["inválido", "risco inválido", "namespace", "outro turno", "outro thread", "sem turno"])(
-    "recusa request desktop %s e libera o agente",
-    async (probe) => {
-      await ready();
-      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-      await send(`desktop ${probe}`);
-      await complete();
-      expect(desktop.execute).not.toHaveBeenCalled();
-      expect(service.snapshot().approvals).toEqual([]);
-    },
-  );
+  it.each([
+    "inválido",
+    "risco inválido",
+    "namespace",
+    "outro turno",
+    "outro thread",
+    "sem turno",
+    "sem alvo",
+  ])("recusa request desktop %s e libera o agente", async (probe) => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send(`desktop ${probe}`);
+    await complete();
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().approvals).toEqual([]);
+  });
   it.each([
     "Excluir arquivo do cliente",
     "Enviar mensagem externa",
@@ -855,6 +861,7 @@ describe("fluxo local do assistente", () => {
   it.each([
     "Janela de teste indisponível.",
     "O Windows bloqueou o script de controle do STAG por uma política de execução.",
+    "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code. O alvo mudou.",
   ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
@@ -875,6 +882,26 @@ describe("fluxo local do assistente", () => {
     await approve(true);
     expect(desktop.execute).toHaveBeenCalledTimes(2);
     expect(service.snapshot().error).toBeNull();
+  });
+  it("start e resume conservam a lista fixa, sem ampliar a política do histórico", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop sequência");
+    await complete();
+    const initialCalls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const start = initialCalls.find((call) => call.method === "thread/start")!;
+    await service.request({ type: "connect" });
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const resume = calls.find((call) => call.method === "thread/resume")!;
+    for (const call of [start, resume]) {
+      expect(call.params.developerInstructions).toContain(
+        "restrito exclusivamente a Postman, IntelliJ IDEA e Visual Studio Code",
+      );
+      expect(call.params.developerInstructions).toContain("não é ampliada por confirmação crítica");
+      expect(call.params.sandbox).toBe("danger-full-access");
+    }
   });
   it("interromper descarta aprovação e decisão repetida não executa duas vezes", async () => {
     await ready();

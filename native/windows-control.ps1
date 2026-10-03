@@ -4,10 +4,16 @@ $ErrorActionPreference = 'Stop'
 $InputBase64 = [Console]::In.ReadToEnd()
 $request = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($InputBase64)) | ConvertFrom-Json
 
-Add-Type @'
+Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System,System.Drawing @'
 using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 public static class StagWindow {
+    [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -15,19 +21,104 @@ public static class StagWindow {
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hWnd, out Rect rect);
+    [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
+    public static uint WindowProcessId(IntPtr window) {
+        uint processId;
+        GetWindowThreadProcessId(window, out processId);
+        return processId;
+    }
+    public static IntPtr WindowAt(int x, int y) { return WindowFromPoint(new Point { X = x, Y = y }); }
+    public static int[] Bounds(IntPtr window) {
+        Rect rect;
+        if (!GetWindowRect(window, out rect)) throw new Exception("STAG_DESKTOP_DENIED: Window unavailable.");
+        return new int[] { rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top };
+    }
+    public static string Capture(IntPtr window) {
+        int[] bounds = Bounds(window);
+        if (bounds[2] <= 0 || bounds[3] <= 0 || bounds[2] > 8192 || bounds[3] > 8192 ||
+            (long)bounds[2] * bounds[3] > 33554432) throw new Exception("STAG_DESKTOP_DENIED: Invalid window dimensions.");
+        // Print only this window. Never copy screen pixels, which could include another application.
+        using (Bitmap image = new Bitmap(bounds[2], bounds[3]))
+        using (Graphics graphics = Graphics.FromImage(image)) {
+            IntPtr hdc = graphics.GetHdc();
+            bool printed;
+            try { printed = PrintWindow(window, hdc, 2); }
+            finally { graphics.ReleaseHdc(hdc); }
+            if (!printed) throw new Exception("Window capture failed; no desktop fallback.");
+            using (MemoryStream stream = new MemoryStream()) {
+                image.Save(stream, ImageFormat.Png);
+                return Convert.ToBase64String(stream.ToArray());
+            }
+        }
+    }
 }
 '@
 [void][StagWindow]::SetProcessDPIAware()
 
-function Focus-StagWindow([int]$processId) {
-    $targetProcess = Get-Process -Id $processId
-    if ($targetProcess.MainWindowHandle -eq 0) { throw 'Processo sem janela visivel.' }
-    [void][StagWindow]::ShowWindow($targetProcess.MainWindowHandle, 9)
-    [void][StagWindow]::SetForegroundWindow($targetProcess.MainWindowHandle)
-    Start-Sleep -Milliseconds 150
-    if ([StagWindow]::GetForegroundWindow() -ne $targetProcess.MainWindowHandle) {
-        throw 'O Windows impediu o foco; nenhuma tecla foi enviada.'
+function Get-StagAllowedProcess([int]$processId) {
+    try { $target = Get-Process -Id $processId -ErrorAction Stop }
+    catch { throw 'STAG_DESKTOP_DENIED: O processo nao esta disponivel; liste as janelas novamente.' }
+    $name = [string]$target.ProcessName
+    switch ($name.ToLowerInvariant()) {
+        'postman' { $product = '^Postman$'; $publisher = '^Postman,? Inc\.?$' }
+        'idea64' { $product = '^IntelliJ IDEA(?: (?:Community|Ultimate) Edition)?$'; $publisher = '^JetBrains s\.r\.o\.?$' }
+        'idea' { $product = '^IntelliJ IDEA(?: (?:Community|Ultimate) Edition)?$'; $publisher = '^JetBrains s\.r\.o\.?$' }
+        'code' { $product = '^(?:Microsoft )?Visual Studio Code$'; $publisher = '^Microsoft Corporation$' }
+        default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA e Visual Studio Code.' }
     }
+    # A title, renamed executable or model-provided name cannot grant access.
+    if (-not $target.Path -or [IO.Path]::GetFileName($target.Path) -ine ($name + '.exe') -or
+        $target.MainWindowHandle -eq 0 -or -not [StagWindow]::IsWindowVisible($target.MainWindowHandle) -or
+        [StagWindow]::WindowProcessId($target.MainWindowHandle) -ne $processId -or
+        [string]$target.FileVersionInfo.ProductName -notmatch $product) {
+        throw 'STAG_DESKTOP_DENIED: Executavel ou janela nao reconhecidos.'
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $target.Path
+    if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -notmatch $publisher) {
+        throw 'STAG_DESKTOP_DENIED: Assinatura do fornecedor nao reconhecida.'
+    }
+    return $target
+}
+
+function Assert-StagWindow($target, [IntPtr]$window) {
+    try { $current = Get-Process -Id $target.Id -ErrorAction Stop }
+    catch { throw 'STAG_DESKTOP_DENIED: O processo encerrou durante a acao.' }
+    if ($current.StartTime -ne $target.StartTime -or $current.Path -ine $target.Path -or
+        $window -eq [IntPtr]::Zero -or -not [StagWindow]::IsWindowVisible($window) -or
+        [StagWindow]::WindowProcessId($window) -ne $target.Id) {
+        throw 'STAG_DESKTOP_DENIED: A janela ou processo mudou durante a acao.'
+    }
+}
+
+function Assert-StagForeground($target) {
+    Assert-StagWindow $target ([StagWindow]::GetForegroundWindow())
+}
+
+function Focus-StagWindow($target, [IntPtr]$window) {
+    Assert-StagWindow $target $window
+    [void][StagWindow]::ShowWindow($window, 9)
+    [void][StagWindow]::SetForegroundWindow($window)
+    Start-Sleep -Milliseconds 150
+    if ([StagWindow]::GetForegroundWindow() -ne $window) {
+        throw 'STAG_DESKTOP_DENIED: O Windows impediu o foco; nenhuma tecla foi enviada.'
+    }
+    Assert-StagForeground $target
+}
+
+function Get-StagCoordinateWindow($target, [int]$x, [int]$y) {
+    $window = [StagWindow]::GetAncestor([StagWindow]::WindowAt($x, $y), 2)
+    Assert-StagWindow $target $window
+    $bounds = [StagWindow]::Bounds($window)
+    if ($x -lt $bounds[0] -or $y -lt $bounds[1] -or $x -ge ($bounds[0] + $bounds[2]) -or $y -ge ($bounds[1] + $bounds[3])) {
+        throw 'STAG_DESKTOP_DENIED: Coordenadas fora da janela autorizada.'
+    }
+    return $window
 }
 
 function Move-StagCursor([int]$x, [int]$y) {
@@ -48,26 +139,60 @@ function ConvertTo-StagLiteralKeys([string]$text) {
     return $literal.Replace("`t", '{TAB}')
 }
 
+if ($request.action -ne 'list_windows') {
+    if (-not $request.processId -or [int]$request.processId -le 0) { throw 'STAG_DESKTOP_DENIED: processId obrigatorio.' }
+    $target = Get-StagAllowedProcess ([int]$request.processId)
+}
+
 switch ($request.action) {
     'list_windows' {
-        $windows = @(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } |
-            Select-Object @{Name='processId';Expression={$_.Id}}, @{Name='title';Expression={$_.MainWindowTitle}}, @{Name='process';Expression={$_.ProcessName}})
+        $windows = @(foreach ($candidate in (Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle })) {
+            try {
+                $allowed = Get-StagAllowedProcess $candidate.Id
+                [pscustomobject]@{ processId = $allowed.Id; title = $allowed.MainWindowTitle; process = $allowed.ProcessName }
+            } catch { continue }
+        })
         ConvertTo-Json -InputObject $windows -Compress
     }
+    'screenshot' {
+        Assert-StagWindow $target $target.MainWindowHandle
+        $before = [StagWindow]::Bounds($target.MainWindowHandle)
+        $image = [StagWindow]::Capture($target.MainWindowHandle)
+        Assert-StagWindow $target $target.MainWindowHandle
+        $after = [StagWindow]::Bounds($target.MainWindowHandle)
+        if (($before -join ',') -ne ($after -join ',')) { throw 'STAG_DESKTOP_DENIED: A janela mudou durante a captura; capture novamente.' }
+        @{
+            processId = $target.Id
+            bounds = @{ x = $before[0]; y = $before[1]; width = $before[2]; height = $before[3] }
+            imageBase64 = $image
+        } | ConvertTo-Json -Depth 4 -Compress
+    }
     'focus_window' {
-        Focus-StagWindow $request.processId
+        Focus-StagWindow $target $target.MainWindowHandle
         '{"ok":true}'
     }
     'send_keys' {
-        Focus-StagWindow $request.processId
+        # One app-local chord per call. System navigation and composite SendKeys cannot escape the allowlist.
+        $keys = [string]$request.keys
+        if ($keys -notmatch '^[+^%]*(?:[a-z0-9]|\{(?:ENTER|RETURN|TAB|ESC|ESCAPE|UP|DOWN|LEFT|RIGHT|HOME|END|PGUP|PGDN|DEL|DELETE|BACKSPACE|BS|F[1-9]|F1[0-2])\})$' -or
+            ($keys.Contains('%') -and $keys -match '\{(?:TAB|ESC|ESCAPE)\}' ) -or
+            ($keys.Contains('^') -and $keys -match '\{(?:ESC|ESCAPE)\}')) {
+            throw 'STAG_DESKTOP_DENIED: Atalho global ou composto; envie um atalho do aplicativo por chamada.'
+        }
+        Focus-StagWindow $target $target.MainWindowHandle
         Add-Type -AssemblyName System.Windows.Forms
-        [Windows.Forms.SendKeys]::SendWait([string]$request.keys)
+        Assert-StagForeground $target
+        [Windows.Forms.SendKeys]::SendWait($keys)
         '{"ok":true}'
     }
     'type_text' {
-        Focus-StagWindow $request.processId
+        Focus-StagWindow $target $target.MainWindowHandle
         Add-Type -AssemblyName System.Windows.Forms
-        [Windows.Forms.SendKeys]::SendWait((ConvertTo-StagLiteralKeys ([string]$request.text)))
+        # Revalidate between characters, including Enter/Tab which can change windows.
+        foreach ($character in ([regex]::Matches([string]$request.text, '\r\n|[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]'))) {
+            Assert-StagForeground $target
+            [Windows.Forms.SendKeys]::SendWait((ConvertTo-StagLiteralKeys $character.Value))
+        }
         '{"ok":true}'
     }
     'click' {
@@ -81,8 +206,14 @@ switch ($request.action) {
             'middle' { $down = 32; $up = 64 }
             default { throw 'Botao de mouse invalido.' }
         }
-        Move-StagCursor ([int]$request.x) ([int]$request.y)
+        $coordinateWindow = Get-StagCoordinateWindow $target ([int]$request.x) ([int]$request.y)
+        Focus-StagWindow $target $coordinateWindow
         for ($i = 0; $i -lt $clicks; $i++) {
+            Assert-StagForeground $target
+            $null = Get-StagCoordinateWindow $target ([int]$request.x) ([int]$request.y)
+            Move-StagCursor ([int]$request.x) ([int]$request.y)
+            $null = Get-StagCoordinateWindow $target ([int]$request.x) ([int]$request.y)
+            Assert-StagForeground $target
             [StagWindow]::mouse_event($down, 0, 0, 0, [UIntPtr]::Zero)
             [StagWindow]::mouse_event($up, 0, 0, 0, [UIntPtr]::Zero)
             if ($i -lt ($clicks - 1)) { Start-Sleep -Milliseconds 80 }
@@ -92,7 +223,12 @@ switch ($request.action) {
     'scroll' {
         $delta = [int]$request.delta
         if ($delta -eq 0 -or $delta -lt -1200 -or $delta -gt 1200) { throw 'Rolagem invalida.' }
+        $coordinateWindow = Get-StagCoordinateWindow $target ([int]$request.x) ([int]$request.y)
+        Focus-StagWindow $target $coordinateWindow
+        Assert-StagForeground $target
         Move-StagCursor ([int]$request.x) ([int]$request.y)
+        $null = Get-StagCoordinateWindow $target ([int]$request.x) ([int]$request.y)
+        Assert-StagForeground $target
         # Win32 expects the two's-complement DWORD representation for a negative delta.
         $wheelData = [BitConverter]::ToUInt32([BitConverter]::GetBytes($delta), 0)
         [StagWindow]::mouse_event(0x0800, 0, 0, $wheelData, [UIntPtr]::Zero)

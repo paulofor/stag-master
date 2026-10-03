@@ -37,25 +37,25 @@ describe("fronteiras do cliente", () => {
   it("valida parâmetros Windows antes da execução", async () => {
     for (const args of [
       { action: "send_keys", keys: "^s" },
-      { action: "click", x: Infinity, y: 0 },
+      { action: "screenshot" },
+      { action: "click", x: 10, y: 20 },
+      { action: "scroll", x: 10, y: 20, delta: 120 },
+      { action: "click", processId: 42, x: Infinity, y: 0 },
       { action: "list_windows", script: "anything" },
       { action: "focus_window", processId: -1 },
       { action: "type_text", text: "literal" },
       { action: "type_text", processId: 42, text: "literal", keys: "^a" },
-      { action: "click", x: 0, y: 0, button: "unknown" },
-      { action: "click", x: 0, y: 0, clicks: 3 },
-      { action: "scroll", x: 0, y: 0, delta: 0 },
-      { action: "scroll", x: 0, y: 0, delta: -1201 },
+      { action: "click", processId: 42, x: 0, y: 0, button: "unknown" },
+      { action: "click", processId: 42, x: 0, y: 0, clicks: 3 },
+      { action: "scroll", processId: 42, x: 0, y: 0, delta: 0 },
+      { action: "scroll", processId: 42, x: 0, y: 0, delta: -1201 },
     ])
       expect(() => desktopArguments.parse(args)).toThrow();
-    const tools = new DesktopTools(
-      "unused",
-      async () => ({ success: true, contentItems: [] }),
-      "linux",
-    );
+    const tools = new DesktopTools("unused", "linux");
     await expect(tools.execute({ action: "list_windows" })).rejects.toThrow("Windows");
-    expect(desktopArguments.parse({ action: "click", x: -1920, y: 10 })).toEqual({
+    expect(desktopArguments.parse({ action: "click", processId: 42, x: -1920, y: 10 })).toEqual({
       action: "click",
+      processId: 42,
       x: -1920,
       y: 10,
     });

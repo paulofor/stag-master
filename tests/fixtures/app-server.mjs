@@ -452,10 +452,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         } else if (input.includes("sequência")) {
           const operations = [
             { action: "list_windows" },
-            { action: "screenshot" },
+            { action: "screenshot", processId: 4242 },
             { action: "focus_window", processId: 4242 },
             {
               action: "click",
+              processId: 4242,
               x: 120,
               y: 180,
               button: "left",
@@ -477,8 +478,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               risk: "routine",
               intent: "Salvar arquivo local",
             },
-            { action: "scroll", x: 120, y: 180, delta: -240 },
-            { action: "screenshot" },
+            { action: "scroll", processId: 4242, x: 120, y: 180, delta: -240 },
+            { action: "screenshot", processId: 4242 },
           ];
           const next = () => {
             const args = operations.shift();
@@ -491,50 +492,59 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           const next = () => {
             if (--remaining === 0) response(thread, turn, "Desktop: duas operações concluídas.");
           };
-          desktopCall(thread, turn, { action: "screenshot" }, next);
-          desktopCall(thread, turn, { action: "scroll", x: 120, y: 180, delta: -120 }, next);
+          desktopCall(thread, turn, { action: "screenshot", processId: 4242 }, next);
+          desktopCall(
+            thread,
+            turn,
+            { action: "scroll", processId: 4242, x: 120, y: 180, delta: -120 },
+            next,
+          );
         } else {
           desktopCall(
             thread,
             turn,
-            input.includes("desktop inválido")
-              ? { action: "click", x: "invalid", y: 0 }
-              : input.includes("crítico")
-                ? {
-                    action: "click",
-                    x: 120,
-                    y: 180,
-                    risk: "critical",
-                    intent:
-                      input.split("crítico")[1].trim() || "Enviar requisição ao serviço externo",
-                  }
-                : input.includes("legado")
-                  ? { action: "click", x: 120, y: 180 }
-                  : input.includes("enter")
-                    ? {
-                        action: "send_keys",
-                        processId: 4242,
-                        keys: "{ENTER}",
-                        risk: "routine",
-                        intent: "Confirmar entrada",
-                      }
-                    : input.includes("quebra")
+            input.includes("sem alvo")
+              ? { action: "screenshot" }
+              : input.includes("desktop inválido")
+                ? { action: "click", processId: 4242, x: "invalid", y: 0 }
+                : input.includes("crítico")
+                  ? {
+                      action: "click",
+                      processId: 4242,
+                      x: 120,
+                      y: 180,
+                      risk: "critical",
+                      intent:
+                        input.split("crítico")[1].trim() || "Enviar requisição ao serviço externo",
+                    }
+                  : input.includes("legado")
+                    ? { action: "click", processId: 4242, x: 120, y: 180 }
+                    : input.includes("enter")
                       ? {
-                          action: "type_text",
+                          action: "send_keys",
                           processId: 4242,
-                          text: "comando\n",
+                          keys: "{ENTER}",
                           risk: "routine",
-                          intent: "Digitar comando",
+                          intent: "Confirmar entrada",
                         }
-                      : input.includes("risco inválido")
+                      : input.includes("quebra")
                         ? {
-                            action: "click",
-                            x: 120,
-                            y: 180,
-                            risk: "unknown",
-                            intent: "Abrir editor",
+                            action: "type_text",
+                            processId: 4242,
+                            text: "comando\n",
+                            risk: "routine",
+                            intent: "Digitar comando",
                           }
-                        : { action: "list_windows" },
+                        : input.includes("risco inválido")
+                          ? {
+                              action: "click",
+                              processId: 4242,
+                              x: 120,
+                              y: 180,
+                              risk: "unknown",
+                              intent: "Abrir editor",
+                            }
+                          : { action: "list_windows" },
             null,
             input.includes("namespace")
               ? { namespace: "unknown" }
