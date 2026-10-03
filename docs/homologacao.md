@@ -1,6 +1,26 @@
-# Matriz de homologação da versão 0.4.2
+# Matriz de homologação da versão 0.4.3
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Desktop limitado a três aplicativos — versão 0.4.3
+
+Matriz definida antes dos testes desta alteração. O driver aceitava qualquer processo, clique/rolagem sem processo alvo e captura da tela inteira. O harness nativo só fornecia um processo genérico e não exercitava a restrição por aplicativo. O controle passa a aceitar somente Postman, IntelliJ IDEA e Visual Studio Code, com identificação pelo executável, produto e assinatura do fornecedor. Todas as operações, exceto listar janelas, exigem o processo alvo. Aprovação crítica não amplia essa lista; navegador continua exclusivamente no painel integrado.
+
+| Área                       | Cenário e aceite                                                                                                                                               | Evidência prevista                               |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Caminho feliz              | Listar somente os três aplicativos; focar, capturar a janela, clicar, digitar e rolar em cada um sem cards de rotina                                           | Dispatcher de produção com APIs sintéticas       |
+| Validação e isolamento     | Recusar outros programas, títulos/nomes falsificados, assinatura/produto inválidos, processo encerrado e argumento sem alvo; nenhum evento de entrada          | Harness nativo + unidade + serviço bidirecional  |
+| Coordenadas e captura      | Recusar taskbar, área de trabalho, outro processo e sobreposição; revalidar o alvo antes de cada interação; capturar somente conteúdo da janela autorizada     | Harness com janelas sintéticas e captura isolada |
+| Teclado e foco             | Recusar atalhos globais e sequências que escapam do alvo; verificar foco antes de enviar teclas; perda de foco interrompe o restante do texto                  | Dispatcher de produção + contratos               |
+| Integração e recuperação   | Recusa/falha libera o agente e permite próxima operação; ações aprovadas também revalidam alvo; fila única com navegador, cancelamento e deduplicação          | Serviço + fixtures determinísticas existentes    |
+| Harness do agente          | Start/resume, descrição e schema informam a lista fixa, processId e recuperação sem contorno por shell/outro desktop; histórico mantém sua política de acesso  | Contrato + smoke real sem inferência             |
+| Interface e dispositivos   | Consentimento e indicador explicitam Postman, IntelliJ e VS Code; conversa única e navegador opcional preservados em compacto, amplo, Pixel 7 e Electron       | E2E + test:desktop                               |
+| Observabilidade e métricas | Erro identifica restrição/ação mínima; contadores de falha e operações preservados; nenhuma imagem global ou autenticação nos snapshots públicos               | Serviço + unidade                                |
+| Dados de teste e Windows   | Somente processos/janelas/imagens sintéticos e CODEX_HOME temporário; parser/driver sob Restricted no Windows; instalador versionado sem publicação automática | Harness local + jobs Windows do PR e da main     |
+
+A execução sintética local valida o dispatcher e suas fronteiras sem tocar janelas reais. Não comprova APIs gráficas ou assinaturas instaladas na sessão Windows do cliente; essas limitações permanecem explícitas, com execução nativa e empacotamento obrigatórios no CI Windows.
+
+Evidência local desta rodada: `npm run check` aprovado com typecheck, 139 contratos, build, handshake real e 26 cenários Chromium compacto/amplo/Pixel 7; `xvfb-run -a npm run test:desktop` aprovado com preload/IPC, conversa e driver de navegador de produção. O dispatcher passou em 79 cenários sintéticos sob PowerShell Core 7.6.6 no Linux, incluindo perda de foco após mover o cursor, troca de processo e mudança do alvo entre cliques. O parser e a compilação do C# de produção passaram sem executar APIs gráficas. `format:check`, sintaxe JavaScript e revisão do diff aprovados. Node 22.12.0 e Xvfb foram preparados localmente; os downloads temporários dessa preparação foram removidos para liberar espaço. O kernel local continua bloqueando namespaces bwrap, limitação já declarada pelo smoke; o job Windows precisa validar todas as operações de arquivo, PowerShell sob Restricted e o instalador 0.4.3.
 
 ## Acesso à pasta de trabalho — versão 0.4.2
 

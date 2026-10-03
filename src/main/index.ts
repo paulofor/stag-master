@@ -1,15 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  desktopCapturer,
-  dialog,
-  ipcMain,
-  net,
-  protocol,
-  screen,
-  session,
-  shell,
-} from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } from "electron";
 import { mkdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -80,30 +69,7 @@ async function start(): Promise<void> {
     ? join(resourceRoot, "codex")
     : join(resourceRoot, ".local/codex");
   const codexBinary = join(codexRoot, "bin", process.platform === "win32" ? "codex.exe" : "codex");
-  const desktop = new DesktopTools(join(resourceRoot, "native/windows-control.ps1"), async () => {
-    const primary = screen.getPrimaryDisplay();
-    const width = Math.round(primary.size.width * primary.scaleFactor);
-    const height = Math.round(primary.size.height * primary.scaleFactor);
-    const sources = await desktopCapturer.getSources({
-      types: ["screen"],
-      thumbnailSize: { width, height },
-    });
-    const source = sources.find((s) => s.display_id === String(primary.id));
-    if (!source || source.thumbnail.isEmpty())
-      throw new Error("Não foi possível capturar a tela principal.");
-    const size = source.thumbnail.getSize();
-    const origin = screen.dipToScreenPoint({ x: primary.bounds.x, y: primary.bounds.y });
-    return {
-      success: true,
-      contentItems: [
-        {
-          type: "inputText",
-          text: `Tela principal: ${size.width}×${size.height} pixels. Origem física: x=${origin.x}, y=${origin.y}. Para clicar, some a origem às coordenadas na imagem.`,
-        },
-        { type: "inputImage", imageUrl: source.thumbnail.toDataURL() },
-      ],
-    };
-  });
+  const desktop = new DesktopTools(join(resourceRoot, "native/windows-control.ps1"));
   service = new AssistantService({
     createRpc: () =>
       new RpcClient({
@@ -212,9 +178,9 @@ async function start(): Promise<void> {
       const result = await dialog.showMessageBox(window!, {
         type: "warning",
         title: "Acesso ao Windows",
-        message: "Permitir que o assistente controle este computador nesta conversa?",
+        message: "Permitir controle de Postman, IntelliJ IDEA e Visual Studio Code nesta conversa?",
         detail:
-          "O agente poderá ver a tela, controlar mouse e teclado e executar comandos com acesso amplo. Capturas, foco, rolagem e interações rotineiras não pedirão nova aprovação. Exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações sem contexto suficiente terão confirmação específica. Capturas e títulos de janelas serão enviados ao ChatGPT para a tarefa. Autorizar inicia uma nova conversa; revogar ou abrir outra conversa encerra o acesso.",
+          "O desktop ficará limitado a esses três aplicativos: capturas somente da janela escolhida, foco, mouse e teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação. Navegação web usa o navegador integrado, com autorização própria. A rotina não pede nova aprovação; exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações incertas exigem confirmação específica. Capturas e títulos dessas janelas são enviados ao ChatGPT. Autorizar inicia nova conversa; revogar ou abrir outra encerra o acesso.",
         buttons: ["Cancelar", "Permitir acesso"],
         defaultId: 0,
         cancelId: 0,
