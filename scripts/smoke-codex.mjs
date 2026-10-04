@@ -114,7 +114,7 @@ try {
     });
   const writePolicy = turnPolicy("project", project).sandboxPolicy;
   const readPolicy = turnPolicy("read", project).sandboxPolicy;
-  const file = join(project, "subpasta", "mais-fundo", "sintético.txt");
+  const file = join(project, ".stag", "subpasta-sintética", "negocio.md");
   const probe = await command("create", file, writePolicy);
   const kernelUnavailable =
     process.platform === "linux" &&
@@ -141,6 +141,12 @@ try {
     // First prove the runner can start and read under Leitura; startup failure is not denial evidence.
     const read = await command("read", file, readPolicy);
     assert.equal(read.exitCode, 0, read.stderr);
+    assert.equal(JSON.parse(read.stdout).content, "arquivo sintético · editado");
+    const readOnlyNew = join(project, ".stag", "nao-criar", "sistema.md");
+    const createInRead = await command("create", readOnlyNew, readPolicy);
+    assert.equal(createInRead.exitCode, 1, "Leitura criou memória indevidamente");
+    assert.match(JSON.parse(createInRead.stderr).code, /^(EACCES|EPERM|EROFS)$/);
+    await assert.rejects(readFile(readOnlyNew), { code: "ENOENT" });
     for (const [target, policy] of [
       [external, writePolicy],
       [`${project}${sep}..${sep}projeto-vizinho${sep}preservar.txt`, writePolicy],
@@ -154,7 +160,7 @@ try {
     assert.equal(await readFile(external, "utf8"), "arquivo externo preservado");
     assert.equal(await readFile(file, "utf8"), "arquivo sintético · editado");
     console.log(
-      "Sandbox real: criação/leitura/edição em subpastas OK; escrita externa, travessia, links e Leitura bloqueados.",
+      "Sandbox real: memória .stag em subpastas criada, lida e editada; escrita externa, travessia, links, criação e edição em Leitura bloqueados.",
     );
   }
   console.log(

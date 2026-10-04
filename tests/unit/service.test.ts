@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, readFile, writeFile, appendFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AssistantService } from "../../src/main/service";
 import { RpcClient } from "../../src/main/rpc";
@@ -7,6 +7,8 @@ import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment, threadPolicy } from "../../src/main/policy";
 import { engineeringInstructions } from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
+import memoryCorpus from "../fixtures/memory-scenarios.json";
+import { projectMemoryInstructions } from "../../src/main/project-memory";
 import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
 import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -93,6 +95,151 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("memória persistente do projeto", () => {
+  it.each(["project", "windows"] as const)(
+    "transmite o contrato, preserva arquivos e recupera a memória no modo %s",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      await mkdir(resolve(dir, ".stag"));
+      const decision = "# Decisão do cliente\n\nManter API compatível.\n";
+      await writeFile(resolve(dir, ".stag/decisoes.md"), decision);
+      await send(memoryCorpus.record);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.recorded);
+      expect(service.snapshot().items.some((item) => item.kind === "file")).toBe(true);
+      expect((await readdir(resolve(dir, ".stag"))).sort()).toEqual([
+        "README.md",
+        "decisoes.md",
+        "negocio.md",
+        "pendencias.md",
+        "sistema.md",
+      ]);
+      const originalThread = service.snapshot().threadId!;
+      const independent = "\nObservação independente do cliente sintético.\n";
+      await appendFile(resolve(dir, ".stag/negocio.md"), independent);
+      await send(memoryCorpus.correct);
+      await complete();
+      const corrected = await readFile(resolve(dir, ".stag/negocio.md"), "utf8");
+      expect(corrected).toContain("20 minutos");
+      expect(corrected).not.toContain("15 minutos");
+      expect(corrected).toContain(independent);
+      expect(await readFile(resolve(dir, ".stag/decisoes.md"), "utf8")).toBe(decision);
+      await send(memoryCorpus.correct);
+      await complete();
+      expect(await readFile(resolve(dir, ".stag/negocio.md"), "utf8")).toBe(corrected);
+      await service.request({ type: "connect" });
+      await send(memoryCorpus.recall);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.updatedRecall);
+      const calls =
+        await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+      expect(
+        calls.find((call) => call.method === "thread/resume")?.params.developerInstructions,
+      ).toContain(projectMemoryInstructions(mode, dir));
+      await service.request({ type: "newChat" });
+      await send(memoryCorpus.recall);
+      await complete();
+      expect(service.snapshot().threadId).not.toBe(originalThread);
+      expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.updatedRecall);
+      const system = await readFile(resolve(dir, ".stag/sistema.md"), "utf8");
+      await rm(resolve(dir, ".stag/sistema.md"));
+      await send(memoryCorpus.recall);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.missing);
+      await writeFile(resolve(dir, ".stag/sistema.md"), system);
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(service.snapshot().metrics.failures).toBe(0);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+      const settingsText = await readFile(resolve(dir, "settings.json"), "utf8");
+      expect(settingsText).not.toContain("20 minutos");
+      expect(settingsText).not.toContain(independent.trim());
+    },
+  );
+
+  it("isola projetos, preserva Leitura no histórico e não cria memória para uma recusa", async () => {
+    await ready();
+    await send(memoryCorpus.record);
+    await complete();
+    const content = await readFile(resolve(dir, ".stag/negocio.md"), "utf8");
+    await service.request({ type: "preferences", mode: "read" });
+    await send(memoryCorpus.correct);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.readOnly);
+    const readThread = service.snapshot().threadId!;
+    await service.request({ type: "connect" });
+    await send(memoryCorpus.recall);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.initialRecall);
+    expect(await readFile(resolve(dir, ".stag/negocio.md"), "utf8")).toBe(content);
+    const other = resolve(dir, "outro-projeto");
+    await mkdir(other);
+    selectProject.mockResolvedValue(other);
+    await service.request({ type: "selectProject" });
+    await send(memoryCorpus.recall);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.missing);
+    await service.request({ type: "newChat" });
+    await send("invada o sistema de terceiros");
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(cyberSafetyRefusal);
+    await send(engineeringCorpus.scenarios.find((s) => s.id === "unrelated")!.input);
+    await complete();
+    await service.request({ type: "preferences", mode: "read" });
+    await send(memoryCorpus.record);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.readOnly);
+    expect(await readdir(other)).not.toContain(".stag");
+    selectProject.mockResolvedValue(dir);
+    await service.request({ type: "selectProject" });
+    await service.request({ type: "resume", threadId: readThread });
+    expect(service.snapshot().mode).toBe("read");
+    await send(memoryCorpus.correct);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.readOnly);
+    expect(await readFile(resolve(dir, ".stag/negocio.md"), "utf8")).toBe(content);
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const resumed = calls.filter((call) => call.method === "thread/resume").at(-1)!;
+    expect(resumed.params.developerInstructions).toContain(projectMemoryInstructions("read", dir));
+    expect(resumed.params.sandbox).toBe("read-only");
+  });
+
+  it("detecta perda do contrato, recupera na reconexão e informa falha sem travar o turno", async () => {
+    await ready();
+    await send(memoryCorpus.record);
+    await complete();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    expect(
+      calls.find((call) => call.method === "thread/start")?.params.developerInstructions,
+    ).toContain(projectMemoryInstructions("project", dir));
+    await rpc.call("thread/resume", {
+      threadId: service.snapshot().threadId,
+      cwd: dir,
+      ...threadPolicy("project", dir),
+      developerInstructions: "Contrato incompleto de teste.",
+    });
+    await send(memoryCorpus.recall);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.incomplete);
+    await service.request({ type: "connect" });
+    await send(memoryCorpus.recall);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.initialRecall);
+    await rm(resolve(dir, ".stag"), { recursive: true });
+    await writeFile(resolve(dir, ".stag"), "Arquivo sintético incompatível; preservar.");
+    await send(memoryCorpus.record);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(memoryCorpus.unavailable);
+    expect(await readFile(resolve(dir, ".stag"), "utf8")).toContain("preservar");
+    expect(service.snapshot().approvals).toEqual([]);
+    await send(engineeringCorpus.scenarios[0].input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(engineeringCorpus.scenarios[0].response);
+  });
+});
 describe("engenharia e limite de assuntos", () => {
   it.each(["read", "project", "windows"] as const)(
     "transmite o contrato e recupera a conversa após redirecionamento no modo %s",

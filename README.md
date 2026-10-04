@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.5: especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.6: memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -34,6 +34,26 @@ O agente classifica o efeito de cada interação na tela; o serviço exige confi
 As operações aprovadas executam o script empacotado com política PowerShell definida apenas para o processo filho. Não é necessário mudar a política de execução do usuário ou do computador. Se uma política corporativa ainda bloquear o script, o STAG informa a falha e pede a verificação pelo administrador; essa política tem precedência. A versão 0.2.1 corrige o bloqueio causado pela política local padrão Restricted.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
+
+## Memória do projeto
+
+Na primeira tarefa de sistemas ou negócio com escrita autorizada, o modelo recebe a orientação de criar `.stag` dentro da pasta selecionada e registrar o conhecimento importante para as próximas solicitações. Ele deve consultar essa memória em cada tarefa pertinente, inclusive em conversas novas e retomadas, e atualizá-la ao aprender fatos duráveis e antes de concluir o trabalho. Não é necessário pedir para memorizar a cada mensagem.
+
+| Arquivo               | Conteúdo                                                             |
+| --------------------- | -------------------------------------------------------------------- |
+| `.stag/README.md`     | Índice das notas                                                     |
+| `.stag/sistema.md`    | Arquitetura, componentes, stack, integrações, convenções e validação |
+| `.stag/negocio.md`    | Domínio, glossário, processos, regras e histórias relevantes         |
+| `.stag/decisoes.md`   | Decisões confirmadas, motivos e consequências                        |
+| `.stag/pendencias.md` | Dúvidas, hipóteses, riscos e próximos passos                         |
+
+As notas devem ser concisas, com fontes e datas, preservando o conteúdo existente e distinguindo fatos de hipóteses. Correções confirmadas atualizam as notas sem duplicar registros a cada turno. O modelo deve verificar a gravação e informar brevemente os arquivos atualizados. Você pode ler e editar esses arquivos; eles permanecem na pasta do projeto entre conversas e reinicializações do aplicativo. Selecionar outra pasta usa a memória dessa outra pasta, sem copiar conhecimento automaticamente.
+
+No modo **Leitura**, o modelo consulta notas existentes, mas não cria nem altera `.stag`. Falha de acesso deve ser informada sem afirmar que algo foi salvo e sem impedir tarefas independentes. Senhas, tokens, segredos, dados pessoais desnecessários, transcrições e raciocínio interno não devem ser registrados. A memória é contexto, não autorização: não altera escopo, segurança, consentimentos ou permissões e não autoriza seguir links para outros projetos. Commit, publicação ou envio externo das notas exigem solicitação.
+
+O registro é realizado pelo modelo com as ferramentas nativas de arquivos do Codex e o sandbox do modo atual. O STAG não copia conversas para `.stag`, não cria um indexador ou grava arquivos do projeto pelo processo principal. O conteúdo relevante consultado pelo agente passa a integrar o contexto enviado ao modelo, como outros arquivos lidos para a tarefa. A seleção do conhecimento e a atualização dependem do comportamento do modelo; os testes determinísticos verificam contratos e persistência sintética, não garantem a memorização semântica de todo fato.
+
+Após atualizar e reabrir o aplicativo, selecione o projeto e envie a tarefa normalmente. Conversas retomadas recebem a orientação de memória sem ampliar seu modo original de acesso.
 
 ## Especialização e assuntos permitidos
 

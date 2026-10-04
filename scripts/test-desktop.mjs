@@ -5,6 +5,7 @@ import { _electron, expect } from "@playwright/test";
 import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
+import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -36,6 +37,10 @@ try {
     await cp(
       "tests/fixtures/engineering-scenarios.json",
       join(dir, ".local/codex/bin/engineering-scenarios.json"),
+    );
+    await cp(
+      "tests/fixtures/memory-scenarios.json",
+      join(dir, ".local/codex/bin/memory-scenarios.json"),
     );
     await writeFile(
       join(dir, ".local/codex/bin/codex"),
@@ -117,6 +122,30 @@ try {
       assert.equal(snapshot.browser.url, "");
       assert.equal(snapshot.metrics.failures, blocked.metrics.failures);
     }
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+    await page.getByLabel("Mensagem para o assistente").fill(memoryCorpus.record);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(page.getByText(memoryCorpus.recorded, { exact: true })).toBeVisible();
+    assert.match(await readFile(join(project, ".stag/negocio.md"), "utf8"), /15 minutos/);
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+    await page.getByLabel("Mensagem para o assistente").fill(memoryCorpus.recall);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(page.getByText(memoryCorpus.initialRecall, { exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await page.getByLabel("Acesso", { exact: true }).selectOption("read");
+    await page.getByLabel("Mensagem para o assistente").fill(memoryCorpus.correct);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(page.getByText(memoryCorpus.readOnly, { exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    assert.match(await readFile(join(project, ".stag/negocio.md"), "utf8"), /15 minutos/);
+    await page.getByLabel("Acesso", { exact: true }).selectOption("project");
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     await page.getByLabel("Mensagem para o assistente").fill("aprovar comando");
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
