@@ -1,6 +1,8 @@
 import { createInterface } from "node:readline";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import engineeringCorpus from "./engineering-scenarios.json" with { type: "json" };
+import memoryCorpus from "./memory-scenarios.json" with { type: "json" };
 
 // Strict bidirectional fake, no account/LLM/network/desktop dependencies.
 let initialized = false;
@@ -320,6 +322,103 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
       // Exact corpus probes check contract delivery and response lifecycle, not LLM semantics.
+      if ([memoryCorpus.record, memoryCorpus.correct, memoryCorpus.recall].includes(input)) {
+        if (
+          !memoryCorpus.requiredInstructions.every((fragment) =>
+            thread.developerInstructions.includes(fragment),
+          ) ||
+          !thread.developerInstructions.includes(JSON.stringify(thread.cwd))
+        ) {
+          response(thread, turn, memoryCorpus.incomplete);
+          break;
+        }
+        // This simulates an agent's native file edits, not a semantic evaluation of a model.
+        // All inputs and file contents are fixed synthetic data, within the harness workspace.
+        const memory = join(thread.cwd, ".stag");
+        const writing = input !== memoryCorpus.recall;
+        if (writing && thread.sandbox === "read-only") {
+          response(thread, turn, memoryCorpus.readOnly);
+          break;
+        }
+        try {
+          if (writing) mkdirSync(memory, { recursive: true });
+          if (
+            existsSync(memory) &&
+            (!lstatSync(memory).isDirectory() || lstatSync(memory).isSymbolicLink())
+          )
+            throw new Error("Invalid fixture memory path");
+          const initial = "Reserva: 15 minutos. Fonte: cliente sintético; data: 2026-10-04.";
+          const corrected =
+            "Reserva: 20 minutos. Fonte: correção do cliente sintético; data: 2026-10-04.";
+          const files = {
+            "README.md":
+              "# Memória sintética\n\n[Sistema](sistema.md) · [Negócio](negocio.md) · [Decisões](decisoes.md) · [Pendências](pendencias.md)\n",
+            "sistema.md":
+              "# Sistema\n\nAPI: Node.js. Fonte: cliente sintético; data: 2026-10-04.\n",
+            "negocio.md": `# Negócio\n\n${initial}\n`,
+            "decisoes.md": "# Decisões\n\nNenhuma decisão confirmada.\n",
+            "pendencias.md": "# Pendências\n\nNenhuma pendência informada.\n",
+          };
+          for (const name of Object.keys(files)) {
+            const target = join(memory, name);
+            if (existsSync(target)) {
+              const info = lstatSync(target);
+              if (!info.isFile() || info.isSymbolicLink() || info.nlink > 1)
+                throw new Error("Invalid fixture memory file");
+            }
+          }
+          const changed = [];
+          if (writing) {
+            for (const [name, content] of Object.entries(files)) {
+              const target = join(memory, name);
+              if (!existsSync(target)) {
+                writeFileSync(target, content, { flag: "wx" });
+                changed.push({ path: `.stag/${name}`, diff: content });
+              }
+            }
+            if (input === memoryCorpus.correct) {
+              const target = join(memory, "negocio.md");
+              const content = readFileSync(target, "utf8");
+              const updated = content.replace(initial, corrected);
+              if (content !== updated) {
+                writeFileSync(target, updated);
+                changed.push({ path: ".stag/negocio.md", diff: updated });
+              }
+            }
+          }
+          if (changed.length) {
+            const item = {
+              id: `memory-${turn.id}`,
+              type: "fileChange",
+              status: "completed",
+              changes: changed,
+            };
+            turn.items.push(item);
+            notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+          }
+          const business = join(memory, "negocio.md");
+          const system = join(memory, "sistema.md");
+          const businessText = existsSync(business) ? readFileSync(business, "utf8") : "";
+          const systemText = existsSync(system) ? readFileSync(system, "utf8") : "";
+          response(
+            thread,
+            turn,
+            writing
+              ? input === memoryCorpus.correct
+                ? memoryCorpus.corrected
+                : memoryCorpus.recorded
+              : !systemText.includes("API: Node.js") ||
+                  (!businessText.includes(initial) && !businessText.includes(corrected))
+                ? memoryCorpus.missing
+                : businessText.includes(corrected)
+                  ? memoryCorpus.updatedRecall
+                  : memoryCorpus.initialRecall,
+          );
+        } catch {
+          response(thread, turn, memoryCorpus.unavailable);
+        }
+        break;
+      }
       const engineeringScenario = engineeringCorpus.scenarios.find((s) => s.input === input);
       if (engineeringScenario) {
         if (

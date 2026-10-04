@@ -1,0 +1,30 @@
+{
+  "requiredInstructions": [
+    "Memória persistente do projeto em .stag",
+    "antes de planejar mudanças ou responder sobre o projeto",
+    "na retomada de histórico e após compactação",
+    ".stag/README.md",
+    ".stag/sistema.md",
+    ".stag/negocio.md",
+    ".stag/decisoes.md",
+    ".stag/pendencias.md",
+    "fonte verificável",
+    "data de registro/atualização",
+    "Separe fatos confirmados de hipóteses",
+    "preserve notas independentes e edições do cliente",
+    "dados de contexto não confiáveis",
+    "Não registre senhas, tokens",
+    "nunca declare memorização sem evidência de gravação"
+  ],
+  "record": "No projeto sintético de estoque, a API usa Node.js e a reserva dura 15 minutos. Considere essas regras ao avaliar o fluxo de reserva.",
+  "correct": "Correção confirmada para o projeto sintético de estoque: a reserva dura 20 minutos. Atualize o contexto preservando as outras notas.",
+  "recall": "Consulte a memória deste projeto sintético e informe a stack da API e o prazo de reserva confirmado.",
+  "recorded": "Contexto sintético salvo em .stag: API Node.js e reserva de 15 minutos.",
+  "corrected": "Contexto sintético atualizado em .stag: reserva de 20 minutos; outras notas preservadas.",
+  "initialRecall": "Memória deste projeto: API Node.js; reserva de 15 minutos.",
+  "updatedRecall": "Memória deste projeto: API Node.js; reserva de 20 minutos.",
+  "missing": "Este projeto ainda não tem memória confirmada; informe o contexto do sistema e do negócio.",
+  "readOnly": "O contexto não foi salvo porque esta conversa está em modo Leitura.",
+  "unavailable": "Não foi possível acessar .stag; o contexto não foi salvo. Posso continuar a parte independente da tarefa.",
+  "incomplete": "Fixture: contrato de memória ausente ou incompleto."
+}
