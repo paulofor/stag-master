@@ -3,6 +3,31 @@ import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/
 import { browserTool } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
 import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/main/cyber-safety";
+import {
+  engineeringInstructions,
+  engineeringToolDescription,
+} from "../../src/main/engineering-policy";
+import engineeringCorpus from "../fixtures/engineering-scenarios.json";
+
+describe("contrato de engenharia e escopo de negócio", () => {
+  it("mantém especialização e limites em todos os modos, plataformas e estados do navegador", () => {
+    for (const mode of ["read", "project", "windows"] as const)
+      for (const platform of ["win32", "linux"])
+        for (const [authorized, available] of [
+          [false, false],
+          [false, true],
+          [true, true],
+        ]) {
+          const instructions = assistantInstructions(mode, platform, authorized, available);
+          expect(instructions).toContain(engineeringInstructions);
+          for (const fragment of engineeringCorpus.requiredInstructions)
+            expect(instructions).toContain(fragment);
+          expect(instructions).toContain(cyberSafetyInstructions);
+        }
+    expect(desktopTool.description).toContain(engineeringToolDescription);
+    expect(browserTool.description).toContain(engineeringToolDescription);
+  });
+});
 
 describe("contrato contra abuso cibernético", () => {
   it("aplica a política em todos os modos/plataformas, independentemente de consentimento", () => {

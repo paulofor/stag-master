@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { readFileSync, writeFileSync } from "node:fs";
+import engineeringCorpus from "./engineering-scenarios.json" with { type: "json" };
 
 // Strict bidirectional fake, no account/LLM/network/desktop dependencies.
 let initialized = false;
@@ -318,6 +319,29 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
+      // Exact corpus probes check contract delivery and response lifecycle, not LLM semantics.
+      const engineeringScenario = engineeringCorpus.scenarios.find((s) => s.input === input);
+      if (engineeringScenario) {
+        if (
+          !engineeringCorpus.requiredInstructions.every((fragment) =>
+            thread.developerInstructions.includes(fragment),
+          )
+        ) {
+          response(thread, turn, "Fixture: contrato de engenharia ausente ou incompleto.");
+        } else if (
+          engineeringScenario.context &&
+          !thread.turns.some((t) =>
+            t.items.some(
+              (item) =>
+                item.type === "userMessage" &&
+                item.content.some((content) => content.text === engineeringScenario.context),
+            ),
+          )
+        ) {
+          response(thread, turn, "Fixture: contexto de negócio não preservado.");
+        } else response(thread, turn, engineeringScenario.response);
+        break;
+      }
       if (input.includes("sair")) {
         setTimeout(() => process.exit(7), 20);
         break;

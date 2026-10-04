@@ -4,7 +4,9 @@ import { resolve } from "node:path";
 import { AssistantService } from "../../src/main/service";
 import { RpcClient } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
-import { codexEnvironment } from "../../src/main/policy";
+import { codexEnvironment, threadPolicy } from "../../src/main/policy";
+import { engineeringInstructions } from "../../src/main/engineering-policy";
+import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
 import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -91,6 +93,81 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("engenharia e limite de assuntos", () => {
+  it.each(["read", "project", "windows"] as const)(
+    "transmite o contrato e recupera a conversa após redirecionamento no modo %s",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      await service.request({ type: "browserConsent", allow: true });
+      const failures = service.snapshot().metrics.failures;
+      const approvals: number[] = [];
+      service.on("snapshot", (snapshot) => approvals.push(snapshot.approvals.length));
+      for (const scenario of engineeringCorpus.scenarios) {
+        if (scenario.context) {
+          await send(scenario.context);
+          await complete();
+          await service.request({ type: "connect" });
+        }
+        await send(scenario.input);
+        await complete();
+        const snapshot = service.snapshot();
+        expect(snapshot.items.at(-1)).toMatchObject({ kind: "assistant", text: scenario.response });
+        expect(snapshot.items.at(-1)?.text).not.toContain("WRONG_THREAD");
+        expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_REASONING");
+        expect(snapshot.mode).toBe(mode);
+        expect(snapshot.metrics.failures).toBe(failures);
+        if (scenario.kind === "refusal") await service.request({ type: "connect" });
+      }
+      await send(engineeringCorpus.scenarios[0].input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(engineeringCorpus.scenarios[0].response);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+      expect(approvals.every((count) => count === 0)).toBe(true);
+      const calls =
+        await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+      const resumed = calls.filter((call) => call.method === "thread/resume");
+      expect(resumed.length).toBeGreaterThan(0);
+      for (const call of resumed) {
+        expect(call.params.developerInstructions).toContain(engineeringInstructions);
+        expect(call.params.sandbox).toBe(threadPolicy(mode, dir).sandbox);
+        expect(call.params.runtimeWorkspaceRoots).toEqual([dir]);
+      }
+    },
+  );
+
+  it("o harness detecta contrato ausente e a reconexão restaura as instruções de produção", async () => {
+    await ready();
+    const scenario = engineeringCorpus.scenarios[0];
+    await send(scenario.input);
+    await complete();
+    let calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    expect(
+      calls.find((call) => call.method === "thread/start")?.params.developerInstructions,
+    ).toContain(engineeringInstructions);
+    await rpc.call("thread/resume", {
+      threadId: service.snapshot().threadId,
+      cwd: dir,
+      ...threadPolicy("project", dir),
+      developerInstructions: "Contrato incompleto de teste.",
+    });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(
+      "Fixture: contrato de engenharia ausente ou incompleto.",
+    );
+    await service.request({ type: "connect" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    calls = await rpc.call("_fixture/readCalls");
+    expect(
+      calls.filter((call) => call.method === "thread/resume").at(-1)?.params.developerInstructions,
+    ).toContain(engineeringInstructions);
+  });
+});
 describe("proteção contra solicitações maliciosas", () => {
   it.each(["read", "project", "windows"] as const)(
     "recusa antes de chamar o agente, mesmo com consentimento no modo %s",
