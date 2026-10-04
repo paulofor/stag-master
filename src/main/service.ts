@@ -23,6 +23,7 @@ import {
   type ToolResult,
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
+import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
 import {
   browserArguments,
   browserApproval,
@@ -63,6 +64,7 @@ interface PendingApproval {
   tool?: "desktop" | "browser";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
+  safety?: () => string | null;
 }
 interface Options {
   createRpc: () => RpcClient;
@@ -126,6 +128,7 @@ export class AssistantService extends EventEmitter {
   private disposed = false;
   private sandboxReady = false;
   private completedTurns = new Set<string>();
+  private safetyBlockId = 0;
   constructor(private options: Options) {
     super();
     this.state = structuredClone(emptySnapshot);
@@ -141,6 +144,33 @@ export class AssistantService extends EventEmitter {
   }
   private publish(): void {
     if (!this.disposed) this.emit("snapshot", this.snapshot());
+  }
+  private recordSafetyBlock(kind: "assistant" | "status" = "status"): void {
+    this.state.metrics.failures++;
+    this.state.items.push({
+      id: `safety-block-${++this.safetyBlockId}`,
+      kind,
+      text: cyberSafetyRefusal,
+    });
+    this.publish();
+  }
+  private approvalSafetyReason(message: RpcMessage): string | null {
+    const p = message.params || {};
+    const item = this.state.items.find((i) => i.id === p.itemId);
+    // Intent and command are inspected independently; do not treat an entire patch or a
+    // command's output as instructions (defensive tests/docs may quote hostile requests).
+    return cyberSafetyReason([
+      text(p.command),
+      text(p.reason),
+      message.method === "item/commandExecution/requestApproval" ? item?.text || "" : "",
+    ]);
+  }
+  private declineUnsafeApproval(message: RpcMessage): void {
+    this.recordSafetyBlock();
+    const available = message.params?.availableDecisions;
+    if (Array.isArray(available) && !available.includes("decline"))
+      this.rpc!.rejectRequest(message.id!, cyberSafetyRefusal);
+    else this.rpc!.respond(message.id!, { decision: "decline" });
   }
   async init(): Promise<void> {
     this.settings = await this.options.store.load();
@@ -553,6 +583,15 @@ export class AssistantService extends EventEmitter {
       throw new Error(
         "O acesso ao projeto está sendo preparado. Aguarde alguns instantes e tente novamente.",
       );
+    if (cyberSafetyReason([input], "request")) {
+      this.state.items.push({
+        id: `blocked-user-${this.safetyBlockId + 1}`,
+        kind: "user",
+        text: input,
+      });
+      this.recordSafetyBlock("assistant");
+      return;
+    }
     if (this.state.threadId && this.browserInstructionsDirty)
       await this.resume(this.state.threadId);
     this.sending = true;
@@ -856,9 +895,12 @@ export class AssistantService extends EventEmitter {
       // Its validated thread/turn establishes ownership just like turn/started.
       if (!this.turnId) this.turnId = text(p.turnId);
       const args = parsed.data;
+      const safety = () =>
+        cyberSafetyReason(Object.values(args).filter((value) => typeof value === "string"));
       const waiting: PendingApproval = isBrowser
         ? {
             message,
+            safety,
             tool: "browser",
             execute: () => this.options.browser!.execute(args as BrowserArguments),
             confirmation: () => this.options.browser!.confirmationReason(args as BrowserArguments),
@@ -866,6 +908,7 @@ export class AssistantService extends EventEmitter {
           }
         : {
             message,
+            safety,
             tool: "desktop",
             execute: () => this.options.desktop.execute(args),
             confirmation: async () =>
@@ -878,6 +921,10 @@ export class AssistantService extends EventEmitter {
         message.method || "",
       )
     ) {
+      if (this.approvalSafetyReason(message)) {
+        this.declineUnsafeApproval(message);
+        return;
+      }
       const isCommand = message.method === "item/commandExecution/requestApproval";
       const item = this.state.items.find((i) => i.id === p.itemId);
       this.pending.set(id, { message });
@@ -954,20 +1001,36 @@ export class AssistantService extends EventEmitter {
         success: false,
         contentItems: [{ type: "inputText", text: "Ação recusada pelo usuário." }],
       };
+      const blockUnsafe = () => {
+        if (!waiting.safety?.()) return false;
+        this.recordSafetyBlock();
+        result = {
+          success: false,
+          contentItems: [{ type: "inputText", text: cyberSafetyRefusal }],
+        };
+        return true;
+      };
       if (accept !== false) {
         try {
-          if (accept === null) {
-            const reason = await waiting.confirmation!();
+          if (!blockUnsafe()) {
+            const reason = accept === null ? await waiting.confirmation!() : null;
             if (!ownsTurn()) return;
-            if (reason) {
-              const id = String(waiting.message.id);
-              this.pending.set(id, waiting);
-              this.state.approvals.push({ id, kind: waiting.tool!, ...waiting.approval!(reason) });
-              this.publish();
-              return;
+            // Recheck after DOM/confirmation inspection and again on the approved path.
+            if (!blockUnsafe()) {
+              if (reason) {
+                const id = String(waiting.message.id);
+                this.pending.set(id, waiting);
+                this.state.approvals.push({
+                  id,
+                  kind: waiting.tool!,
+                  ...waiting.approval!(reason),
+                });
+                this.publish();
+                return;
+              }
+              result = await waiting.execute!();
             }
           }
-          result = await waiting.execute!();
         } catch (error) {
           if (ownsTurn()) {
             this.state.error = errorText(error);
@@ -998,6 +1061,16 @@ export class AssistantService extends EventEmitter {
         if (!value) throw new Error("Responda todas as perguntas antes de continuar.");
         answers[q.id] = { answers: [value] };
       }
+      if (
+        cyberSafetyReason(
+          Object.values(answers).flatMap((value) => value.answers),
+          "request",
+        )
+      ) {
+        this.recordSafetyBlock();
+        // Resolve the reverse request with the refusal, never forward the hostile answer.
+        for (const q of approval.questions || []) answers[q.id] = { answers: [cyberSafetyRefusal] };
+      }
       this.rpc.respond(waiting.message.id, { answers });
     } else if (waiting.execute) {
       // Remove first to prevent double-click executing a desktop action twice.
@@ -1006,6 +1079,12 @@ export class AssistantService extends EventEmitter {
       this.publish();
       await this.executeTool(waiting, action.accept === true);
     } else {
+      if (action.accept === true && this.approvalSafetyReason(waiting.message)) {
+        this.declineUnsafeApproval(waiting.message);
+        this.pending.delete(action.id);
+        this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
+        return;
+      }
       const available = waiting.message.params?.availableDecisions;
       const decision = action.accept === true ? "accept" : "decline";
       if (Array.isArray(available) && !available.includes(decision))

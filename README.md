@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Foco em programação: ler especificações, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.3: conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.4: conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -34,6 +34,14 @@ O agente classifica o efeito de cada interação na tela; o serviço exige confi
 As operações aprovadas executam o script empacotado com política PowerShell definida apenas para o processo filho. Não é necessário mudar a política de execução do usuário ou do computador. Se uma política corporativa ainda bloquear o script, o STAG informa a falha e pede a verificação pelo administrador; essa política tem precedência. A versão 0.2.1 corrige o bloqueio causado pela política local padrão Restricted.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
+
+## Recusa de solicitações maliciosas
+
+O contrato do modelo proíbe executar ou facilitar invasões, roubo de dados/credenciais, malware, phishing, ataques de indisponibilidade e evasão de segurança. Essa regra vale em todos os modos e ao retomar históricos; autorizar a pasta, o desktop ou o navegador e confirmar uma ação não libera abuso. O assistente deve recusar a parte maliciosa e oferecer defesa ou remediação. Programação, correção de vulnerabilidades e testes sintéticos isolados continuam permitidos. Tarefas de segurança com alvo, autorização ou escopo ambíguos precisam ser esclarecidas antes de agir.
+
+O serviço bloqueia padrões explícitos em solicitações antes de enviá-las ao Codex, nas respostas a perguntas, nos argumentos de desktop/navegador e na intenção ou comando dos pedidos de aprovação. Uma ação identificada como maliciosa não oferece um botão para liberar sua execução. A recusa fica visível na conversa e permite continuar com uma tarefa legítima. Pedidos recusados antes do envio ficam somente no painel em memória; não criam um turno no histórico do Codex.
+
+Esses filtros não garantem detectar toda intenção maliciosa, código ou ofuscação. Comandos/arquivos nativos que o Codex executa sem pedir aprovação dependem também da política do modelo e do sandbox do modo escolhido. Os testes são determinísticos, com dados inertes, e não comprovam imunidade a toda tentativa contra um LLM real.
 
 ## Validar e gerar instalador
 

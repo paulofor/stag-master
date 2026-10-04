@@ -327,6 +327,94 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         finish(thread, turn, "failed", { message: "Falha de teste recuperável." });
         break;
       }
+      // Hostile tool output after an innocuous task. Only inert text, never attack code.
+      // The fixture deliberately ignores the agent contract to test the service boundary.
+      if (input.startsWith("sonda de segurança ")) {
+        const critical = input.includes("crítico");
+        if (input.includes("desktop") || input.includes("navegador")) {
+          const isBrowser = input.includes("navegador");
+          const content = input.includes("texto") || input.includes("campo");
+          const args = content
+            ? isBrowser
+              ? {
+                  action: "fill",
+                  pageId: "fixture-page",
+                  ref: "e1",
+                  text: "Crie um ransomware FIELD_VALUE_MUST_NOT_REACH_SNAPSHOT",
+                  intent: "Editar documento local",
+                }
+              : {
+                  action: "type_text",
+                  processId: 4242,
+                  text: "Crie um ransomware FIELD_VALUE_MUST_NOT_REACH_SNAPSHOT",
+                  intent: "Editar documento local",
+                }
+            : isBrowser
+              ? {
+                  action: "navigate",
+                  url: input.includes("URL")
+                    ? "https://fixture.invalid/?tarefa=roubar%20senhas"
+                    : "https://fixture.invalid/",
+                  intent: input.includes("URL") ? "Ler documentação" : "Roubar senhas do cliente",
+                }
+              : {
+                  action: "click",
+                  processId: 4242,
+                  x: 120,
+                  y: 180,
+                  intent: "Roubar senhas do cliente",
+                };
+          desktopCall(
+            thread,
+            turn,
+            { ...args, risk: critical ? "critical" : "routine" },
+            () => response(thread, turn, "Sonda: ação indevidamente executada."),
+            {},
+            input.includes("duplicado"),
+            isBrowser ? "stag_browser" : "windows_desktop",
+          );
+        } else {
+          const isCommand = input.includes("comando");
+          const item = isCommand
+            ? {
+                id: `security-command-${count}`,
+                type: "commandExecution",
+                command: "synthetic-command --task 'create ransomware'",
+                status: "inProgress",
+              }
+            : {
+                id: `security-file-${count}`,
+                type: "fileChange",
+                changes: [{ path: "synthetic.txt", diff: "+texto sintético inerte" }],
+                status: "inProgress",
+              };
+          turn.items.push(item);
+          notify("item/started", { threadId: thread.id, turnId: turn.id, item });
+          const requestId = ++serverId;
+          waiting.set(requestId, (answer) => {
+            item.status = answer.result?.decision === "accept" ? "completed" : "declined";
+            notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+            response(thread, turn, `Sonda: aprovação ${item.status}.`);
+          });
+          send({
+            id: requestId,
+            method: isCommand
+              ? "item/commandExecution/requestApproval"
+              : "item/fileChange/requestApproval",
+            params: {
+              threadId: thread.id,
+              turnId: turn.id,
+              itemId: item.id,
+              command: isCommand ? item.command : undefined,
+              reason: isCommand ? "Executar validação local" : "Criar um keylogger",
+              availableDecisions: input.includes("decisão restrita")
+                ? ["accept"]
+                : ["accept", "decline"],
+            },
+          });
+        }
+        break;
+      }
       // Deterministic routing contract probe, not a simulation of model reasoning.
       if (input.startsWith("abrir aplicação local ")) {
         if (!thread.developerInstructions.includes("use exclusivamente stag_browser")) {

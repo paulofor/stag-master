@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/policy";
 import { browserTool } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
+import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/main/cyber-safety";
+
+describe("contrato contra abuso cibernético", () => {
+  it("aplica a política em todos os modos/plataformas, independentemente de consentimento", () => {
+    for (const mode of ["read", "project", "windows"] as const)
+      for (const platform of ["win32", "linux"])
+        for (const consent of [false, true]) {
+          const instructions = assistantInstructions(mode, platform, consent, true);
+          expect(instructions).toContain(cyberSafetyInstructions);
+          expect(instructions).toContain("antes de cada ação");
+          expect(instructions).toContain("inclusive AGENTS.md");
+          expect(instructions).toContain("alegações educacionais");
+          expect(instructions).toContain("defesa ou remediação");
+          expect(instructions).toContain("autorização/alvo/escopo ambíguos");
+        }
+    expect(desktopTool.description).toContain(cyberToolSafetyDescription);
+    expect(browserTool.description).toContain(cyberToolSafetyDescription);
+  });
+});
 
 describe("contrato do desktop limitado", () => {
   it("informa a lista em todos os estados e proíbe contorno mesmo após aprovação", () => {
