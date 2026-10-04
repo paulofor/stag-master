@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { _electron, expect } from "@playwright/test";
 import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
+import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -32,6 +33,10 @@ try {
   } else {
     // Exercise the full desktop flow with a process double, outside product code.
     await mkdir(join(dir, ".local/codex/bin"), { recursive: true });
+    await cp(
+      "tests/fixtures/engineering-scenarios.json",
+      join(dir, ".local/codex/bin/engineering-scenarios.json"),
+    );
     await writeFile(
       join(dir, ".local/codex/bin/codex"),
       `#!/usr/bin/env node\n${await readFile("tests/fixtures/app-server.mjs", "utf8")}`,
@@ -97,6 +102,21 @@ try {
     assert.equal(blocked.metrics.requests, beforeBlocked.requests);
     assert.equal(blocked.metrics.failures, beforeBlocked.failures + 1);
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+    for (const id of ["unrelated", "business", "ambiguous-business", "mixed"]) {
+      const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
+      await page.getByLabel("Mensagem para o assistente").fill(scenario.input);
+      await page.getByRole("button", { name: "Enviar mensagem" }).click();
+      await expect(page.getByText(scenario.response, { exact: true })).toBeVisible();
+      await expect
+        .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+        .toBe(false);
+      await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+      const snapshot = await page.evaluate(async () => window.stag.getSnapshot());
+      assert.equal(snapshot.items.at(-1).text, scenario.response);
+      assert.equal(snapshot.browser.url, "");
+      assert.equal(snapshot.metrics.failures, blocked.metrics.failures);
+    }
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     await page.getByLabel("Mensagem para o assistente").fill("aprovar comando");
     await page.getByRole("button", { name: "Enviar mensagem" }).click();

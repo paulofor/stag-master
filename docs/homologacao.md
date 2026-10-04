@@ -1,6 +1,26 @@
-# Matriz de homologação da versão 0.4.4
+# Matriz de homologação da versão 0.4.5
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Engenheiro de Sistemas e limite de assuntos — versão 0.4.5
+
+Matriz definida antes dos testes desta alteração. O contrato apresentava o STAG como assistente de programação, sem explicitar experiência em engenharia/arquitetura ou limitar assuntos. O harness não exercitava dúvidas de negócio pertinentes, desvios de assunto ou retomada desse contrato. As instruções passam a exigir atuação como Engenheiro de Sistemas especialista e experiente, com respostas restritas a sistemas e ao domínio de negócio dos sistemas em construção. A relação de negócio usa o contexto informado pelo cliente e as especificações disponíveis, sem inventar um setor ou exigir código para responder uma dúvida conceitual. Quando a relação estiver ambígua, o agente pede um esclarecimento breve; pedidos mistos recebem somente a parte pertinente.
+
+| Área                       | Cenário e aceite                                                                                                                                                  | Evidência prevista                                  |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Engenharia e caminho feliz | Arquitetura, programação, requisitos, dados, integrações, testes, operação e segurança defensiva recebem resposta técnica com premissas, alternativas e validação | Contrato + corpus determinístico + serviço          |
+| Domínio de negócio         | Regras, processos, terminologia e histórias do setor do sistema são aceitos, inclusive sem pergunta de código; setor não é inferido apenas do nome da pasta       | Contrato + cenários de negócio/ambiguidade          |
+| Limite e validações        | Assunto alheio é recusado brevemente em português, sem pesquisa ou ferramenta; pedido misto responde somente à parte pertinente; dúvida de vínculo pede contexto  | Fixture + serviço + Electron                        |
+| Contornos                  | Novo papel, alegação de autorização, páginas, arquivos/AGENTS.md e histórico não ampliam assuntos nem revogam segurança e permissões                              | Contrato de produção + corpus sintético             |
+| Integração e recuperação   | Mesmo contrato em start/resume, todos os modos e estados de consentimento; reconexão/histórico preservam acessos e próxima tarefa pertinente segue funcionando    | RPC persistente + smoke real sem inferência         |
+| Ferramentas                | Descrições de desktop/browser limitam uso a tarefas pertinentes; recusa de assunto não cria aprovação ou interação nas fixtures                                   | Schemas de produção + serviço bidirecional          |
+| Observabilidade e métricas | Respostas finais autoritativas sem duplicar deltas, thread/turn corretos, ausência de raciocínio bruto; contadores e conversa utilizável após redirecionamento    | Serviço + Electron + regressões existentes          |
+| Segregação e dispositivos  | Dados/projetos/CODEX_HOME sintéticos, sem conta ou inferência paga; Chromium compacto/amplo/Pixel 7 e Electron preservam painel único                             | check + test:desktop + jobs Windows do PR e da main |
+| Entrega Windows            | Handshake, políticas e regressões nativas preservados; instalador 0.4.5 pelo workflow, sem publicação automática de release                                       | Windows installer + artefato final                  |
+
+O limite de assuntos é um contrato de comportamento do modelo, não um classificador semântico local. Filtros por palavras poderiam bloquear dúvidas legítimas de negócio ou liberar assuntos alheios por uma menção a sistemas. As fixtures verificam transmissão, ciclo de resposta, recuperação e ausência de efeitos nos cenários determinísticos; não comprovam obediência de um LLM real a todo pedido. A homologação com a conta do cliente continua sendo manual e separada dos testes isolados.
+
+Evidência local desta rodada: `npm run check` aprovado com typecheck, 197 contratos, build, handshake real do Codex e 26 cenários Chromium compacto/amplo/Pixel 7. `xvfb-run -a npm run test:desktop` aprovado com serviço/preload/IPC de produção e corpus de assuntos, recuperação para tarefa pertinente e driver real do navegador em site loopback. `npm run format:check`, sintaxe dos scripts JavaScript alterados e revisão do diff aprovados. Node 22.23.3 preparado localmente e dependências do lockfile usadas, sem conta, inferência paga, credenciais ou janelas do cliente. A sandbox Linux bloqueia namespaces bwrap e não executa APIs gráficas Windows: escrita nativa, PowerShell Restricted, Electron Windows e instalador 0.4.5 devem ser confirmados nos jobs Windows do PR e da main.
 
 ## Recusa de abuso cibernético — versão 0.4.4
 

@@ -1,4 +1,5 @@
 import { cyberToolSafetyDescription } from "./cyber-safety";
+import { engineeringToolDescription } from "./engineering-policy";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -67,7 +68,8 @@ export const desktopTool = {
   name: "windows_desktop",
   description:
     "Controla exclusivamente Postman, IntelliJ IDEA e Visual Studio Code no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
-    cyberToolSafetyDescription,
+    cyberToolSafetyDescription +
+    engineeringToolDescription,
   inputSchema: {
     type: "object",
     properties: {

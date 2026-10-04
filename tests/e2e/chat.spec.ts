@@ -29,6 +29,9 @@ test("painel compacto, onboarding e conversa Markdown", async ({ page }, info) =
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("heading", { name: "Do que vamos cuidar hoje?" })).toBeVisible();
+  await expect(page.locator(".welcome-description")).toContainText(
+    "Arquitetura, programação e regras de negócio.",
+  );
   await expect(page.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
   await mkdir(".local/screenshots", { recursive: true });
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-welcome.png` });

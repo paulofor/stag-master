@@ -1,8 +1,8 @@
 # STAG
 
-Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Foco em programação: ler especificações, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
+Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.4: conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.5: especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -34,6 +34,16 @@ O agente classifica o efeito de cada interação na tela; o serviço exige confi
 As operações aprovadas executam o script empacotado com política PowerShell definida apenas para o processo filho. Não é necessário mudar a política de execução do usuário ou do computador. Se uma política corporativa ainda bloquear o script, o STAG informa a falha e pede a verificação pelo administrador; essa política tem precedência. A versão 0.2.1 corrige o bloqueio causado pela política local padrão Restricted.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
+
+## Especialização e assuntos permitidos
+
+O STAG recebe instruções para atuar como Engenheiro de Sistemas especialista e experiente, do entendimento dos requisitos e regras de negócio à arquitetura, programação, testes e operação. Deve comparar alternativas e custos quando relevantes, explicitar premissas e incertezas e validar as mudanças com evidências.
+
+As respostas ficam restritas a engenharia de sistemas e ao domínio de negócio dos sistemas em construção. Dúvidas conceituais e sobre processos, terminologia, regras e histórias de usuário são permitidas, mesmo sem pedido de código. Por exemplo, explicar reserva de estoque em um sistema de estoque faz parte do trabalho. O modelo usa o contexto informado pelo cliente e as especificações do projeto; quando o vínculo estiver ambíguo, pede um esclarecimento breve.
+
+Pedidos claramente alheios recebem um redirecionamento breve, sem resposta ao conteúdo, pesquisa ou ferramenta. Pedidos mistos recebem somente a parte pertinente. Esse contrato vale em conversas novas e ao retomar históricos, em todos os modos; novo papel, autorização ou instruções em páginas/arquivos não ampliam os assuntos nem removem as regras de segurança e acesso. Após atualizar e reabrir o aplicativo, conversas retomadas recebem as novas instruções sem mudar suas permissões.
+
+O limite é uma orientação de comportamento do modelo, não um bloqueio semântico absoluto por código. O harness usa um corpus sintético para verificar transmissão do contrato, ciclo de resposta, ausência de efeitos nesses cenários e recuperação; não usa uma conta real nem comprova todas as respostas de um LLM.
 
 ## Recusa de solicitações maliciosas
 

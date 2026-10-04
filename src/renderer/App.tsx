@@ -348,9 +348,9 @@ export function App() {
                 cuidar hoje?
               </h1>
               <p className="welcome-description">
-                Do primeiro contexto ao último teste.
+                Arquitetura, programação e regras de negócio.
                 <br />
-                Um assistente ao lado do seu código.
+                Engenharia de sistemas ao seu lado.
               </p>
               {!state.account ? (
                 <div className="onboarding">
