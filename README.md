@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.6: memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.7: colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA e Visual Studio Code com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -34,6 +34,14 @@ O agente classifica o efeito de cada interação na tela; o serviço exige confi
 As operações aprovadas executam o script empacotado com política PowerShell definida apenas para o processo filho. Não é necessário mudar a política de execução do usuário ou do computador. Se uma política corporativa ainda bloquear o script, o STAG informa a falha e pede a verificação pelo administrador; essa política tem precedência. A versão 0.2.1 corrige o bloqueio causado pela política local padrão Restricted.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
+
+## Imagens na solicitação
+
+Copie uma captura ou imagem **PNG/JPEG** e use **Ctrl+V** no campo da mensagem. Confira as miniaturas e remova qualquer anexo pelo **X**. Você pode acrescentar a descrição ou enviar somente a imagem com **Enter** ou o botão de envio. **Shift+Enter** continua criando uma nova linha.
+
+Cada mensagem aceita até quatro imagens e **4 MB no total**, com até 8192 pixels por lado e 20 megapixels por imagem. Imagens inválidas são recusadas; uma falha de envio preserva texto e anexos para tentar novamente. Nova conversa, seleção de outro contexto, abertura de histórico e saída da conta descartam os anexos pendentes. Cancelar a seleção de pasta preserva o contexto.
+
+Ao enviar, as imagens vão para o modelo da sua conta ChatGPT pelo Codex e passam a integrar o histórico da conversa. Não há acesso contínuo à área de transferência, gravação dos anexos nas configurações ou arquivos temporários no projeto. Modelos declarados somente de texto não aceitam anexos. Imagens não autorizam desktop/navegador nem alteram as regras de assuntos ou segurança.
 
 ## Memória do projeto
 

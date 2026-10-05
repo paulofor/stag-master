@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -27,12 +27,20 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrowserPane } from "./BrowserPane";
+import { readPastedImage } from "./request-images";
+import {
+  maxRequestImages,
+  maxRequestImageBytes,
+  requestImageBytes,
+  requestImagesSchema,
+} from "../shared/request-images";
 import {
   emptySnapshot,
   type Action,
   type Approval,
   type ChatItem,
   type Snapshot,
+  type RequestImage,
 } from "../shared/types";
 
 const effortLabels: Record<string, string> = {
@@ -73,6 +81,20 @@ const suggestions = [
 export function App() {
   const [state, setState] = useState<Snapshot>(structuredClone(emptySnapshot));
   const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<RequestImage[]>([]);
+  const [pasting, setPasting] = useState(false);
+  const [sendingDraft, setSendingDraft] = useState(false);
+  const imageEpoch = useRef(0);
+  const pasteInProgress = useRef(false);
+  const sendInProgress = useRef(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const clearImages = useCallback(() => {
+    imageEpoch.current++;
+    pasteInProgress.current = false;
+    setPasting(false);
+    setImages([]);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [menu, setMenu] = useState<"history" | "account" | null>(null);
@@ -83,6 +105,7 @@ export function App() {
   const input = useRef<HTMLTextAreaElement>(null);
   const revision = useRef(0);
   const bridge = window.stag;
+  useEffect(clearImages, [clearImages, state.project?.path, state.account?.email]);
   useEffect(() => {
     if (state.approvals.length) setBrowserFocused(false);
   }, [state.approvals.length]);
@@ -109,7 +132,19 @@ export function App() {
       setError(null);
       setPending(true);
       try {
-        await bridge.request(action);
+        const before = stateRef.current;
+        const next = await bridge.request(action);
+        if (["newChat", "resume", "logout"].includes(action.type)) {
+          clearImages();
+          setDraft("");
+        } else if (
+          (action.type === "preferences" && before.mode !== next.mode) ||
+          (action.type === "selectProject" &&
+            (before.project?.path !== next.project?.path ||
+              before.threadId !== next.threadId ||
+              before.mode !== next.mode))
+        )
+          clearImages();
         return true;
       } catch (err) {
         setError(
@@ -122,23 +157,69 @@ export function App() {
         setPending(false);
       }
     },
-    [bridge],
+    [bridge, clearImages],
   );
   const canSend =
-    !!draft.trim() &&
+    (!!draft.trim() || images.length > 0) &&
     !!state.account &&
     !!state.project &&
     !!state.model &&
     state.connection === "ready" &&
     !state.busy &&
-    !pending;
+    !pending &&
+    !pasting &&
+    !sendingDraft;
   async function send() {
-    if (!canSend) return;
+    if (!canSend || pasteInProgress.current || sendInProgress.current) return;
+    sendInProgress.current = true;
+    setSendingDraft(true);
     const text = draft.trim();
-    setDraft("");
     setAtBottom(true);
-    if (!(await run({ type: "send", text }))) setDraft(text);
+    if (await run({ type: "send", text, ...(images.length ? { images } : {}) })) {
+      setDraft("");
+      clearImages();
+    }
+    sendInProgress.current = false;
+    setSendingDraft(false);
     input.current?.focus();
+  }
+  async function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.files);
+    if (!files.length) return; // Normal text paste remains the textarea's native behavior.
+    event.preventDefault();
+    if (pasteInProgress.current || sendInProgress.current || pending) return;
+    setError(null);
+    if (images.length + files.length > maxRequestImages) {
+      setError("Envie no máximo 4 imagens por mensagem.");
+      return;
+    }
+    if (
+      files.reduce(
+        (size, file) => size + file.size,
+        images.reduce((size, image) => size + requestImageBytes(image), 0),
+      ) > maxRequestImageBytes
+    ) {
+      setError("As imagens devem somar no máximo 4 MB por mensagem.");
+      return;
+    }
+    const epoch = imageEpoch.current;
+    pasteInProgress.current = true;
+    setPasting(true);
+    try {
+      const pasted = await Promise.all(files.map(readPastedImage));
+      if (epoch !== imageEpoch.current) return;
+      const result = requestImagesSchema.safeParse([...images, ...pasted]);
+      if (!result.success) throw new Error(result.error.issues[0].message);
+      setImages(result.data);
+    } catch (err) {
+      if (epoch === imageEpoch.current)
+        setError(err instanceof Error ? err.message : "Não foi possível colar a imagem.");
+    } finally {
+      if (epoch === imageEpoch.current) {
+        pasteInProgress.current = false;
+        setPasting(false);
+      }
+    }
   }
   useEffect(() => {
     if (atBottom && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
@@ -149,7 +230,6 @@ export function App() {
         event.preventDefault();
         if (!state.busy && !pending) {
           void run({ type: "newChat" });
-          setDraft("");
         }
       }
       if (event.key === "Escape") {
@@ -216,7 +296,6 @@ export function App() {
               aria-label="Nova conversa"
               disabled={disabledContext}
               onClick={() => {
-                setDraft("");
                 void run({ type: "newChat" });
               }}
             >
@@ -524,12 +603,19 @@ export function App() {
             </section>
           )}
           <section className="composer" aria-label="Escrever mensagem">
+            <ImageStrip
+              images={images}
+              disabled={pasting || sendingDraft}
+              remove={(index) => setImages(images.filter((_, imageIndex) => imageIndex !== index))}
+            />
             <textarea
               ref={input}
               aria-label="Mensagem para o assistente"
               placeholder="Descreva uma tarefa, uma ideia ou um problema…"
               value={draft}
               rows={3}
+              disabled={sendingDraft}
+              onPaste={(event) => void pasteImages(event)}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -538,6 +624,11 @@ export function App() {
                 }
               }}
             />
+            <div className="paste-hint" role="status">
+              {pasting
+                ? "Preparando imagem…"
+                : "Cole imagens com Ctrl+V · até 4 imagens, 4 MB no total"}
+            </div>
             <div className="composer-controls">
               <button
                 className="attach-button icon-button"
@@ -723,6 +814,7 @@ function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) =
   if (item.kind === "user")
     return (
       <div className="user-message">
+        <ImageStrip images={item.images || []} />
         <div>{item.text}</div>
       </div>
     );
@@ -818,6 +910,41 @@ function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) =
       {item.kind === "file" && <div className="tool-paths">{item.text}</div>}
       {item.output && <pre>{item.output}</pre>}
     </details>
+  );
+}
+
+function ImageStrip({
+  images,
+  remove,
+  disabled = false,
+}: {
+  images: RequestImage[];
+  remove?: (index: number) => void;
+  disabled?: boolean;
+}) {
+  if (!images.length) return null;
+  return (
+    <div
+      className={`request-images ${remove ? "pending-images" : "sent-images"}`}
+      aria-label="Imagens anexadas"
+    >
+      {images.map((image, index) => (
+        <figure key={index}>
+          <img src={image.dataUrl} alt={`Imagem anexada ${index + 1}`} />
+          {remove && (
+            <button
+              className="icon-button remove-image"
+              aria-label={`Remover imagem ${index + 1}`}
+              title="Remover imagem"
+              disabled={disabled}
+              onClick={() => remove(index)}
+            >
+              <X size={13} />
+            </button>
+          )}
+        </figure>
+      ))}
+    </div>
   );
 }
 

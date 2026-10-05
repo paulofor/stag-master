@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  net,
+  protocol,
+  session,
+  shell,
+} from "electron";
 import { mkdir } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -134,6 +144,12 @@ async function start(): Promise<void> {
   ipcMain.handle("stag:action", async (event, raw: unknown) => {
     trusted(event);
     const action = actionSchema.parse(raw) as Action;
+    if (action.type === "send") {
+      for (const image of action.images || []) {
+        const decoded = nativeImage.createFromDataURL(image.dataUrl);
+        if (decoded.isEmpty()) throw new Error("Imagem inválida ou incompleta. Cole outra imagem.");
+      }
+    }
     if (action.type === "browserBounds") {
       browser!.setBounds(action.bounds);
       return service!.snapshot();

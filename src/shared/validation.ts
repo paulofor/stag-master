@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { requestImagesSchema } from "./request-images";
 
 export const actionSchema = z.discriminatedUnion("type", [
   z
@@ -24,7 +25,17 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("resume"), threadId: z.string().min(1).max(200) }).strict(),
-  z.object({ type: z.literal("send"), text: z.string().trim().min(1).max(100000) }).strict(),
+  z
+    .object({
+      type: z.literal("send"),
+      text: z.string().trim().max(100000),
+      images: requestImagesSchema.optional(),
+    })
+    .strict()
+    .refine(
+      (action) => !!action.text || !!action.images?.length,
+      "Escreva uma mensagem ou cole uma imagem.",
+    ),
   z
     .object({
       type: z.literal("answer"),

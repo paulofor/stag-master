@@ -117,11 +117,16 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 state.threadId = `thread-${++count}`;
                 state.threads.unshift({
                   id: state.threadId,
-                  title: action.text,
+                  title: action.text || "Solicitação com imagens",
                   updatedAt: Date.now(),
                 });
               }
-              state.items.push({ id: `user-${++count}`, kind: "user", text: action.text });
+              state.items.push({
+                id: `user-${++count}`,
+                kind: "user",
+                text: action.text,
+                ...(action.images?.length ? { images: action.images } : {}),
+              });
               if (action.text.includes("navegador") && state.browser.authorized) {
                 if (action.text.includes("crítico"))
                   state.approvals = [

@@ -353,6 +353,52 @@ h1 {
 .desktop-access .desktop-authorized {
   color: #587448;
 }
+.paste-hint {
+  font-size: 9px;
+  color: #7d876f;
+  padding: 0 14px 8px;
+}
+.request-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
+.pending-images {
+  padding: 12px 14px 0;
+}
+.request-images figure {
+  position: relative;
+  margin: 0;
+  min-width: 0;
+}
+.request-images img {
+  display: block;
+  width: 72px;
+  height: 64px;
+  object-fit: contain;
+  border: 1px solid #dbe0d2;
+  background: #fffefa;
+  border-radius: 7px;
+}
+.sent-images {
+  margin-bottom: 8px;
+}
+.sent-images img {
+  width: 160px;
+  height: 120px;
+  max-width: 100%;
+}
+.remove-image {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: #fffefa;
+  border: 1px solid #dbe0d2;
+}
 .composer:focus-within {
   border-color: #9caf92;
 }

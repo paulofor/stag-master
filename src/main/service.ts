@@ -11,8 +11,10 @@ import {
   type Snapshot,
   type BrowserControl,
   type BrowserInfo,
+  type RequestImage,
 } from "../shared/types";
 import { actionSchema, safeLink } from "../shared/validation";
+import { requestImagesSchema } from "../shared/request-images";
 import { RpcClient, type RpcMessage } from "./rpc";
 import { SettingsStore, type Settings } from "./settings";
 import {
@@ -37,7 +39,7 @@ interface WireItem {
   text?: string;
   phase?: string;
   status?: string;
-  content?: { type: string; text?: string }[];
+  content?: { type: string; text?: string; url?: string }[];
   command?: string;
   aggregatedOutput?: string;
   changes?: { path: string; diff?: string }[];
@@ -91,6 +93,7 @@ const modelSchema = z.object({
     z.object({ reasoningEffort: z.string(), description: z.string() }),
   ),
   isDefault: z.boolean().default(false),
+  inputModalities: z.array(z.string()).optional(),
 });
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -101,10 +104,9 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 function errorText(error: unknown): string {
-  return (error instanceof Error ? error.message : "Não foi possível concluir a ação.").replace(
-    /(?:sk-|ghp_)[\w-]+/g,
-    "[credencial removida]",
-  );
+  return (error instanceof Error ? error.message : "Não foi possível concluir a ação.")
+    .replace(/(?:sk-|ghp_)[\w-]+/g, "[credencial removida]")
+    .replace(/data:image\/[^\s"'<>]+/gi, "[imagem removida]");
 }
 
 export class AssistantService extends EventEmitter {
@@ -236,7 +238,7 @@ export class AssistantService extends EventEmitter {
           await this.resume(action.threadId);
           break;
         case "send":
-          await this.send(action.text);
+          await this.send(action.text, action.images || []);
           break;
         case "stop":
           await this.stop();
@@ -569,7 +571,7 @@ export class AssistantService extends EventEmitter {
     this.state.busy = last?.status === "inProgress";
     if (this.state.busy) this.turnId = last!.id;
   }
-  private async send(input: string): Promise<void> {
+  private async send(input: string, images: RequestImage[]): Promise<void> {
     if (this.sending || this.state.busy) throw new Error("Aguarde ou pare a execução atual.");
     if (this.state.connection !== "ready" || !this.state.account)
       throw new Error("Entre com sua conta ChatGPT para continuar.");
@@ -577,6 +579,12 @@ export class AssistantService extends EventEmitter {
     const selectedModel = this.state.models.find((m) => m.model === this.state.model);
     if (!selectedModel)
       throw new Error("Nenhum modelo disponível. Reconecte para atualizar a lista.");
+    if (
+      images.length &&
+      selectedModel.inputModalities &&
+      !selectedModel.inputModalities.includes("image")
+    )
+      throw new Error("Este modelo não aceita imagens. Selecione outro modelo da sua conta.");
     if (this.state.mode === "windows" && !this.windowsConsent)
       throw new Error("Confirme o acesso ao Windows.");
     if (this.state.platform === "win32" && this.state.mode !== "windows" && !this.sandboxReady)
@@ -588,6 +596,7 @@ export class AssistantService extends EventEmitter {
         id: `blocked-user-${this.safetyBlockId + 1}`,
         kind: "user",
         text: input,
+        ...(images.length ? { images } : {}),
       });
       this.recordSafetyBlock("assistant");
       return;
@@ -633,12 +642,20 @@ export class AssistantService extends EventEmitter {
         };
         await this.options.store.save(this.settings);
       }
-      this.state.items.push({ id: localId, kind: "user", text: input });
+      this.state.items.push({
+        id: localId,
+        kind: "user",
+        text: input,
+        ...(images.length ? { images } : {}),
+      });
       this.publish();
       const result = await this.call<{ turn: WireTurn }>("turn/start", {
         threadId: this.state.threadId,
         cwd: this.state.project.path,
-        input: [{ type: "text", text: input }],
+        input: [
+          ...(input ? [{ type: "text", text: input }] : []),
+          ...images.map((image) => ({ type: "image", url: image.dataUrl })),
+        ],
         model: this.state.model,
         effort: this.state.effort,
         ...turnPolicy(this.state.mode, this.state.project.path),
@@ -648,6 +665,7 @@ export class AssistantService extends EventEmitter {
     } catch (error) {
       this.state.busy = false;
       this.turnId = null;
+      this.state.items = this.state.items.filter((item) => item.id !== localId);
       // A timed-out request may have started upstream; reconnect instead of replaying.
       if (/demorou/.test(errorText(error))) this.rpc?.close();
       throw error;
@@ -684,11 +702,30 @@ export class AssistantService extends EventEmitter {
         .filter((c) => c.type === "text")
         .map((c) => c.text || "")
         .join("\n");
+      const parsedImages = requestImagesSchema.safeParse(
+        (item.content || [])
+          .filter((content) => content.type === "image")
+          .map((content) => ({ dataUrl: content.url })),
+      );
+      const images = parsedImages.success ? parsedImages.data : [];
       const local = this.state.items.findIndex(
-        (i) => i.kind === "user" && i.id.startsWith("local-") && i.text === message,
+        (i) =>
+          i.kind === "user" &&
+          i.id.startsWith("local-") &&
+          i.text === message &&
+          JSON.stringify(i.images || []) === JSON.stringify(images),
       );
       if (local !== -1) this.state.items.splice(local, 1);
-      next = { id: item.id, kind: "user", text: message };
+      next = {
+        id: item.id,
+        kind: "user",
+        text:
+          message ||
+          (!images.length && item.content?.some((content) => content.type === "image")
+            ? "Imagem indisponível no histórico."
+            : ""),
+        ...(images.length ? { images } : {}),
+      };
     }
     if (item.type === "commandExecution")
       next = {
