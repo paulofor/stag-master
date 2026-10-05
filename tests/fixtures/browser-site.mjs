@@ -1,10 +1,33 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
+import { build } from "esbuild";
 
 // Every page and field is synthetic. Only loopback traffic, with no account or external service.
 export async function startBrowserSite() {
+  const comboScript = (
+    await build({
+      entryPoints: ["tests/fixtures/browser-combos.tsx"],
+      bundle: true,
+      write: false,
+      platform: "browser",
+      format: "iife",
+      jsx: "automatic",
+    })
+  ).outputFiles[0].text;
   const effects = { submissions: 0, downloads: 0 };
   const server = createServer((request, response) => {
+    if (request.url === "/combos.js") {
+      response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
+      response.end(comboScript);
+      return;
+    }
+    if (request.url === "/combos") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(
+        '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Combos sintéticos</title><style>body{font:16px system-ui;padding:16px}label{display:block;margin-top:12px}select,input,[role=combobox],[role=option]{padding:8px;border:1px solid #aaa;margin:4px}section{margin:16px 0}[role=listbox]{padding:10px;border:2px solid #467;background:#eef}</style><body><div id="combos"></div><script src="/combos.js"></script></body></html>',
+      );
+      return;
+    }
     if (request.url === "/submit") {
       effects.submissions++;
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

@@ -1199,6 +1199,33 @@ describe("fluxo local do assistente", () => {
     await approve(true);
     expect(browser.execute).toHaveBeenCalledOnce();
   });
+  it("seleção de combo usa consentimento/fila, deduplica, recusa e recupera sem expor opção", async () => {
+    await ready();
+    await send("navegador combo contrato");
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador combo contrato duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(browser.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "select", label: "SYNTHETIC_PRIVATE_CHOICE" }),
+    );
+    expect(service.snapshot().approvals).toEqual([]);
+    await send("navegador combo contrato crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_PRIVATE_CHOICE");
+    await approve(false);
+    expect(browser.execute).toHaveBeenCalledOnce();
+    browser.execute.mockRejectedValueOnce(new Error("As opções mudaram. Faça novo snapshot."));
+    await send("navegador combo contrato crítico");
+    await approve(true);
+    expect(service.snapshot().metrics.failures).toBe(1);
+    await send("navegador combo contrato");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(3);
+    expect(service.snapshot().error).toBeNull();
+  });
   it("navegador trata erros do probe/driver, recupera e não duplica pedidos", async () => {
     await ready();
     await service.request({ type: "browserConsent", allow: true });
