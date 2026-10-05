@@ -67,7 +67,7 @@ export const desktopTool = {
   type: "function",
   name: "windows_desktop",
   description:
-    "Controla exclusivamente Postman, IntelliJ IDEA e Visual Studio Code no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
+    "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. No DBeaver, inspecionar a interface e editar SQL sem executá-lo são rotina; alterar dados/esquema, confirmar transações, importar/exportar ou enviar dados, usar credenciais e ações de efeito incerto exigem confirmação específica com conexão, alvo e efeito concretos. Não presuma que a conexão é local ou de teste. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
     cyberToolSafetyDescription +
     engineeringToolDescription,
   inputSchema: {
@@ -177,7 +177,7 @@ export function desktopApproval(input: DesktopArguments): Pick<Approval, "title"
 function desktopOperationDetail(input: DesktopArguments): string {
   switch (input.action) {
     case "list_windows":
-      return "Listar somente janelas de Postman, IntelliJ IDEA e Visual Studio Code.";
+      return "Listar somente janelas de Postman, IntelliJ IDEA, Visual Studio Code e DBeaver.";
     case "screenshot":
       return `Capturar somente a janela do processo ${input.processId}.`;
     case "focus_window":
@@ -270,7 +270,7 @@ export class DesktopTools {
       }
       if (/STAG_DESKTOP_DENIED/.test(detail)) {
         throw new Error(
-          "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
+          "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
           { cause: error },
         );
       }
@@ -300,7 +300,7 @@ export class DesktopTools {
         contentItems: [
           {
             type: "inputText",
-            text: `Janela do processo ${capture.processId}: ${width}×${height} pixels. Origem física: x=${x}, y=${y}. Para clicar/rolar, some a origem às coordenadas na imagem e use processId=${capture.processId}. Somente Postman, IntelliJ IDEA e Visual Studio Code são permitidos.`,
+            text: `Janela do processo ${capture.processId}: ${width}×${height} pixels. Origem física: x=${x}, y=${y}. Para clicar/rolar, some a origem às coordenadas na imagem e use processId=${capture.processId}. Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver são permitidos.`,
           },
           { type: "inputImage", imageUrl: `data:image/png;base64,${capture.imageBase64}` },
         ],

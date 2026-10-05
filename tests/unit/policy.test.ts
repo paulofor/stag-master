@@ -52,17 +52,20 @@ describe("contrato do desktop limitado", () => {
     for (const mode of ["read", "project", "windows"] as const) {
       const instructions = assistantInstructions(mode, "win32", false, true);
       expect(instructions).toContain(
-        "restrito exclusivamente a Postman, IntelliJ IDEA e Visual Studio Code",
+        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
       );
       expect(instructions).toContain("não é ampliada por confirmação crítica");
       expect(instructions).toContain("terminal de IDE, scripts, bibliotecas ou outra automação");
       expect(instructions).toContain("nunca da tela inteira");
       expect(instructions).toContain("incluindo screenshot, click e scroll");
+      expect(instructions).toContain("editar SQL sem executá-lo são rotina");
+      expect(instructions).toContain("Não presuma que uma conexão é local ou de teste");
     }
     expect(desktopTool.description).toContain(
-      "Controla exclusivamente Postman, IntelliJ IDEA e Visual Studio Code",
+      "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
     );
     expect(desktopTool.description).toContain("mesmo após aprovação");
+    expect(desktopTool.description).toContain("confirmar transações");
     expect(desktopTool.inputSchema.anyOf).toContainEqual({ required: ["processId"] });
   });
 });

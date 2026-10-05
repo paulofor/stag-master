@@ -587,8 +587,8 @@ export function App() {
               <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
                 <Monitor size={14} />
                 {state.mode === "windows"
-                  ? "Desktop autorizado · Postman, IntelliJ e VS Code"
-                  : "Desktop · Postman, IntelliJ e VS Code"}
+                  ? "Desktop autorizado · Postman, IntelliJ, VS Code e DBeaver"
+                  : "Desktop · Postman, IntelliJ, VS Code e DBeaver"}
               </span>
               <button
                 className="text-button"
@@ -760,10 +760,10 @@ export function App() {
               </div>
               <h2 id="windows-title">Trabalhar no Windows</h2>
               <p>
-                O STAG poderá controlar somente Postman, IntelliJ IDEA e Visual Studio Code pelo
-                desktop, com capturas apenas da janela escolhida, mouse e teclado. Outros programas
-                e atalhos globais ficam bloqueados, mesmo com aprovação. Páginas web usam o
-                navegador integrado, autorizado separadamente. Capturas e edição local rotineiras
+                O STAG poderá controlar somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver
+                pelo desktop, com capturas apenas da janela escolhida, mouse e teclado. Outros
+                programas e atalhos globais ficam bloqueados, mesmo com aprovação. Páginas web usam
+                o navegador integrado, autorizado separadamente. Capturas e edição local rotineiras
                 seguem sem novas permissões. Exclusão, envio externo, publicação, pagamentos,
                 credenciais e mudanças no sistema pedem confirmação, assim como interações sem
                 contexto suficiente. Capturas e títulos dessas janelas são enviados ao ChatGPT para

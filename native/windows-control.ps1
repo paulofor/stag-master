@@ -69,7 +69,8 @@ function Get-StagAllowedProcess([int]$processId) {
         'idea64' { $product = '^IntelliJ IDEA(?: (?:Community|Ultimate) Edition)?$'; $publisher = '^JetBrains s\.r\.o\.?$' }
         'idea' { $product = '^IntelliJ IDEA(?: (?:Community|Ultimate) Edition)?$'; $publisher = '^JetBrains s\.r\.o\.?$' }
         'code' { $product = '^(?:Microsoft )?Visual Studio Code$'; $publisher = '^Microsoft Corporation$' }
-        default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA e Visual Studio Code.' }
+        'dbeaver' { $product = '^DBeaver(?: Community)?$'; $publisher = '^DBeaver Corp$' }
+        default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver.' }
     }
     # A title, renamed executable or model-provided name cannot grant access.
     if (-not $target.Path -or [IO.Path]::GetFileName($target.Path) -ine ($name + '.exe') -or
