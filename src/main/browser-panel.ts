@@ -232,6 +232,14 @@ export class BrowserPanel extends EventEmitter {
         action: "probe",
         pageId: input.pageId,
         ref: input.ref,
+        ...(input.action === "select"
+          ? {
+              operation: "select" as const,
+              value: input.value,
+              label: input.label,
+              index: input.index,
+            }
+          : {}),
       })) as { reason: string | null };
       reason ||= probe.reason;
     }
@@ -296,7 +304,8 @@ export class BrowserPanel extends EventEmitter {
       if (input.action === "press") {
         this.window.focus();
         this.view.webContents.focus();
-        const keyCode = input.key === "Control+A" ? "A" : input.key;
+        // Electron expects accelerator codes (Down), while the tool uses DOM keys (ArrowDown).
+        const keyCode = input.key === "Control+A" ? "A" : input.key.replace(/^Arrow/, "");
         const modifiers: Electron.KeyboardInputEvent["modifiers"] =
           input.key === "Control+A" ? ["control"] : [];
         this.view.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });

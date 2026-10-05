@@ -430,12 +430,69 @@ try {
         (item) => item.text === "stag_browser" && item.status === "completed",
       ).length >= 2,
     );
+    // Exercise selection through IPC, App Server requests and the production browser driver.
+    const comboDom = (code) =>
+      application.evaluate(async ({ BrowserWindow }, expression) => {
+        const parent = BrowserWindow.getAllWindows()[0];
+        const view = parent.contentView.children.find(
+          (child) => child.webContents && child.webContents !== parent.webContents,
+        );
+        return view.webContents.executeJavaScript(expression);
+      }, code);
+    const comboTask = `navegador combo real ${new URL("combos", site.url).href}`;
+    await input.fill(comboTask);
+    await input.press("Enter");
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 1);
+    await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+    const criticalComboTask = comboTask.replace("navegador", "navegador crítico");
+    await input.fill(criticalComboTask);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 0);
+    await page.getByRole("button", { name: "Recusar", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 0);
+    await input.fill(criticalComboTask);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    await comboDom(
+      "document.querySelector('#native').options[7].value='SYNTHETIC_CHANGED_AFTER_APPROVAL'",
+    );
+    await page.getByRole("button", { name: "Permitir esta ação" }).click();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 0);
+    assert.match(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).error),
+      /alvo mudou/,
+    );
+    await input.fill(criticalComboTask);
+    await input.press("Enter");
+    await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Permitir esta ação" }).click();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 7);
+    assert.doesNotMatch(
+      JSON.stringify(await page.evaluate(async () => window.stag.getSnapshot())),
+      /SYNTHETIC_INTERNAL|SYNTHETIC_CHANGED_AFTER_APPROVAL/,
+    );
     await input.fill(`navegador envio real ${site.url}`);
     await input.press("Enter");
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     assert.equal(site.effects.submissions, 0);
     await page.getByRole("button", { name: "Recusar", exact: true }).click();
-    await expect(page.getByText("Navegador: recusado.", { exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await expect(page.getByText("Navegador: recusado.", { exact: true }).last()).toBeVisible();
     assert.equal(site.effects.submissions, 0);
     await input.fill(`navegador envio real ${site.url}`);
     await input.press("Enter");

@@ -1,6 +1,25 @@
-# Matriz de homologação da versão 0.4.11
+# Matriz de homologação da versão 0.4.12
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Seleção de combos no navegador — versão 0.4.12
+
+Matriz definida antes dos testes. O snapshot não descobria combobox/listbox/option ARIA; click não emitia os eventos de pressão usados por componentes personalizados. Select aceitava apenas o valor interno e não verificava grupos desabilitados, ambiguidades nem mudanças nas opções. O harness cobria somente um select HTML simples. A correção usa operações fixas e referências do snapshot, na fila e sessão existentes.
+
+| Área                          | Cenário e aceite                                                                                                                                                 | Evidência prevista                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Caminho feliz                 | Select nativo por texto exato, índice ou valor legado; eventos input/change atualizam a aplicação; label associado identifica o campo                            | Driver Electron real + site loopback                  |
+| Personalizados                | Combobox ARIA abre por mouse/tecla; opções de listbox, inclusive em portal, aparecem após novo snapshot e podem ser clicadas; campo pesquisável usa fill         | Driver real + fixture sintética com handlers de mouse |
+| Validações                    | Exatamente um seletor; ambiguidade, opção inexistente, grupo desabilitado, controle somente leitura e lista múltipla não provocam seleção acidental              | Schema + driver real                                  |
+| Alvos e recuperação           | Opções/associações alteradas, popup fechado e referências antigas são recusados; novo snapshot recupera; sessão descartada invalida alvos                        | Driver real + serviço                                 |
+| Confirmações                  | Opção crítica ou campo de pagamento exige confirmação; recusa não produz efeito, aprovação revalida opções; rotina sem cards                                     | Driver real + App Server determinístico               |
+| Privacidade e observabilidade | Snapshots e cards omitem valores internos/preenchidos; erros legíveis não copiam valores; contadores existentes, deduplicação e fila desktop/browser preservados | Contratos + serviço + Electron                        |
+| Integração e segregação       | Schema real registrado no Codex; somente projeto/CODEX_HOME temporários e site local, sem credenciais ou inferência paga                                         | check + test:desktop                                  |
+| Dispositivos e entrega        | Chromium compacto/amplo/Pixel 7; WebContentsView Electron Linux e Windows; instalador versionado sem publicação automática                                       | check local + jobs PR/main                            |
+
+O harness comprova as operações do driver e a transmissão do contrato, sem garantir decisões semânticas de todo LLM. Widgets sem semântica acessível ou que exigem eventos confiáveis específicos podem exigir ação manual; não há fallback para desktop ou navegador externo.
+
+Evidência local: `npm run check` aprovado com 272 testes de contrato, build, handshake do Codex isolado e 46 cenários Chromium compacto/amplo/Pixel 7; `xvfb-run -a npm run test:desktop`, `format:check`, sintaxe dos scripts JavaScript e revisão do diff aprovados. O Electron exercitou componentes React controlados, pesquisa, portais, cliques por mouse/pointer, seleção por texto/índice/valor e recuperação de opções alteradas, inclusive entre o card e a aprovação pelo serviço. A primeira rodada revelou que ArrowDown era enviado sem a tradução para o código Down do Electron; a regressão agora confere os quatro eventos de seta recebidos pela página. A API exige [códigos Accelerator](https://www.electronjs.org/docs/latest/api/structures/keyboard-input-event); os combos seguem o [padrão ARIA](https://www.w3.org/WAI/ARIA/apg/patterns/combobox/). Somente dados sintéticos e loopback, Node 22.23.3, sem conta ou inferência paga. Linux não comprova Windows nativo e bloqueia namespaces bwrap: o job Windows deve validar os testes nativos, o navegador e o instalador do HEAD antes do merge.
 
 ## Adaptações de acesso no desenvolvimento local — versão 0.4.11
 

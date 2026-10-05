@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
+import { validateBrowserCombos } from "./test-browser-combos.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
@@ -176,6 +177,7 @@ export async function validateBrowser(application, dir, site) {
     console.log(
       "Browser real: segurança, IPC remoto, popups/downloads, protocolos e sessão efêmera.",
     );
+    await validateBrowserCombos({ execute, reason, snapshot, dom, target, site });
     assert.deepEqual(await dom("window.securityProbe"), {
       node: "undefined",
       require: "undefined",

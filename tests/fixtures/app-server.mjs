@@ -939,6 +939,47 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             else response(thread, turn, "Navegador: sequência concluída.");
           };
           next();
+        } else if (input.includes("combo contrato")) {
+          call(
+            {
+              action: "select",
+              pageId: "fixture-page",
+              ref: "e1",
+              label: "SYNTHETIC_PRIVATE_CHOICE",
+              risk: input.includes("crítico") ? "critical" : "routine",
+              intent: "Escolher opção sintética local",
+            },
+            null,
+            input.includes("duplicado"),
+          );
+        } else if (input.includes("combo real")) {
+          const url = input.split("combo real")[1].trim();
+          call(
+            { action: "navigate", url, risk: "routine", intent: "Ler combos sintéticos" },
+            () => {
+              call({ action: "snapshot" }, (answer) => {
+                const doc = JSON.parse(answer.result?.contentItems?.[0]?.text || "{}");
+                const ref = doc.elements?.find((el) => el.label === "Ambiente de teste")?.ref;
+                if (!ref) {
+                  response(thread, turn, "Navegador: combo não encontrado.");
+                  return;
+                }
+                call(
+                  {
+                    action: "select",
+                    pageId: doc.pageId,
+                    ref,
+                    label: input.includes("crítico")
+                      ? "Excluir projeto sintético"
+                      : "Desenvolvimento local",
+                    risk: "routine",
+                    intent: "Escolher opção sintética no formulário local",
+                  },
+                  () => response(thread, turn, "Navegador: combo selecionado."),
+                );
+              });
+            },
+          );
         } else if (input.includes("paralelo") || input.includes("misto")) {
           let remaining = 2;
           const next = () => {
