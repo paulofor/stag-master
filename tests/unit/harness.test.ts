@@ -6,48 +6,62 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { promisify } from "node:util";
 import { createGitRunner, prepareProjectGit } from "../../src/main/project-git";
 
-it("probe Git usa caminho absoluto com PATH restrito e distingue propriedade de falha de inicialização", async () => {
+it("probe envia Git diretamente, distingue propriedade de falha e recupera", async () => {
   await mkdir(resolve(".local"), { recursive: true });
   const dir = await mkdtemp(resolve(".local/git-probe-test-"));
   try {
-    const { gitFixture } = await import(
+    const { gitFixture, verifySandboxGit } = await import(
       pathToFileURL(resolve("tests/fixtures/project-git.mjs")).href
     );
     const fixture = await gitFixture(dir);
-    await fixture.init(fixture.project);
+    const nested = resolve(fixture.project, "frontend");
+    const neighbor = resolve(dir, "vizinho");
+    for (const path of [fixture.project, nested, neighbor]) await fixture.init(path);
     const execute = promisify(execFile);
     await expect(
       execute("git", ["--version"], { cwd: dir, env: { ...fixture.env, PATH: "" } }),
     ).rejects.toMatchObject({ code: "ENOENT" });
-    const probe = async (executable: string) => {
-      const { stdout } = await execute(
-        process.execPath,
-        [resolve("tests/fixtures/git-status.mjs"), fixture.project, executable],
-        {
-          cwd: dir,
-          env: { ...fixture.env, PATH: "" },
-          encoding: "utf8",
-        },
-      );
-      return JSON.parse(stdout);
+    const policy = {
+      type: "workspaceWrite",
+      writableRoots: [fixture.project],
+      networkAccess: true,
     };
-    expect(await probe(resolve(dir, "git-ausente"))).toMatchObject({
-      code: null,
-      launchError: "ENOENT",
-      dubiousOwnership: false,
+    const call = vi.fn(
+      async (
+        method: string,
+        params: { command: string[]; env: Record<string, string>; sandboxPolicy: unknown },
+      ) => {
+        expect(method).toBe("command/exec");
+        expect(params.command[0]).toBe(fixture.executable);
+        expect(params.sandboxPolicy).toEqual(policy);
+        const result = await fixture.git(params.command.slice(1), { ...params.env, PATH: "" });
+        const stderr = result.dubiousOwnership
+          ? "fatal: detected dubious ownership in repository"
+          : "";
+        return { exitCode: result.code, stdout: result.stdout, stderr };
+      },
+    );
+    const probe = () =>
+      verifySandboxGit({ call }, fixture.executable, fixture.project, nested, neighbor, policy);
+    await expect(probe()).rejects.toThrow("confiança cadastrada");
+    expect(
+      (await prepareProjectGit(fixture.project, { run: createGitRunner(fixture.env) })).verified,
+    ).toBe(2);
+    await probe();
+    const ordinaryCall = call.getMockImplementation()!;
+    call.mockImplementation(async (method, params) => {
+      if (params.command.includes(neighbor)) throw new Error("spawn EPERM");
+      return ordinaryCall(method, params);
     });
-    expect(await probe(fixture.executable)).toMatchObject({
-      code: 128,
-      launchError: null,
-      dubiousOwnership: true,
+    await expect(probe()).rejects.toThrow("EPERM");
+    call.mockImplementation(async (method, params) => {
+      if (params.command.includes(neighbor))
+        throw new Error(
+          "sandbox denied exec error: fatal: detected dubious ownership in repository",
+        );
+      return ordinaryCall(method, params);
     });
-    const report = await prepareProjectGit(fixture.project, { run: createGitRunner(fixture.env) });
-    expect(report.verified).toBe(1);
-    expect(await probe(fixture.executable)).toEqual({
-      code: 0,
-      launchError: null,
-      dubiousOwnership: false,
-    });
+    await probe();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -3,6 +3,7 @@ import { access, mkdir, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
+import assert from "node:assert/strict";
 
 const execute = promisify(execFile);
 
@@ -47,7 +48,12 @@ export async function gitFixture(dir) {
       return { code: 0, stdout };
     } catch (error) {
       // Never surface stderr/command lines; some test values deliberately resemble credentials.
-      if (typeof error.code === "number") return { code: error.code, stdout: error.stdout || "" };
+      if (typeof error.code === "number")
+        return {
+          code: error.code,
+          stdout: error.stdout || "",
+          dubiousOwnership: /detected dubious ownership/.test(error.stderr || ""),
+        };
       throw new Error("Git indisponível no harness isolado.");
     }
   };
@@ -57,4 +63,45 @@ export async function gitFixture(dir) {
       throw new Error("Falha ao criar repositório sintético.");
   };
   return { home, project, env, git, init, executable };
+}
+
+// Exercise Git itself through the production sandbox API, without a second Node process launcher.
+export async function verifySandboxGit(rpc, executable, project, nested, neighbor, sandboxPolicy) {
+  for (const repository of [project, nested, neighbor]) {
+    let result;
+    try {
+      result = await rpc.call("command/exec", {
+        command: [
+          executable,
+          "--no-optional-locks",
+          "-C",
+          repository,
+          "status",
+          "--short",
+          "--branch",
+        ],
+        env: { GIT_TEST_ASSUME_DIFFERENT_OWNER: "1" },
+        cwd: project,
+        sandboxPolicy,
+        timeoutMs: 15000,
+      });
+    } catch (error) {
+      // Windows can return a nonzero exit as an RPC error. Only this Git diagnostic proves ownership denial.
+      if (repository === neighbor && /detected dubious ownership/.test(error.message)) continue;
+      throw error;
+    }
+    if (repository === neighbor) {
+      assert.notEqual(result.exitCode, 0);
+      assert.match(
+        result.stderr,
+        /detected dubious ownership/,
+        "Vizinho deve ser bloqueado por propriedade, não por falha de inicialização.",
+      );
+    } else
+      assert.equal(
+        result.exitCode,
+        0,
+        "O sandbox deve reconhecer a confiança cadastrada pelo main.",
+      );
+  }
 }

@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
 import { startImageProvider } from "../tests/fixtures/image-provider.mjs";
-import { gitFixture } from "../tests/fixtures/project-git.mjs";
+import { gitFixture, verifySandboxGit } from "../tests/fixtures/project-git.mjs";
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/codex-smoke-"));
 const project = join(dir, "projeto com espaço-ação");
@@ -20,8 +20,6 @@ try {
   await mkdir(neighbor);
   const runner = join(dir, "workspace-files.mjs");
   await cp("tests/fixtures/workspace-files.mjs", runner);
-  const gitStatus = join(dir, "git-status.mjs");
-  await cp("tests/fixtures/git-status.mjs", gitStatus);
   await build({
     entryPoints: [
       "src/main/rpc.ts",
@@ -222,29 +220,14 @@ try {
     );
   } else {
     assert.equal(probe.exitCode, 0, probe.stderr);
-    for (const repository of [project, nestedRepository, neighbor]) {
-      const result = await rpc.call("command/exec", {
-        command: [process.execPath, gitStatus, repository, gitTest.executable],
-        cwd: project,
-        sandboxPolicy: writePolicy,
-        timeoutMs: 15000,
-      });
-      assert.equal(result.exitCode, 0, "O probe Git deve iniciar no sandbox.");
-      const status = JSON.parse(result.stdout);
-      assert.equal(
-        status.launchError,
-        null,
-        `Falha ao iniciar Git no sandbox: ${status.launchError}`,
-      );
-      const code = status.code;
-      if (repository === neighbor)
-        assert.equal(
-          status.dubiousOwnership,
-          true,
-          "Vizinho deve continuar bloqueado por propriedade, não por falha de inicialização.",
-        );
-      else assert.equal(code, 0, "O sandbox deve reconhecer a confiança cadastrada pelo main.");
-    }
+    await verifySandboxGit(
+      rpc,
+      gitTest.executable,
+      project,
+      nestedRepository,
+      neighbor,
+      writePolicy,
+    );
     console.log(
       "Git no sandbox real: raiz e subpasta autorizadas; vizinho continua bloqueado por propriedade.",
     );
