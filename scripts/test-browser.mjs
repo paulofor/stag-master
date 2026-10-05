@@ -65,6 +65,7 @@ export async function validateBrowser(application, dir, site) {
     assert.ok(ref, `Elemento sintético ausente: ${label}`);
     return { pageId: doc.pageId, ref };
   };
+  let validationError;
   try {
     console.log(
       "Browser real: navegação, texto, campos, seleções, cliques, teclas, rolagem e captura.",
@@ -220,6 +221,7 @@ export async function validateBrowser(application, dir, site) {
     await dom(
       "document.cookie='synthetic_session=fixture';localStorage.setItem('synthetic','fixture')",
     );
+    console.log("Browser real: descartar sessão sintética e recuperar navegação interrompida.");
     await application.evaluate(() => global.browserHarness.browser.reset());
     await execute({
       action: "navigate",
@@ -250,6 +252,7 @@ export async function validateBrowser(application, dir, site) {
     });
     assert.match((await snapshot()).text, /Documentação sintética/);
     doc = await snapshot();
+    console.log("Browser real: cancelar tecla pendente ao trocar sessão durante o foco.");
     await application.evaluate(() => {
       const browser = global.browserHarness.browser;
       const document = browser.document.bind(browser);
@@ -285,11 +288,21 @@ export async function validateBrowser(application, dir, site) {
     assert.match((await keyAction).message, /cancelada/);
     assert.deepEqual(await application.evaluate(() => global.keyboardEffects), []);
     console.log("Browser real: driver de produção e dados sintéticos aprovados.");
+  } catch (error) {
+    validationError = error;
+    throw error;
   } finally {
-    await application.evaluate(() => {
-      global.browserHarness.browser.dispose();
-      global.browserHarness.host.destroy();
-      delete global.browserHarness;
-    });
+    try {
+      await application.evaluate(() => {
+        global.browserHarness.browser.dispose();
+        global.browserHarness.host.destroy();
+        delete global.browserHarness;
+      });
+    } catch (error) {
+      if (!validationError) throw error;
+      console.error(
+        "Browser harness: limpeza falhou após o erro de validação; causa original preservada.",
+      );
+    }
   }
 }

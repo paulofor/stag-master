@@ -61,6 +61,9 @@ try {
     env,
     timeout: 30000,
   });
+  application.process().on("exit", (code, signal) => {
+    console.log(`Electron harness: processo encerrado (código=${code}, sinal=${signal}).`);
+  });
   const page = await application.firstWindow();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
