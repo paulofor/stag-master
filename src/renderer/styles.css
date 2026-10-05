@@ -158,6 +158,25 @@ svg {
   gap: 6px;
   white-space: nowrap;
 }
+.project-git {
+  flex-shrink: 0;
+  margin: 0 24px 6px;
+  color: #626c61;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.project-git summary {
+  cursor: pointer;
+  margin-top: 4px;
+}
+.project-git p {
+  margin: 6px 0;
+}
+.project-git ul {
+  padding-left: 18px;
+}
 .status-dot {
   width: 5px;
   height: 5px;

@@ -121,12 +121,16 @@ test("colagem em andamento não reaparece depois de trocar conversa", async ({ p
     };
   });
   await paste(page);
-  await expect(page.getByRole("status")).toContainText("Preparando imagem");
+  await expect(page.getByRole("status", { name: "Imagens da solicitação" })).toContainText(
+    "Preparando imagem",
+  );
   await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
   await page.evaluate(() =>
     (window as typeof window & { finishImageRead: () => void }).finishImageRead(),
   );
-  await expect(page.getByRole("status")).not.toContainText("Preparando imagem");
+  await expect(page.getByRole("status", { name: "Imagens da solicitação" })).not.toContainText(
+    "Preparando imagem",
+  );
   await paste(page);
   await expect(page.locator(".composer img")).toHaveCount(1);
 });

@@ -14,6 +14,9 @@ test("selecionar pasta autoriza leitura e escrita, e Leitura continua disponíve
   page,
 }) => {
   await ready(page);
+  await expect(page.getByRole("region", { name: "Preparação Git", exact: true })).toContainText(
+    "Git pronto: 2 repositório(s) verificado(s).",
+  );
   const access = page.getByLabel("Acesso", { exact: true });
   await expect(access).toHaveValue("project");
   await expect(access.locator("option:checked")).toHaveText("Projeto · leitura e escrita");
@@ -24,6 +27,45 @@ test("selecionar pasta autoriza leitura e escrita, e Leitura continua disponíve
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
+});
+test("preparação Git com falha mostra orientação sem bloquear conversa", async ({ page }, info) => {
+  await installBridge(page, {
+    project: {
+      path: "C:/Projetos/exemplo",
+      name: "exemplo",
+      git: {
+        phase: "complete",
+        scanned: 2,
+        found: 1,
+        added: 0,
+        verified: 0,
+        skipped: 1,
+        failures: 1,
+        incomplete: false,
+        issues: [
+          {
+            path: "frontend",
+            message:
+              "Não foi possível cadastrar a confiança Git. Verifique a configuração e selecione a pasta novamente.",
+          },
+        ],
+      },
+    },
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
+  const report = page.getByRole("region", { name: "Preparação Git", exact: true });
+  await expect(report).toContainText("Há pendências");
+  await report.getByText("Detalhes do Git").click();
+  await expect(report).toContainText("selecione a pasta novamente");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await mkdir(".local/screenshots", { recursive: true });
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-git-report.png` });
+  await page.getByLabel("Mensagem para o assistente").fill("Explique a arquitetura");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
 });
 test("painel compacto, onboarding e conversa Markdown", async ({ page }, info) => {
   const errors: string[] = [];

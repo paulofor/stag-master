@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
 import { startImageProvider } from "../tests/fixtures/image-provider.mjs";
+import { gitFixture, verifySandboxGit } from "../tests/fixtures/project-git.mjs";
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/codex-smoke-"));
 const project = join(dir, "projeto com espaço-ação");
@@ -25,6 +26,7 @@ try {
       "src/main/desktop-tools.ts",
       "src/main/browser-tools.ts",
       "src/main/policy.ts",
+      "src/main/project-git.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -39,13 +41,23 @@ try {
     pathToFileURL(join(dir, "policy.mjs")).href
   );
   const binary = resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex");
+  const { prepareProjectGit, createGitRunner, projectGitInstructions } = await import(
+    pathToFileURL(join(dir, "project-git.mjs")).href
+  );
+  const gitTest = await gitFixture(dir);
+  const nestedRepository = join(project, "frontend");
+  for (const repository of [project, nestedRepository, neighbor]) await gitTest.init(repository);
+  const gitReport = await prepareProjectGit(project, { run: createGitRunner(gitTest.env) });
+  assert.equal(gitReport.verified, 2);
+  assert.equal(gitReport.failures, 0);
+  const smokeEnvironment = codexEnvironment(join(dir, "home"), gitTest.env);
   const schemas = join(dir, "protocol");
   await promisify(execFile)(
     binary,
     ["app-server", "generate-json-schema", "--experimental", "--out", schemas],
     {
       cwd: project,
-      env: codexEnvironment(join(dir, "home")),
+      env: smokeEnvironment,
       timeout: 30000,
     },
   );
@@ -81,7 +93,7 @@ try {
       ...(process.platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : []),
     ],
     cwd: project,
-    env: codexEnvironment(join(dir, "home")),
+    env: smokeEnvironment,
   });
   await rpc.start();
   const account = await rpc.call("account/read", { refreshToken: false });
@@ -116,7 +128,10 @@ try {
     model: (models.data.find((model) => model.isDefault) || models.data[0]).model,
     ephemeral: false,
     ...threadPolicy("project", project),
-    developerInstructions: assistantInstructions("project", process.platform, false, true, project),
+    developerInstructions:
+      assistantInstructions("project", process.platform, false, true, project) +
+      "\n" +
+      projectGitInstructions(gitReport),
     dynamicTools: [desktopTool, browserTool],
   });
   assert.ok(started.thread.id);
@@ -164,7 +179,10 @@ try {
     threadId: started.thread.id,
     cwd: project,
     ...threadPolicy("project", project),
-    developerInstructions: assistantInstructions("project", process.platform, true, true, project),
+    developerInstructions:
+      assistantInstructions("project", process.platform, true, true, project) +
+      "\n" +
+      projectGitInstructions(gitReport),
   });
   assert.equal(resumed.thread.id, started.thread.id);
   const resumedImage = resumed.thread.turns
@@ -202,6 +220,17 @@ try {
     );
   } else {
     assert.equal(probe.exitCode, 0, probe.stderr);
+    await verifySandboxGit(
+      rpc,
+      gitTest.executable,
+      project,
+      nestedRepository,
+      neighbor,
+      writePolicy,
+    );
+    console.log(
+      "Git no sandbox real: raiz e subpasta autorizadas; vizinho continua bloqueado por propriedade.",
+    );
     assert.equal(JSON.parse(probe.stdout).content, "arquivo sintético");
     for (const operation of ["edit", "read"]) {
       const result = await command(operation, file, writePolicy);

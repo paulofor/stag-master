@@ -26,6 +26,7 @@ import {
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
+import { prepareProjectGit, projectGitInstructions } from "./project-git";
 import {
   browserArguments,
   browserApproval,
@@ -72,6 +73,7 @@ interface Options {
   createRpc: () => RpcClient;
   store: SettingsStore;
   selectProject: () => Promise<string | null>;
+  prepareProjectGit?: typeof prepareProjectGit;
   openExternal: (url: string) => Promise<void>;
   desktop: { execute: (args: unknown) => Promise<ToolResult> };
   browser?: {
@@ -131,6 +133,7 @@ export class AssistantService extends EventEmitter {
   private sandboxReady = false;
   private completedTurns = new Set<string>();
   private safetyBlockId = 0;
+  private projectPreparation = new AbortController();
   constructor(private options: Options) {
     super();
     this.state = structuredClone(emptySnapshot);
@@ -415,6 +418,16 @@ export class AssistantService extends EventEmitter {
     this.state.project = { path, name: basename(path) || path };
     this.settings.project = path;
     await this.options.store.save(this.settings);
+    this.state.project.git = await (this.options.prepareProjectGit || prepareProjectGit)(path, {
+      signal: this.projectPreparation.signal,
+      onProgress: (git) => {
+        if (!this.disposed && this.state.project?.path === path) {
+          this.state.project.git = git;
+          this.publish();
+        }
+      },
+    });
+    this.state.metrics.failures += this.state.project.git.failures;
     if (this.state.connection === "ready") await this.refreshHistory();
   }
   private clearChat(): void {
@@ -545,13 +558,16 @@ export class AssistantService extends EventEmitter {
       threadId: id,
       cwd: policy.path,
       ...threadPolicy(policy.mode, policy.path),
-      developerInstructions: assistantInstructions(
-        policy.mode,
-        this.state.platform,
-        this.state.browser.authorized,
-        !!policy.browserTool,
-        policy.path,
-      ),
+      developerInstructions:
+        assistantInstructions(
+          policy.mode,
+          this.state.platform,
+          this.state.browser.authorized,
+          !!policy.browserTool,
+          policy.path,
+        ) +
+        "\n" +
+        projectGitInstructions(this.state.project?.git),
     });
     this.state.threadId = id;
     this.browserInstructionsDirty = false;
@@ -619,13 +635,16 @@ export class AssistantService extends EventEmitter {
           cwd: this.state.project.path,
           model: this.state.model,
           ...threadPolicy(this.state.mode, this.state.project.path),
-          developerInstructions: assistantInstructions(
-            this.state.mode,
-            this.state.platform,
-            this.state.browser.authorized,
-            !!this.options.browser,
-            this.state.project.path,
-          ),
+          developerInstructions:
+            assistantInstructions(
+              this.state.mode,
+              this.state.platform,
+              this.state.browser.authorized,
+              !!this.options.browser,
+              this.state.project.path,
+            ) +
+            "\n" +
+            projectGitInstructions(this.state.project.git),
           serviceName: "stag_desktop",
           dynamicTools: [
             ...(this.state.mode === "windows" ? [desktopTool] : []),
@@ -1133,6 +1152,7 @@ export class AssistantService extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
+    this.projectPreparation.abort();
     this.toolEpoch++;
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();

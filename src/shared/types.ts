@@ -12,6 +12,18 @@ export interface Model {
 export interface Project {
   path: string;
   name: string;
+  git?: ProjectGitReport;
+}
+export interface ProjectGitReport {
+  phase: "scanning" | "complete";
+  scanned: number;
+  found: number;
+  added: number;
+  verified: number;
+  skipped: number;
+  failures: number;
+  incomplete: boolean;
+  issues: { path: string; message: string }[];
 }
 export interface ThreadSummary {
   id: string;
