@@ -14,6 +14,10 @@ export interface Project {
   name: string;
   git?: ProjectGitReport;
 }
+export interface DocumentationSource {
+  name: string;
+  url: string;
+}
 export interface ProjectGitReport {
   phase: "scanning" | "complete";
   scanned: number;
@@ -61,6 +65,7 @@ export interface Snapshot {
   account: { email: string | null; plan: string | null } | null;
   loginPending: boolean;
   project: Project | null;
+  projectSources: DocumentationSource[];
   models: Model[];
   model: string;
   effort: string;
@@ -94,6 +99,7 @@ export const emptySnapshot: Snapshot = {
   account: null,
   loginPending: false,
   project: null,
+  projectSources: [],
   models: [],
   model: "",
   effort: "",
@@ -125,6 +131,7 @@ export type Action =
   | { type: "cancelLogin" }
   | { type: "logout" }
   | { type: "selectProject" }
+  | { type: "projectSources"; projectPath: string; sources: DocumentationSource[] }
   | {
       type: "preferences";
       model?: string;

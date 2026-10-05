@@ -19,6 +19,10 @@ const blankInfo = (): BrowserInfo => ({
   canGoForward: false,
   error: null,
 });
+type BrowserBounds = { x: number; y: number; width: number; height: number };
+function fitsWindow(bounds: BrowserBounds, [width, height]: number[]): boolean {
+  return bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= height + 1;
+}
 export class BrowserPanel extends EventEmitter {
   private view!: WebContentsView;
   private info = blankInfo();
@@ -148,17 +152,26 @@ export class BrowserPanel extends EventEmitter {
       this.info.error = "O navegador encerrou. Recarregue a página para continuar.";
       this.publish();
     });
-    this.setBounds(this.bounds);
+    this.restoreBounds();
     this.publish();
   }
   setVisible(visible: boolean): void {
     this.visible = visible;
-    this.setBounds(this.bounds);
+    this.restoreBounds();
   }
-  setBounds(bounds: typeof this.bounds): void {
-    const [width, height] = this.window.getContentSize();
-    if (bounds.x + bounds.width > width + 1 || bounds.y + bounds.height > height + 1)
-      throw new Error("Limites do navegador fora da janela.");
+  private restoreBounds(): void {
+    // The native window may shrink before the renderer sends updated bounds.
+    // Discard only stale internal layout; explicit IPC bounds remain strictly validated.
+    this.setBounds(
+      fitsWindow(this.bounds, this.window.getContentSize())
+        ? this.bounds
+        : { x: 0, y: 0, width: 0, height: 0 },
+    );
+  }
+  setBounds(bounds: BrowserBounds): void {
+    const size = this.window.getContentSize();
+    const [width, height] = size;
+    if (!fitsWindow(bounds, size)) throw new Error("Limites do navegador fora da janela.");
     this.bounds = bounds;
     // Keep a usable viewport for model operations while a compact window shows the conversation tab.
     this.view.setBounds(

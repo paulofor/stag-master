@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent } from "r
 import {
   ArrowDown,
   ArrowUp,
+  BookOpen,
   Check,
   CheckCheck,
   ChevronDown,
@@ -28,6 +29,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrowserPane } from "./BrowserPane";
 import { ProjectGitStatus } from "./ProjectGitStatus";
+import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
 import { readPastedImage } from "./request-images";
 import {
   maxRequestImages,
@@ -100,6 +102,7 @@ export function App() {
   const [pending, setPending] = useState(false);
   const [menu, setMenu] = useState<"history" | "account" | null>(null);
   const [windowsDialog, setWindowsDialog] = useState(false);
+  const [sourcesDialog, setSourcesDialog] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [browserFocused, setBrowserFocused] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
@@ -107,6 +110,7 @@ export function App() {
   const revision = useRef(0);
   const bridge = window.stag;
   useEffect(clearImages, [clearImages, state.project?.path, state.account?.email]);
+  useEffect(() => setSourcesDialog(false), [state.project?.path]);
   useEffect(() => {
     if (state.approvals.length) setBrowserFocused(false);
   }, [state.approvals.length]);
@@ -229,7 +233,7 @@ export function App() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (!state.busy && !pending) {
+        if (!state.busy && !pending && !sourcesDialog && !windowsDialog) {
           void run({ type: "newChat" });
         }
       }
@@ -240,7 +244,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, state.busy, pending]);
+  }, [run, state.busy, pending, sourcesDialog, windowsDialog]);
   const chosenModel = state.models.find((m) => m.model === state.model);
   const disabledContext = state.busy || pending;
   const visibleError = error || state.error;
@@ -323,6 +327,26 @@ export function App() {
             <FolderOpen size={15} />
             <span>{state.project?.name || "Selecionar projeto"}</span>
             <ChevronDown size={12} />
+          </button>
+          <button
+            className="project-sources-button"
+            aria-label="Fontes do projeto"
+            title="Cadastrar URLs da documentação do projeto"
+            disabled={!state.project || disabledContext}
+            onClick={() => {
+              setMenu(null);
+              setError(null);
+              setSourcesDialog(true);
+            }}
+          >
+            <BookOpen size={14} />
+            <span>Fontes</span>
+            <span
+              className="sources-count"
+              aria-label={`${state.projectSources.length} fontes salvas`}
+            >
+              {state.projectSources.length}
+            </span>
           </button>
           <span className="connection" title={state.account?.email || "Codex App Server local"}>
             <span
@@ -797,12 +821,26 @@ export function App() {
             </section>
           </div>
         )}
+        {sourcesDialog && state.project && (
+          <ProjectSourcesDialog
+            key={state.project.path}
+            projectName={state.project.name}
+            sources={state.projectSources}
+            pending={pending}
+            error={visibleError}
+            close={() => setSourcesDialog(false)}
+            save={(sources) =>
+              run({ type: "projectSources", projectPath: state.project!.path, sources })
+            }
+          />
+        )}
       </div>
       {state.browser.available && state.browser.visible && (
         <BrowserPane
           state={state.browser}
           busy={state.busy}
           pending={pending}
+          obscured={sourcesDialog}
           run={run}
           backToChat={() => setBrowserFocused(false)}
         />

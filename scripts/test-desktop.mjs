@@ -6,6 +6,7 @@ import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
+import sourceCorpus from "../tests/fixtures/source-scenarios.json" with { type: "json" };
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 
@@ -46,6 +47,10 @@ try {
     await cp(
       "tests/fixtures/memory-scenarios.json",
       join(dir, ".local/codex/bin/memory-scenarios.json"),
+    );
+    await cp(
+      "tests/fixtures/source-scenarios.json",
+      join(dir, ".local/codex/bin/source-scenarios.json"),
     );
     await writeFile(
       join(dir, ".local/codex/bin/codex"),
@@ -108,6 +113,38 @@ try {
   );
   assert.equal(repeatedGit.added, 0);
   assert.equal(repeatedGit.verified, 2);
+  // Real main/preload persistence works without an account or browser consent on both platforms.
+  const source = { name: "Documentação sintética", url: site.url };
+  await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();
+  const sourcesDialog = page.getByRole("dialog", { name: "Fontes do projeto", exact: true });
+  await sourcesDialog.getByRole("button", { name: "Adicionar fonte" }).click();
+  await sourcesDialog.getByLabel("Nome da fonte 1", { exact: true }).fill(source.name);
+  await sourcesDialog.getByLabel("URL da fonte 1", { exact: true }).fill(source.url);
+  await sourcesDialog.getByRole("button", { name: "Salvar fontes" }).click();
+  await expect(sourcesDialog).toHaveCount(0);
+  const savedSources = JSON.parse(await readFile(join(data, "settings.json"), "utf8"));
+  assert.deepEqual(savedSources.projectSources[project], [source]);
+  assert.equal(
+    await page.evaluate(async () => (await window.stag.getSnapshot()).browser.authorized),
+    false,
+  );
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Fontes do projeto", exact: true })).toContainText(
+    "1",
+  );
+  const invalidSource = await page.evaluate(async (projectPath) => {
+    try {
+      await window.stag.request({
+        type: "projectSources",
+        projectPath,
+        sources: [{ name: "Inerte", url: "file:///C:/docs" }],
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  }, project);
+  assert.equal(invalidSource, true);
   for (const repository of [project, nestedRepository])
     assert.equal(
       (
@@ -185,6 +222,13 @@ try {
   if (process.platform !== "win32") {
     await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
     await expect(page.getByLabel("Modelo", { exact: true })).toHaveValue("fixture-model");
+    await page.getByLabel("Mensagem para o assistente").fill(sourceCorpus.input);
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect(page.getByText(sourceCorpus.unauthorized, { exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, dataUrl) => {
       await clipboard.write([
         new ClipboardItem({
@@ -325,6 +369,33 @@ try {
     });
     assert.equal(contentsResult.value, "feito pelo modelo");
     assert.equal(contentsResult.visible, true);
+    await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();
+    await expect(sourcesDialog).toBeVisible();
+    await expect
+      .poll(() =>
+        application.evaluate(({ BrowserWindow }) => {
+          const parent = BrowserWindow.getAllWindows()[0];
+          return parent.contentView.children
+            .find((view) => view.webContents && view.webContents !== parent.webContents)
+            ?.getVisible();
+        }),
+      )
+      .toBe(false);
+    await sourcesDialog.getByRole("button", { name: "Cancelar", exact: true }).click();
+    await expect
+      .poll(() =>
+        application.evaluate(({ BrowserWindow }) => {
+          const parent = BrowserWindow.getAllWindows()[0];
+          return parent.contentView.children
+            .find((view) => view.webContents && view.webContents !== parent.webContents)
+            ?.getVisible();
+        }),
+      )
+      .toBe(true);
+    assert.equal(
+      await page.evaluate(async () => (await window.stag.getSnapshot()).browser.authorized),
+      true,
+    );
     const viewport = await page.locator(".browser-viewport").boundingBox();
     assert.ok(Math.abs(contentsResult.bounds.x - viewport.x) <= 1);
     assert.ok(Math.abs(contentsResult.bounds.width - viewport.width) <= 1);
@@ -335,6 +406,19 @@ try {
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
     await page.screenshot({ path: ".local/screenshots/electron-browser-panel.png" });
     const input = page.getByLabel("Mensagem para o assistente");
+    await input.fill(sourceCorpus.input);
+    await input.press("Enter");
+    await expect(page.getByText(sourceCorpus.complete, { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Endereço do navegador")).toHaveValue(source.url);
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    const sourceSnapshot = await page.evaluate(async () => window.stag.getSnapshot());
+    assert.ok(
+      sourceSnapshot.items.filter(
+        (item) => item.text === "stag_browser" && item.status === "completed",
+      ).length >= 2,
+    );
     await input.fill(`navegador envio real ${site.url}`);
     await input.press("Enter");
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
@@ -390,6 +474,25 @@ try {
   }
   await validateBrowser(application, dir, site);
   assert.deepEqual(errors, []);
+  await application.close();
+  application = await _electron.launch({
+    args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
+    env,
+    timeout: 30000,
+  });
+  const restartedPage = await application.firstWindow();
+  await expect
+    .poll(() => restartedPage.evaluate(async () => (await window.stag.getSnapshot()).connection))
+    .toBe("ready");
+  await expect(
+    restartedPage.getByRole("button", { name: "Fontes do projeto", exact: true }),
+  ).toContainText("1");
+  const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
+  assert.deepEqual(restarted.projectSources, [source]);
+  assert.equal(restarted.browser.authorized, false);
+  console.log(
+    "Fontes do projeto: cadastro IPC, persistência e reinício real OK; consentimento não herdado.",
+  );
   console.log(
     process.platform === "win32"
       ? "Electron Windows: janela, protocolo local, preload, IPC, projeto e Codex real OK; OAuth não executado."

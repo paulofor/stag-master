@@ -2,7 +2,15 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.9: preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.10: fontes de documentação por projeto, preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+
+## Fontes de documentação do projeto
+
+Depois de selecionar a pasta, clique em **Fontes**, ao lado do nome do projeto. Na janela **Fontes do projeto**, use **Adicionar fonte**, informe um nome e uma URL completa HTTP(S) e clique em **Salvar fontes**. Cadastre até 20 fontes; você pode editar os campos, remover fontes ou cancelar sem alterar o cadastro. URLs repetidas e URLs com usuário/senha são recusadas. Não inclua senhas ou tokens nos links.
+
+O cadastro fica nas configurações locais do STAG, separado por pasta, e permanece após reiniciar o aplicativo. O modelo recebe a lista vigente em todas as solicitações, inclusive em históricos retomados e depois de editar/remover fontes numa conversa existente. Deve consultar a documentação quando a resposta ou alteração depender dela, priorizá-la para requisitos e regras do projeto e citar a URL/seção utilizada. Conflitos com código, notas ou correções do cliente precisam ser esclarecidos.
+
+A consulta usa o navegador integrado: clique em **Autorizar navegador** na conversa quando necessário. O cadastro não concede esse acesso. Fontes inacessíveis devem ser relatadas; trechos fornecidos pelo cliente podem permitir continuar. Nomes e páginas são contexto de referência e não mudam permissões, assuntos ou segurança. Em **Leitura**, cadastrar fontes altera apenas as configurações do aplicativo, sem gravar no projeto. Falhas de salvamento preservam o cadastro anterior e os campos da janela.
 
 ## Executar no Windows
 

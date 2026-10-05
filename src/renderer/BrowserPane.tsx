@@ -6,12 +6,14 @@ export function BrowserPane({
   state,
   busy,
   pending,
+  obscured = false,
   run,
   backToChat,
 }: {
   state: BrowserState;
   busy: boolean;
   pending: boolean;
+  obscured?: boolean;
   run: (action: Action) => Promise<boolean>;
   backToChat: () => void;
 }) {
@@ -27,7 +29,7 @@ export function BrowserPane({
     const update = () => {
       const rect = target.getBoundingClientRect();
       const bounds =
-        rect.width && rect.height
+        !obscured && rect.width && rect.height
           ? {
               x: Math.round(rect.x),
               y: Math.round(rect.y),
@@ -48,8 +50,8 @@ export function BrowserPane({
         .request({ type: "browserBounds", bounds: { x: 0, y: 0, width: 0, height: 0 } })
         .catch(() => {});
     };
-  }, []);
-  const manualDisabled = busy || pending;
+  }, [obscured]);
+  const manualDisabled = busy || pending || obscured;
   return (
     <section className="browser-panel" aria-label="Navegador do assistente">
       <header className="browser-heading">

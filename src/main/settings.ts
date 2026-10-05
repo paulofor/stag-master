@@ -1,9 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { projectSourcesSchema } from "../shared/project-sources";
 
 const settingsSchema = z.object({
   project: z.string().optional(),
+  projectSources: z.record(z.string(), projectSourcesSchema).default({}),
   threads: z
     .record(
       z.string(),
@@ -15,18 +17,21 @@ const settingsSchema = z.object({
     )
     .default({}),
 });
+const storedSettingsSchema = settingsSchema.extend({
+  projectSources: z.record(z.string(), projectSourcesSchema.catch([])).default({}).catch({}),
+});
 export type Settings = z.infer<typeof settingsSchema>;
 export class SettingsStore {
   private queue: Promise<void> = Promise.resolve();
   constructor(private file: string) {}
   async load(): Promise<Settings> {
     try {
-      return settingsSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
+      return storedSettingsSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
     } catch {
-      return { threads: {} };
+      return { threads: {}, projectSources: {} };
     }
   }
-  save(settings: Settings): Promise<void> {
+  save(settings: z.input<typeof settingsSchema>): Promise<void> {
     const content = JSON.stringify(settingsSchema.parse(settings));
     const write = this.queue.then(async () => {
       await mkdir(dirname(this.file), { recursive: true });

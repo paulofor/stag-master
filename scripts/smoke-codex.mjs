@@ -27,6 +27,7 @@ try {
       "src/main/browser-tools.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
+      "src/main/project-sources.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -37,6 +38,9 @@ try {
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
   const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
+  const { projectSourcesContext } = await import(
+    pathToFileURL(join(dir, "project-sources.mjs")).href
+  );
   const { assistantInstructions, threadPolicy, turnPolicy, codexEnvironment } = await import(
     pathToFileURL(join(dir, "policy.mjs")).href
   );
@@ -62,6 +66,11 @@ try {
     },
   );
   const turnSchema = JSON.parse(await readFile(join(schemas, "v2/TurnStartParams.json"), "utf8"));
+  assert.ok(
+    turnSchema.properties.additionalContext,
+    "O binário fixado deve aceitar contexto por turno.",
+  );
+  assert.deepEqual(turnSchema.definitions.AdditionalContextKind.enum, ["untrusted", "application"]);
   const imageShape = turnSchema.definitions.UserInput.oneOf.find((entry) =>
     entry.properties?.type?.enum?.includes("image"),
   );
@@ -123,13 +132,14 @@ try {
     }
   }
   // Verify experimental desktop-tool schema against the bundled binary without a turn/LLM call.
+  const sources = [{ name: "Documentação sintética inicial", url: `${provider.url}/docs-initial` }];
   const started = await rpc.call("thread/start", {
     cwd: project,
     model: (models.data.find((model) => model.isDefault) || models.data[0]).model,
     ephemeral: false,
     ...threadPolicy("project", project),
     developerInstructions:
-      assistantInstructions("project", process.platform, false, true, project) +
+      assistantInstructions("project", process.platform, false, true, project, sources) +
       "\n" +
       projectGitInstructions(gitReport),
     dynamicTools: [desktopTool, browserTool],
@@ -141,31 +151,41 @@ try {
   // The server reports cwd/runtime roots separately from additional configured roots.
   assert.deepEqual(started.sandbox.writableRoots, []);
   // A real user turn is required for UI history; raw injected Responses items aren't UI turns.
-  let timer;
-  let listener;
-  const completed = new Promise((resolve, reject) => {
-    timer = setTimeout(() => reject(new Error("Turno sintético de imagem não concluiu.")), 30000);
-    listener = (message) => {
-      if (message.method === "turn/completed" && message.params.threadId === started.thread.id)
-        resolve(message.params.turn);
-    };
-    rpc.on("notification", listener);
-  });
-  try {
-    await rpc.call("turn/start", {
-      threadId: started.thread.id,
-      cwd: project,
-      input: [
-        { type: "text", text: "Analise a imagem sintética do sistema." },
-        { type: "image", url: imageFixture.dataUrl },
-      ],
-      ...turnPolicy("project", project),
+  async function syntheticTurn(input, sourceList = sources, authorized = false) {
+    let timer;
+    let listener;
+    const completed = new Promise((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("Turno sintético não concluiu.")), 30000);
+      listener = (message) => {
+        if (message.method === "turn/completed" && message.params.threadId === started.thread.id)
+          resolve(message.params.turn);
+      };
+      rpc.on("notification", listener);
     });
-    assert.equal((await completed).status, "completed");
-  } finally {
-    clearTimeout(timer);
-    rpc.off("notification", listener);
+    try {
+      await rpc.call("turn/start", {
+        threadId: started.thread.id,
+        cwd: project,
+        input,
+        additionalContext: projectSourcesContext(project, sourceList, authorized, true),
+        ...turnPolicy("project", project),
+      });
+      assert.equal((await completed).status, "completed");
+    } finally {
+      clearTimeout(timer);
+      rpc.off("notification", listener);
+    }
   }
+  await syntheticTurn([
+    { type: "text", text: "Analise a imagem sintética do sistema." },
+    { type: "image", url: imageFixture.dataUrl },
+  ]);
+  assert.ok(
+    JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
+      sources[0].url,
+    ),
+    "Fontes de start devem chegar ao provedor pelo Codex real.",
+  );
   const providerImage = provider.inputs
     .flat()
     .flatMap((item) => item.content || [])
@@ -175,12 +195,15 @@ try {
     imageFixture.dataUrl,
     "Pixels precisam chegar ao provedor local pelo Codex real.",
   );
+  const updatedSources = [
+    { name: "Documentação sintética atualizada", url: `${provider.url}/docs-updated` },
+  ];
   const resumed = await rpc.call("thread/resume", {
     threadId: started.thread.id,
     cwd: project,
     ...threadPolicy("project", project),
     developerInstructions:
-      assistantInstructions("project", process.platform, true, true, project) +
+      assistantInstructions("project", process.platform, true, true, project, updatedSources) +
       "\n" +
       projectGitInstructions(gitReport),
   });
@@ -197,6 +220,18 @@ try {
   );
   assert.deepEqual(resumed.sandbox, started.sandbox);
   assert.deepEqual(resumed.runtimeWorkspaceRoots, [project]);
+  await syntheticTurn(
+    [{ type: "text", text: "Explique a documentação sintética do projeto." }],
+    updatedSources,
+    true,
+  );
+  assert.ok(
+    JSON.stringify({
+      input: provider.inputs.at(-1),
+      instructions: provider.instructions.at(-1),
+    }).includes(updatedSources[0].url),
+    "Fontes atualizadas em resume devem chegar ao provedor no próximo turno.",
+  );
   const command = (operation, target, policy) =>
     rpc.call("command/exec", {
       command: [process.execPath, runner, operation, target],
@@ -267,7 +302,7 @@ try {
     );
   }
   console.log(
-    `Codex real: handshake, conta isolada, ${models.data.length} modelos, schemas desktop/browser/imagem, pixels no provedor local e histórico, instruções e raízes explícitas de start/resume OK. Resposta determinística em loopback; nenhum LLM real/inferência paga.`,
+    `Codex real: handshake, conta isolada, ${models.data.length} modelos, schemas desktop/browser/imagem/contexto, pixels no provedor local e histórico, fontes vigentes por turno, instruções e raízes explícitas de start/resume OK. Resposta determinística em loopback; nenhum LLM real/inferência paga.`,
   );
 } finally {
   await rpc?.shutdown();
