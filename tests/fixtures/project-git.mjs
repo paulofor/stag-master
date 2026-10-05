@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { access, mkdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import { delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
@@ -21,9 +22,23 @@ export async function gitFixture(dir) {
     GIT_CONFIG_NOSYSTEM: "1",
     GIT_TERMINAL_PROMPT: "0",
   };
+  // Resolve before entering Codex: its computed command environment can have a different PATH.
+  let executable;
+  for (const directory of (env.PATH || "").split(delimiter)) {
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, process.platform === "win32" ? "git.exe" : "git");
+    try {
+      await access(candidate, constants.X_OK);
+      executable = await realpath(candidate);
+      break;
+    } catch {
+      /* Try the next installed location. */
+    }
+  }
+  if (!executable) throw new Error("Git indisponível no harness isolado.");
   const git = async (args, extra = {}) => {
     try {
-      const { stdout } = await execute("git", args, {
+      const { stdout } = await execute(executable, args, {
         cwd: home,
         env: { ...env, ...extra },
         encoding: "utf8",
@@ -41,5 +56,5 @@ export async function gitFixture(dir) {
     if ((await git(["init", "--initial-branch=main", path])).code !== 0)
       throw new Error("Falha ao criar repositório sintético.");
   };
-  return { home, project, env, git, init };
+  return { home, project, env, git, init, executable };
 }

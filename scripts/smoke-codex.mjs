@@ -224,15 +224,25 @@ try {
     assert.equal(probe.exitCode, 0, probe.stderr);
     for (const repository of [project, nestedRepository, neighbor]) {
       const result = await rpc.call("command/exec", {
-        command: [process.execPath, gitStatus, repository],
+        command: [process.execPath, gitStatus, repository, gitTest.executable],
         cwd: project,
         sandboxPolicy: writePolicy,
         timeoutMs: 15000,
       });
       assert.equal(result.exitCode, 0, "O probe Git deve iniciar no sandbox.");
-      const code = JSON.parse(result.stdout).code;
+      const status = JSON.parse(result.stdout);
+      assert.equal(
+        status.launchError,
+        null,
+        `Falha ao iniciar Git no sandbox: ${status.launchError}`,
+      );
+      const code = status.code;
       if (repository === neighbor)
-        assert.notEqual(code, 0, "Vizinho não autorizado pelo cadastro.");
+        assert.equal(
+          status.dubiousOwnership,
+          true,
+          "Vizinho deve continuar bloqueado por propriedade, não por falha de inicialização.",
+        );
       else assert.equal(code, 0, "O sandbox deve reconhecer a confiança cadastrada pelo main.");
     }
     console.log(
