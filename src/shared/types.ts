@@ -7,6 +7,7 @@ export interface Model {
   defaultReasoningEffort: string;
   supportedReasoningEfforts: { reasoningEffort: string; description: string }[];
   isDefault: boolean;
+  inputModalities?: string[];
 }
 export interface Project {
   path: string;
@@ -24,6 +25,10 @@ export interface ChatItem {
   output?: string;
   status?: string;
   phase?: string;
+  images?: RequestImage[];
+}
+export interface RequestImage {
+  dataUrl: string;
 }
 export interface Question {
   id: string;
@@ -117,7 +122,7 @@ export type Action =
     }
   | { type: "newChat" }
   | { type: "resume"; threadId: string }
-  | { type: "send"; text: string }
+  | { type: "send"; text: string; images?: RequestImage[] }
   | { type: "stop" }
   | { type: "answer"; id: string; accept?: boolean; answers?: Record<string, string> }
   | { type: "openLink"; url: string }

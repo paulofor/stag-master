@@ -3,6 +3,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { RpcId } from "../shared/types";
 import { version } from "../../package.json";
 
+// Bounded headroom for resumed conversations containing several image turns.
+const maxFrameChars = 32 * 1024 * 1024;
+
 export interface RpcMessage {
   id?: RpcId;
   method?: string;
@@ -109,7 +112,7 @@ export class RpcClient extends EventEmitter {
     while ((newline = this.buffer.indexOf("\n")) !== -1) {
       const line = this.buffer.slice(0, newline);
       this.buffer = this.buffer.slice(newline + 1);
-      if (line.length > 8 * 1024 * 1024) {
+      if (line.length > maxFrameChars) {
         this.fail(new Error("Mensagem Codex acima do limite."));
         return;
       }
@@ -133,8 +136,7 @@ export class RpcClient extends EventEmitter {
         else waiting.resolve(message.result);
       }
     }
-    if (this.buffer.length > 8 * 1024 * 1024)
-      this.fail(new Error("Mensagem Codex acima do limite."));
+    if (this.buffer.length > maxFrameChars) this.fail(new Error("Mensagem Codex acima do limite."));
   }
   private fail(error: Error): void {
     if (this.closed) return;

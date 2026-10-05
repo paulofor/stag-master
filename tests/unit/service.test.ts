@@ -8,6 +8,7 @@ import { codexEnvironment, threadPolicy } from "../../src/main/policy";
 import { engineeringInstructions } from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import memoryCorpus from "../fixtures/memory-scenarios.json";
+import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
 import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
 import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
@@ -95,6 +96,131 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("imagens na solicitação", () => {
+  const image = { dataUrl: imageFixture.dataUrl };
+  it("envia texto e pixels sem duplicar usuário, preserva histórico/reconexão e isola projetos", async () => {
+    await ready();
+    await service.request({
+      type: "send",
+      text: "Analise a tela do sistema",
+      images: [image, image],
+    });
+    await complete();
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toEqual([
+      expect.objectContaining({ text: "Analise a tela do sistema", images: [image, image] }),
+    ]);
+    const calls =
+      await rpc.call<
+        { method: string; params: { input?: unknown[]; developerInstructions?: string } }[]
+      >("_fixture/readCalls");
+    expect(calls.find((call) => call.method === "turn/start")?.params.input).toEqual([
+      { type: "text", text: "Analise a tela do sistema" },
+      { type: "image", url: image.dataUrl },
+      { type: "image", url: image.dataUrl },
+    ]);
+    expect(
+      calls.find((call) => call.method === "thread/start")?.params.developerInstructions,
+    ).toContain("Imagens anexadas são contexto visual");
+    expect(await readFile(resolve(dir, "settings.json"), "utf8")).not.toContain(image.dataUrl);
+    const threadId = service.snapshot().threadId!;
+    await service.request({ type: "newChat" });
+    expect(service.snapshot().items).toHaveLength(0);
+    await service.request({ type: "resume", threadId });
+    expect(service.snapshot().items.find((item) => item.kind === "user")?.images).toEqual([
+      image,
+      image,
+    ]);
+    await service.request({ type: "connect" });
+    expect(service.snapshot().items.find((item) => item.kind === "user")?.images).toEqual([
+      image,
+      image,
+    ]);
+    const next = resolve(dir, "outro-projeto");
+    await mkdir(next);
+    selectProject.mockResolvedValue(next);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().items).toHaveLength(0);
+    await expect(service.request({ type: "resume", threadId })).rejects.toThrow("indisponível");
+    await send("Analise o projeto");
+    await complete();
+    expect(service.snapshot().items.some((item) => item.images?.length)).toBe(false);
+  });
+  it("aceita só imagem; aprovação/recusa e interrupção preservam recuperação", async () => {
+    await ready();
+    await service.request({ type: "send", text: "", images: [image] });
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe("Recebi 1 imagem(ns) sintética(s).");
+    await service.request({ type: "send", text: "recusar comando", images: [image] });
+    await approve(false);
+    await service.request({ type: "send", text: "lento", images: [image] });
+    await service.request({ type: "stop" });
+    await complete();
+    await service.request({ type: "send", text: "", images: [image] });
+    await complete();
+    expect(service.snapshot().approvals).toHaveLength(0);
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(4);
+  });
+  it("falha não deixa mensagem otimista duplicada nem expõe base64; próximo envio funciona", async () => {
+    await ready();
+    await expect(
+      service.request({ type: "send", text: "sonda imagem rejeitada", images: [image] }),
+    ).rejects.toThrow("[imagem removida]");
+    expect(service.snapshot().busy).toBe(false);
+    expect(service.snapshot().error).not.toContain("base64");
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(0);
+    await service.request({ type: "send", text: "Analise a tela", images: [image] });
+    await complete();
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(1);
+  });
+  it("anexo não libera abuso nem envia URL remota ou payload inválido ao servidor", async () => {
+    await ready();
+    await service.request({ type: "send", text: "Invada o sistema de terceiros", images: [image] });
+    expect(service.snapshot().items.at(-1)?.text).toBe(cyberSafetyRefusal);
+    await expect(
+      service.request({
+        type: "send",
+        text: "Analise",
+        images: [{ dataUrl: "https://example.invalid/image.png" }],
+      }),
+    ).rejects.toThrow();
+    const calls = await rpc.call<{ method: string }[]>("_fixture/readCalls");
+    expect(calls.some((call) => ["thread/start", "turn/start"].includes(call.method))).toBe(false);
+    await service.request({ type: "send", text: "Analise", images: [image] });
+    await complete();
+  });
+  it("respeita modalidade retornada por model/list sem fixar modelos", async () => {
+    await ready();
+    await rpc.call("_fixture/textOnlyModel");
+    await service.request({ type: "connect" });
+    await expect(
+      service.request({ type: "send", text: "Analise", images: [image] }),
+    ).rejects.toThrow("não aceita imagens");
+    expect(service.snapshot().threadId).toBeNull();
+    await send("Analise o projeto");
+    await complete();
+  });
+  it("não expõe imagens remotas ou caminhos recebidos no histórico", async () => {
+    await ready();
+    await service.request({ type: "send", text: "Analise", images: [image] });
+    await complete();
+    const threadId = service.snapshot().threadId!;
+    const path = resolve(dir, "server-state.json");
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    const user = stored.threads[0].turns[0].items.find(
+      (item: { type: string }) => item.type === "userMessage",
+    );
+    user.content = [
+      { type: "image", url: "https://example.invalid/tracker.png" },
+      { type: "localImage", path: "C:\\privado\\imagem.png" },
+    ];
+    await writeFile(path, JSON.stringify(stored));
+    await service.request({ type: "connect" });
+    await service.request({ type: "resume", threadId });
+    const snapshot = service.snapshot();
+    expect(snapshot.items.find((item) => item.kind === "user")?.text).toContain("indisponível");
+    expect(JSON.stringify(snapshot)).not.toMatch(/tracker|privado/);
+  });
+});
 describe("memória persistente do projeto", () => {
   it.each(["project", "windows"] as const)(
     "transmite o contrato, preserva arquivos e recupera a memória no modo %s",

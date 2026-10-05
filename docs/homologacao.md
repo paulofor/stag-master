@@ -1,6 +1,26 @@
-# Matriz de homologação da versão 0.4.6
+# Matriz de homologação da versão 0.4.7
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Colagem de imagens na solicitação — versão 0.4.7
+
+Matriz definida antes dos testes. O compositor, o IPC e o serviço aceitam somente texto; a fixture assume que a primeira entrada contém texto e não comprova o transporte de pixels. A alteração permite colar PNG/JPEG no textarea, conferir/remover miniaturas e enviar texto com imagens ou somente imagens pelo formato nativo `image/url` do App Server. Limites: quatro imagens e 4 MB somados por mensagem, 8192 pixels por lado e 20 megapixels por imagem. Anexos ficam em memória até o envio; o histórico continua pertencendo ao Codex. Não há leitura global da área de transferência, arquivos temporários no projeto, novas permissões ou chamadas pagas nos testes.
+
+| Área                       | Cenário e aceite                                                                                                                                                          | Evidência prevista                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Caminho feliz              | Ctrl+V no textarea cria prévia; remover um anexo não altera texto/outros anexos; botão/Enter envia pixels e texto; imagem sem texto também inicia turno                   | Chromium + Electron com clipboard nativo + serviço bidirecional |
+| Validação                  | Recusar tipo não raster, URL remota/local, base64 inválido, MIME falsificado, imagem incompleta, dimensões excessivas, quantidade e volume acima do limite antes do turno | Schemas compartilhados + IPC/decoder nativo + fixture estrita   |
+| Recuperação                | Falha preserva rascunho e imagens; novo envio não duplica mensagem; parar/recusar aprovação permite próxima tarefa; colagem assíncrona não reaparece em outra conversa    | Serviço + Chromium + Electron                                   |
+| Isolamento                 | Nova conversa, troca de projeto, histórico e logout descartam anexos pendentes; cancelamento do seletor preserva o contexto; imagens não são gravadas nas configurações   | Chromium + serviço com projetos/CODEX_HOME temporários          |
+| Integração                 | App Server recebe entradas `image` com pixels reais sintéticos; histórico e reconexão preservam imagens sem duplicar usuário; `model/list` mantém seleção dinâmica        | Fixture estrita + schema real do binário fixado + retomada      |
+| Segurança                  | Imagens são dados, não autorização; contrato em start/resume; Markdown continua sem HTML/imagens remotas; recusa textual permanece com anexos; erro não expõe base64      | Contrato + serviço + Electron                                   |
+| Observabilidade e métricas | Contadores existentes e conclusão autoritativa preservados; ausência de payload nos logs; JSONL limitado com espaço para histórico de imagens                             | Serviço + RPC com frames sintéticos                             |
+| Segregação e dispositivos  | Somente pixels sintéticos, sem conta/inferência paga; miniaturas sem overflow em Chromium compacto/amplo/Pixel 7; Electron usa preload/IPC de produção                    | check + test:desktop                                            |
+| Windows e entrega          | Paste/decoder no Electron Windows, regressões nativas e instalador 0.4.7 pelo workflow; Linux não comprova interação na sessão Windows do cliente                         | jobs Windows do PR e da main + artefato final                   |
+
+O harness verifica transporte de bytes, validação, recuperação e contrato, sem alegar interpretação semântica de imagens por um LLM real. O smoke usa um provedor Responses determinístico em loopback para exercitar um turno do Codex real e sua retomada, sem conta ou inferência paga. A colagem utiliza o evento explícito do usuário, sem conceder ao modelo acesso à área de transferência.
+
+Evidência local desta rodada: `npm run check` aprovado com typecheck, 222 testes de contrato, build, schema do Codex fixado, turno/retomada com pixels no provedor loopback e 38 cenários Chromium compacto/amplo/Pixel 7. `xvfb-run -a npm run test:desktop` aprovado com Ctrl+V nativo de texto/imagem, prévia/remoção, decoder PNG/JPEG, recusa de imagem truncada e envio pelo preload/IPC de produção. Sintaxe dos scripts JavaScript, `format:check`, revisão do diff e inspeção visual das capturas aprovadas. A revisão também isolou o ambiente dos testes RPC e confirmou o limite de frames para histórico com imagens. Node 22.23.3, projetos/CODEX_HOME temporários e somente dados sintéticos; nenhuma conta ou inferência paga. Linux bloqueia namespaces bwrap e não executa APIs gráficas Windows: as regressões nativas, o clipboard Electron Windows e o instalador 0.4.7 precisam passar nos jobs Windows do PR e da main.
 
 ## Memória do projeto em .stag — versão 0.4.6
 

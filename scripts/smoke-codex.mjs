@@ -3,11 +3,16 @@ import { build } from "esbuild";
 import { mkdtemp, rm, mkdir, cp, writeFile, readFile, symlink } from "node:fs/promises";
 import { resolve, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
+import { startImageProvider } from "../tests/fixtures/image-provider.mjs";
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/codex-smoke-"));
 const project = join(dir, "projeto com espaço-ação");
 const neighbor = join(dir, "projeto-vizinho");
 let rpc;
+let provider;
 try {
   await mkdir(join(dir, "home"), { recursive: true });
   await mkdir(project);
@@ -33,12 +38,46 @@ try {
   const { assistantInstructions, threadPolicy, turnPolicy, codexEnvironment } = await import(
     pathToFileURL(join(dir, "policy.mjs")).href
   );
+  const binary = resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex");
+  const schemas = join(dir, "protocol");
+  await promisify(execFile)(
+    binary,
+    ["app-server", "generate-json-schema", "--experimental", "--out", schemas],
+    {
+      cwd: project,
+      env: codexEnvironment(join(dir, "home")),
+      timeout: 30000,
+    },
+  );
+  const turnSchema = JSON.parse(await readFile(join(schemas, "v2/TurnStartParams.json"), "utf8"));
+  const imageShape = turnSchema.definitions.UserInput.oneOf.find((entry) =>
+    entry.properties?.type?.enum?.includes("image"),
+  );
+  assert.ok(
+    imageShape?.anyOf?.some(
+      (entry) => entry.required?.includes("url") && entry.properties?.url?.type === "string",
+    ),
+    "O binário fixado deve aceitar input image/url.",
+  );
+  provider = await startImageProvider();
   rpc = new RpcClient({
-    command: resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex"),
+    command: binary,
     args: [
       "app-server",
       "--listen",
       "stdio://",
+      "-c",
+      'model_provider="stag_image_fixture"',
+      "-c",
+      'model_providers.stag_image_fixture.name="STAG synthetic images"',
+      "-c",
+      `model_providers.stag_image_fixture.base_url=${JSON.stringify(provider.url)}`,
+      "-c",
+      'model_providers.stag_image_fixture.wire_api="responses"',
+      "-c",
+      "model_providers.stag_image_fixture.requires_openai_auth=false",
+      "-c",
+      "model_providers.stag_image_fixture.supports_websockets=false",
       ...(process.platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : []),
     ],
     cwd: project,
@@ -74,6 +113,7 @@ try {
   // Verify experimental desktop-tool schema against the bundled binary without a turn/LLM call.
   const started = await rpc.call("thread/start", {
     cwd: project,
+    model: (models.data.find((model) => model.isDefault) || models.data[0]).model,
     ephemeral: false,
     ...threadPolicy("project", project),
     developerInstructions: assistantInstructions("project", process.platform, false, true, project),
@@ -85,17 +125,41 @@ try {
   assert.deepEqual(started.runtimeWorkspaceRoots, [project]);
   // The server reports cwd/runtime roots separately from additional configured roots.
   assert.deepEqual(started.sandbox.writableRoots, []);
-  // Materialize synthetic history without starting inference; empty threads have no rollout.
-  await rpc.call("thread/inject_items", {
-    threadId: started.thread.id,
-    items: [
-      {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: "Histórico sintético para validar a retomada." }],
-      },
-    ],
+  // A real user turn is required for UI history; raw injected Responses items aren't UI turns.
+  let timer;
+  let listener;
+  const completed = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("Turno sintético de imagem não concluiu.")), 30000);
+    listener = (message) => {
+      if (message.method === "turn/completed" && message.params.threadId === started.thread.id)
+        resolve(message.params.turn);
+    };
+    rpc.on("notification", listener);
   });
+  try {
+    await rpc.call("turn/start", {
+      threadId: started.thread.id,
+      cwd: project,
+      input: [
+        { type: "text", text: "Analise a imagem sintética do sistema." },
+        { type: "image", url: imageFixture.dataUrl },
+      ],
+      ...turnPolicy("project", project),
+    });
+    assert.equal((await completed).status, "completed");
+  } finally {
+    clearTimeout(timer);
+    rpc.off("notification", listener);
+  }
+  const providerImage = provider.inputs
+    .flat()
+    .flatMap((item) => item.content || [])
+    .find((item) => item.type === "input_image");
+  assert.equal(
+    providerImage?.image_url,
+    imageFixture.dataUrl,
+    "Pixels precisam chegar ao provedor local pelo Codex real.",
+  );
   const resumed = await rpc.call("thread/resume", {
     threadId: started.thread.id,
     cwd: project,
@@ -103,6 +167,16 @@ try {
     developerInstructions: assistantInstructions("project", process.platform, true, true, project),
   });
   assert.equal(resumed.thread.id, started.thread.id);
+  const resumedImage = resumed.thread.turns
+    .flatMap((turn) => turn.items)
+    .filter((item) => item.type === "userMessage")
+    .flatMap((item) => item.content)
+    .find((item) => item.type === "image");
+  assert.equal(
+    resumedImage?.url,
+    imageFixture.dataUrl,
+    "Retomada real deve preservar os pixels sintéticos.",
+  );
   assert.deepEqual(resumed.sandbox, started.sandbox);
   assert.deepEqual(resumed.runtimeWorkspaceRoots, [project]);
   const command = (operation, target, policy) =>
@@ -164,9 +238,10 @@ try {
     );
   }
   console.log(
-    `Codex real: handshake, conta isolada, ${models.data.length} modelos, schemas desktop/browser, instruções e raízes explícitas de start/resume OK. Nenhum turno/LLM executado.`,
+    `Codex real: handshake, conta isolada, ${models.data.length} modelos, schemas desktop/browser/imagem, pixels no provedor local e histórico, instruções e raízes explícitas de start/resume OK. Resposta determinística em loopback; nenhum LLM real/inferência paga.`,
   );
 } finally {
   await rpc?.shutdown();
+  await provider?.close();
   await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

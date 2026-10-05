@@ -6,6 +6,7 @@ import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
+import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -90,9 +91,84 @@ try {
     }
   });
   assert.equal(rejected, true);
+  const imageInput = page.getByLabel("Mensagem para o assistente");
+  await application.evaluate(async ({ clipboard }) =>
+    clipboard.writeText("Tarefa sintética colada"),
+  );
+  await imageInput.focus();
+  await imageInput.press("Control+v");
+  await expect(imageInput).toHaveValue("Tarefa sintética colada");
+  await expect(page.locator(".composer img")).toHaveCount(0);
+  await imageInput.fill("");
+  // The real OS clipboard event reaches the sandboxed renderer; no clipboard API is exposed.
+  await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, dataUrl) => {
+    await clipboard.write([
+      new ClipboardItem({
+        "image/png": new Blob([nativeImage.createFromDataURL(dataUrl).toPNG()], {
+          type: "image/png",
+        }),
+      }),
+    ]);
+  }, imageFixture.dataUrl);
+  await imageInput.focus();
+  await imageInput.press("Control+v");
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  assert.equal(await page.locator(".composer img").evaluate((img) => img.naturalWidth), 2);
+  await page.getByRole("button", { name: "Remover imagem 1" }).click();
+  await expect(page.locator(".composer img")).toHaveCount(0);
+  const invalidPixelsRejected = await page.evaluate(async (dataUrl) => {
+    const bytes = Uint8Array.from(atob(dataUrl.split(",")[1]), (c) => c.charCodeAt(0));
+    // Valid PNG header/dimensions but no IDAT/IEND: the production native decoder must reject it.
+    const truncated = `data:image/png;base64,${btoa(String.fromCharCode(...bytes.slice(0, 33)))}`;
+    try {
+      await window.stag.request({
+        type: "send",
+        text: "Analise o sistema",
+        images: [{ dataUrl: truncated }],
+      });
+      return false;
+    } catch (error) {
+      return /Imagem inválida/.test(error.message);
+    }
+  }, imageFixture.dataUrl);
+  assert.equal(invalidPixelsRejected, true);
+  // JPEG is checked by both shared validation and the native decoder, before account checks.
+  const jpeg = await application.evaluate(
+    ({ nativeImage }, dataUrl) =>
+      `data:image/jpeg;base64,${nativeImage.createFromDataURL(dataUrl).toJPEG(80).toString("base64")}`,
+    imageFixture.dataUrl,
+  );
+  const jpegValidated = await page.evaluate(async (dataUrl) => {
+    try {
+      await window.stag.request({ type: "send", text: "Analise o sistema", images: [{ dataUrl }] });
+      return false;
+    } catch (error) {
+      return /Entre com sua conta/.test(error.message);
+    }
+  }, jpeg);
+  assert.equal(jpegValidated, true);
   if (process.platform !== "win32") {
     await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
     await expect(page.getByLabel("Modelo", { exact: true })).toHaveValue("fixture-model");
+    await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, dataUrl) => {
+      await clipboard.write([
+        new ClipboardItem({
+          "image/png": new Blob([nativeImage.createFromDataURL(dataUrl).toPNG()], {
+            type: "image/png",
+          }),
+        }),
+      ]);
+    }, imageFixture.dataUrl);
+    await imageInput.focus();
+    await imageInput.press("Control+v");
+    await expect(page.locator(".composer img")).toHaveCount(1);
+    await imageInput.press("Enter");
+    await expect(
+      page.getByText("Recebi 1 imagem(ns) sintética(s).", { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".user-message img")).toHaveCount(1);
+    await expect(page.locator(".composer img")).toHaveCount(0);
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     const beforeBlocked = await page.evaluate(
       async () => (await window.stag.getSnapshot()).metrics,
     );

@@ -9,6 +9,7 @@ let initialized = false;
 let loggedIn = false;
 let count = 0;
 let serverId = 500;
+let textOnlyModel = false;
 const calls = [];
 const threads = new Map();
 // Recovery tests opt into a file in their temporary directory; never use the user's Codex home.
@@ -17,13 +18,17 @@ if (stateFile) {
   try {
     const stored = JSON.parse(readFileSync(stateFile, "utf8"));
     loggedIn = stored.loggedIn;
+    textOnlyModel = stored.textOnlyModel === true;
     count = stored.count;
     for (const thread of stored.threads) threads.set(thread.id, thread);
   } catch {}
 }
 const persist = () => {
   if (stateFile)
-    writeFileSync(stateFile, JSON.stringify({ loggedIn, count, threads: [...threads.values()] }));
+    writeFileSync(
+      stateFile,
+      JSON.stringify({ loggedIn, textOnlyModel, count, threads: [...threads.values()] }),
+    );
 };
 const waiting = new Map();
 const send = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -220,6 +225,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             displayName: "Modelo de teste",
             defaultReasoningEffort: "medium",
             isDefault: true,
+            inputModalities: textOnlyModel ? ["text"] : ["text", "image"],
             supportedReasoningEfforts: [
               { reasoningEffort: "medium", description: "Padrão de teste" },
               { reasoningEffort: "high", description: "Mais esforço" },
@@ -288,14 +294,37 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         failure(id, "Invalid turn workspace policy");
         break;
       }
-      const input = p.input[0].text;
+      if (
+        !Array.isArray(p.input) ||
+        !p.input.length ||
+        p.input.some((item) =>
+          item.type === "text"
+            ? typeof item.text !== "string" || !item.text.trim()
+            : item.type !== "image" ||
+              typeof item.url !== "string" ||
+              !/^data:image\/(png|jpeg);base64,/.test(item.url) ||
+              Buffer.from(item.url.split(",")[1], "base64").length < 33,
+        )
+      ) {
+        failure(id, "Invalid multimodal input");
+        break;
+      }
+      const input = p.input
+        .filter((item) => item.type === "text")
+        .map((item) => item.text)
+        .join("\n");
+      const images = p.input.filter((item) => item.type === "image");
+      if (input === "sonda imagem rejeitada") {
+        failure(id, `Falha sintética no envio de ${images[0]?.url || "imagem"}`);
+        break;
+      }
       const turn = {
         id: `fixture-turn-${++count}`,
         status: "inProgress",
         items: [{ id: `user-${count}`, type: "userMessage", content: p.input }],
       };
       thread.turns.push(turn);
-      thread.preview = input;
+      thread.preview = input || "Solicitação com imagens";
       if (!input.includes("desktop sem início"))
         notify("turn/started", { threadId: thread.id, turn });
       notify("item/started", { threadId: thread.id, turnId: turn.id, item: turn.items[0] });
@@ -909,7 +938,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       const finalText = input.includes("html")
         ? "Teste seguro. <script>window.hacked=true</script>\n\n![rastreador](https://example.invalid/tracker.png)\n\n[documentação](https://learn.chatgpt.com/docs/app-server)"
-        : undefined;
+        : images.length
+          ? `Recebi ${images.length} imagem(ns) sintética(s).`
+          : undefined;
       response(thread, turn, finalText);
       if (input.includes("rápido"))
         reply(id, { turn: { id: turn.id, status: "inProgress", items: [] } });
@@ -927,6 +958,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     }
     case "_fixture/readCalls":
       reply(id, calls);
+      break;
+    case "_fixture/textOnlyModel":
+      textOnlyModel = true;
+      persist();
+      reply(id, {});
+      break;
+    case "_fixture/largeFrame":
+      reply(id, { synthetic: "A".repeat(Math.min(p.size, 33 * 1024 * 1024)) });
       break;
     case "_fixture/timeout":
       break;
