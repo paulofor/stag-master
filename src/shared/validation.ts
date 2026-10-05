@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { requestImagesSchema } from "./request-images";
+import { projectSourcesSchema } from "./project-sources";
 
 export const actionSchema = z.discriminatedUnion("type", [
   z
@@ -25,6 +26,13 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("resume"), threadId: z.string().min(1).max(200) }).strict(),
+  z
+    .object({
+      type: z.literal("projectSources"),
+      projectPath: z.string().min(1).max(32768),
+      sources: projectSourcesSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.literal("send"),

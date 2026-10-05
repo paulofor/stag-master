@@ -78,6 +78,11 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.browser.authorized = false;
               state.browser.url = "";
               break;
+            case "projectSources":
+              if (state.busy || action.projectPath !== state.project?.path)
+                throw new Error("O projeto mudou ou está em execução.");
+              state.projectSources = action.sources;
+              break;
             case "preferences":
               if (action.mode) {
                 state.mode = action.mode;

@@ -126,7 +126,7 @@ svg {
   justify-content: space-between;
   padding: 13px 26px;
   flex-shrink: 0;
-  gap: 20px;
+  gap: 10px;
 }
 .project-button {
   background: transparent;
@@ -139,7 +139,8 @@ svg {
   font-size: 11px;
   color: #626c61;
   min-width: 0;
-  max-width: 72%;
+  max-width: 55%;
+  margin-right: auto;
 }
 .project-button span {
   overflow: hidden;
@@ -157,6 +158,105 @@ svg {
   align-items: center;
   gap: 6px;
   white-space: nowrap;
+}
+.project-sources-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #e1e3db;
+  border-radius: 6px;
+  background: transparent;
+  padding: 6px 8px;
+  color: #626c61;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.project-sources-button:hover:not(:disabled) {
+  background: #f1f2e9;
+}
+.sources-count {
+  background: #e9eee0;
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.sources-dialog {
+  width: min(560px, calc(100% - 32px));
+  max-width: 560px;
+  max-height: calc(100dvh - 32px);
+  padding: 22px;
+  overflow: auto;
+}
+.sources-dialog::backdrop {
+  background: #35412d35;
+  backdrop-filter: blur(2px);
+}
+.sources-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #647b52;
+}
+.sources-heading h2 {
+  flex: 1;
+  margin: 0;
+}
+.sources-dialog .sources-hint {
+  font-size: 11px;
+}
+.sources-list {
+  display: grid;
+  gap: 12px;
+}
+.source-entry {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid #dedfd3;
+  border-radius: 9px;
+  padding: 10px 13px;
+}
+.source-entry legend {
+  color: #7c8a6a;
+  font-size: 11px;
+  padding: 0 4px;
+}
+.source-entry label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: #626c61;
+}
+.source-entry input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #dedfd3;
+  background: #fffefa;
+  color: #252a29;
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 12px;
+}
+.source-remove,
+.sources-add .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sources-add {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0;
+  font-size: 11px;
+  color: #7c8a6a;
+}
+.sources-dialog .sources-error {
+  background: #fbede5;
+  color: #965139;
+  padding: 9px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
 }
 .project-git {
   flex-shrink: 0;

@@ -8,6 +8,7 @@ import { codexEnvironment, threadPolicy } from "../../src/main/policy";
 import { engineeringInstructions } from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import memoryCorpus from "../fixtures/memory-scenarios.json";
+import sourceCorpus from "../fixtures/source-scenarios.json";
 import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
 import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
@@ -111,6 +112,198 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("fontes de documentação cadastradas", () => {
+  const source = { name: "Projeto sintético", url: "https://docs.example.invalid/project" };
+  const saveSources = (sources: (typeof source)[], projectPath = dir) =>
+    service.request({ type: "projectSources", projectPath, sources });
+  it("envia fontes em start/resume, exige consentimento e usa a lista atual sem mudar a conversa", async () => {
+    await ready();
+    const before = service.snapshot().metrics.requests;
+    await saveSources([source]);
+    expect(service.snapshot().metrics.requests).toBe(before);
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.unauthorized);
+    expect(browser.execute).not.toHaveBeenCalled();
+    const thread = service.snapshot().threadId;
+    await service.request({ type: "browserConsent", allow: true });
+    await send(sourceCorpus.input);
+    await complete();
+    expect(browser.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "navigate", url: source.url }),
+    );
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.complete);
+    const replacement = { ...source, url: "http://localhost:4201/documentacao" };
+    await saveSources([replacement]);
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().threadId).toBe(thread);
+    expect(browser.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "navigate", url: replacement.url }),
+    );
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    const start = calls.find((call) => call.method === "thread/start")!;
+    expect(start.params.developerInstructions).toContain(JSON.stringify([source]));
+    const resumed = calls.filter((call) => call.method === "thread/resume").at(-1)!;
+    expect(resumed.params.developerInstructions).toContain(JSON.stringify([replacement]));
+    expect(resumed.params.developerInstructions).not.toContain(source.url);
+    expect(resumed.params.sandbox).toBe("workspace-write");
+    expect(resumed.params.runtimeWorkspaceRoots).toEqual([dir]);
+    const turnContext = calls.filter((call) => call.method === "turn/start").at(-1)!.params
+      .additionalContext as Record<string, { kind: string; value: string }>;
+    expect(turnContext.stag_project_sources_data.kind).toBe("untrusted");
+    expect(JSON.parse(turnContext.stag_project_sources_data.value)).toEqual({
+      projectPath: dir,
+      sources: [replacement],
+    });
+    expect(turnContext.stag_project_sources_policy.kind).toBe("application");
+    expect(turnContext.stag_project_sources_policy.value).not.toContain(source.name);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
+    browser.execute.mockClear();
+    await saveSources([]);
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.missing);
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+  it("persiste no reinício e isola pastas, seleção cancelada e formulários de outro contexto", async () => {
+    await ready();
+    await saveSources([source]);
+    await service.request({ type: "newChat" });
+    await service.init();
+    expect(service.snapshot().projectSources).toEqual([source]);
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().projectSources).toEqual([source]);
+    const neighbor = resolve(dir, "neighbor");
+    await mkdir(neighbor);
+    selectProject.mockResolvedValueOnce(neighbor);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().projectSources).toEqual([]);
+    await expect(saveSources([], dir)).rejects.toThrow("O projeto mudou");
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.missing);
+    selectProject.mockResolvedValueOnce(dir);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().projectSources).toEqual([source]);
+  });
+  it("serializa o envio durante a retomada das fontes, sem duplicar turnos ou disputar com outro cadastro", async () => {
+    await ready();
+    await send(sourceCorpus.input);
+    await complete();
+    await saveSources([source]);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalCall = rpc.call.bind(rpc);
+    let resuming = false;
+    vi.spyOn(rpc, "call").mockImplementationOnce(async (method, params) => {
+      resuming = true;
+      await gate;
+      return originalCall(method, params);
+    });
+    const sending = send(sourceCorpus.input);
+    try {
+      await vi.waitFor(() => expect(resuming).toBe(true));
+      await expect(send(sourceCorpus.input)).rejects.toThrow("Aguarde ou pare");
+      await expect(saveSources([])).rejects.toThrow("Pare a execução");
+    } finally {
+      release();
+      await sending;
+    }
+    await complete();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(2);
+    expect(service.snapshot().projectSources).toEqual([source]);
+  });
+  it("falha de disco preserva fontes e falha de atualização remota não envia turno; ambas recuperam", async () => {
+    await ready();
+    await saveSources([source]);
+    await send(sourceCorpus.input);
+    await complete();
+    const replacement = { ...source, name: "Referência atualizada" };
+    vi.spyOn(store, "save").mockRejectedValueOnce(new Error("Falha sintética ao salvar fontes."));
+    await expect(saveSources([replacement])).rejects.toThrow("Falha sintética");
+    expect(service.snapshot().projectSources).toEqual([source]);
+    expect((await store.load()).projectSources[dir]).toEqual([source]);
+    await saveSources([replacement]);
+    vi.spyOn(rpc, "call").mockRejectedValueOnce(
+      new Error("Falha sintética ao atualizar contrato."),
+    );
+    const users = service.snapshot().items.filter((item) => item.kind === "user").length;
+    await expect(send(sourceCorpus.input)).rejects.toThrow("atualizar contrato");
+    expect(service.snapshot().busy).toBe(false);
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(users);
+    await send(sourceCorpus.input);
+    await complete();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    expect(
+      calls.filter((call) => call.method === "thread/resume").at(-1)?.params.developerInstructions,
+    ).toContain(JSON.stringify([replacement]));
+  });
+  it("bloqueia alteração durante turno, detecta perda de contrato e recupera por reconexão", async () => {
+    await ready();
+    await saveSources([source]);
+    await send("lento");
+    await expect(saveSources([])).rejects.toThrow("Pare a execução");
+    await service.request({ type: "stop" });
+    await complete();
+    await rpc.call("thread/resume", {
+      threadId: service.snapshot().threadId,
+      cwd: dir,
+      ...threadPolicy("project", dir),
+      developerInstructions: "Contrato incompleto de teste.",
+    });
+    // Simulate loss of the current per-turn context as well as start/resume instructions.
+    const originalCall = rpc.call.bind(rpc);
+    const lostContext = vi.spyOn(rpc, "call").mockImplementationOnce((method, params) => {
+      const context = params!.additionalContext as Record<string, { kind: string; value: string }>;
+      return originalCall(method, {
+        ...params,
+        additionalContext: {
+          ...context,
+          stag_project_sources_policy: {
+            kind: "application",
+            value: "Contrato incompleto de teste.",
+          },
+        },
+      });
+    });
+    await send(sourceCorpus.input);
+    await complete();
+    lostContext.mockRestore();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.incomplete);
+    await service.request({ type: "connect" });
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.unauthorized);
+  });
+  it("cadastro em Leitura não escreve no projeto, e histórico sem ferramenta conserva modo e exige nova conversa", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await saveSources([source]);
+    await send(sourceCorpus.input);
+    await complete();
+    const thread = service.snapshot().threadId!;
+    const settings = await store.load();
+    delete settings.threads[thread].browserTool;
+    await store.save(settings);
+    await service.init();
+    await service.request({ type: "resume", threadId: thread });
+    await send(sourceCorpus.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.legacy);
+    expect(service.snapshot().mode).toBe("read");
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(await readdir(dir)).not.toContain(".stag");
+  });
+});
 describe("imagens na solicitação", () => {
   const image = { dataUrl: imageFixture.dataUrl };
   it("envia texto e pixels sem duplicar usuário, preserva histórico/reconexão e isola projetos", async () => {

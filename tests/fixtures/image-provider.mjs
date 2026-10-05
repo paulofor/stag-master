@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 // Loopback-only Responses provider: deterministic output, no account, LLM or external network.
 export async function startImageProvider() {
   const inputs = [];
+  const instructions = [];
   const server = createServer(async (request, response) => {
     if (request.method !== "POST" || !request.url.endsWith("/responses")) {
       response.writeHead(404).end();
@@ -20,6 +21,7 @@ export async function startImageProvider() {
     }
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     inputs.push(body.input);
+    instructions.push(body.instructions);
     const text = "Imagem sintética recebida pelo provedor local.";
     const item = {
       id: "msg_stag_image",
@@ -90,6 +92,7 @@ export async function startImageProvider() {
   return {
     url: `http://127.0.0.1:${server.address().port}/v1`,
     inputs,
+    instructions,
     close: () =>
       new Promise((resolve) => {
         server.close(resolve);

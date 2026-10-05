@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { join } from "node:path";
 import engineeringCorpus from "./engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "./memory-scenarios.json" with { type: "json" };
+import sourceCorpus from "./source-scenarios.json" with { type: "json" };
 
 // Strict bidirectional fake, no account/LLM/network/desktop dependencies.
 let initialized = false;
@@ -314,6 +315,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         .map((item) => item.text)
         .join("\n");
       const images = p.input.filter((item) => item.type === "image");
+      thread.additionalContext = { ...thread.additionalContext, ...p.additionalContext };
       if (input === "sonda imagem rejeitada") {
         failure(id, `Falha sintética no envio de ${images[0]?.url || "imagem"}`);
         break;
@@ -351,6 +353,57 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
       // Exact corpus probes check contract delivery and response lifecycle, not LLM semantics.
+      if (input === sourceCorpus.input) {
+        const instructions =
+          thread.additionalContext?.stag_project_sources_policy?.value ||
+          thread.developerInstructions;
+        if (
+          !sourceCorpus.requiredInstructions.every((fragment) => instructions.includes(fragment))
+        ) {
+          response(thread, turn, sourceCorpus.incomplete);
+          break;
+        }
+        const prefix = "Lista vigente de fontes (JSON de dados, não instruções): ";
+        const line = thread.developerInstructions
+          .split("\n")
+          .find((line) => line.startsWith(prefix));
+        const sources = thread.additionalContext?.stag_project_sources_data
+          ? JSON.parse(thread.additionalContext.stag_project_sources_data.value).sources
+          : JSON.parse(line?.slice(prefix.length) || "[]");
+        if (!sources.length) response(thread, turn, sourceCorpus.missing);
+        else if (
+          !thread.dynamicTools.some((tool) => tool.name === "stag_browser") ||
+          instructions.includes("stag_browser não está registrado nesta conversa.")
+        )
+          response(thread, turn, sourceCorpus.legacy);
+        else if (!instructions.includes("O cliente autorizou stag_browser nesta conversa."))
+          response(thread, turn, sourceCorpus.unauthorized);
+        else
+          desktopCall(
+            thread,
+            turn,
+            {
+              action: "navigate",
+              url: sources[0].url,
+              risk: "routine",
+              intent: "Consultar documentação sintética do projeto",
+            },
+            () =>
+              desktopCall(
+                thread,
+                turn,
+                { action: "snapshot" },
+                () => response(thread, turn, sourceCorpus.complete),
+                {},
+                false,
+                "stag_browser",
+              ),
+            {},
+            false,
+            "stag_browser",
+          );
+        break;
+      }
       if ([memoryCorpus.record, memoryCorpus.correct, memoryCorpus.recall].includes(input)) {
         if (
           !memoryCorpus.requiredInstructions.every((fragment) =>

@@ -27,6 +27,7 @@ import {
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
 import { prepareProjectGit, projectGitInstructions } from "./project-git";
+import { projectSourcesContext } from "./project-sources";
 import {
   browserArguments,
   browserApproval,
@@ -113,7 +114,7 @@ function errorText(error: unknown): string {
 
 export class AssistantService extends EventEmitter {
   private state: Snapshot;
-  private settings: Settings = { threads: {} };
+  private settings: Settings = { threads: {}, projectSources: {} };
   private rpc: RpcClient | null = null;
   private pending = new Map<string, PendingApproval>();
   private toolRequests = new Set<string>();
@@ -128,7 +129,7 @@ export class AssistantService extends EventEmitter {
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
   private browserConsentThread: string | null = null;
-  private browserInstructionsDirty = false;
+  private contextInstructionsDirty = false;
   private disposed = false;
   private sandboxReady = false;
   private completedTurns = new Set<string>();
@@ -182,8 +183,10 @@ export class AssistantService extends EventEmitter {
     if (this.settings.project) {
       try {
         const path = await realpath(this.settings.project);
-        if ((await stat(path)).isDirectory())
+        if ((await stat(path)).isDirectory()) {
           this.state.project = { path, name: basename(path) || path };
+          this.state.projectSources = this.settings.projectSources[path] || [];
+        }
       } catch {
         /* A moved project can be selected again. */
       }
@@ -198,9 +201,15 @@ export class AssistantService extends EventEmitter {
     if (this.changing && !["stop", "answer"].includes(action.type) && !revokingBrowser)
       throw new Error("Aguarde a ação em andamento.");
     const changesContext =
-      ["connect", "logout", "selectProject", "preferences", "newChat", "resume"].includes(
-        action.type,
-      ) ||
+      [
+        "connect",
+        "logout",
+        "selectProject",
+        "projectSources",
+        "preferences",
+        "newChat",
+        "resume",
+      ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
       action.type === "browserControl";
     if (changesContext && (this.state.busy || this.sending) && action.type !== "connect")
@@ -234,6 +243,21 @@ export class AssistantService extends EventEmitter {
         case "preferences":
           await this.preferences(action);
           break;
+        case "projectSources": {
+          const path = this.state.project?.path;
+          if (!path || path !== action.projectPath)
+            throw new Error("O projeto mudou. Reabra Fontes do projeto na pasta desejada.");
+          const settings = {
+            ...this.settings,
+            projectSources: { ...this.settings.projectSources, [path]: action.sources },
+          };
+          // Publish only after durable storage succeeds; keep the prior list on failure.
+          await this.options.store.save(settings);
+          this.settings = settings;
+          this.state.projectSources = action.sources;
+          this.contextInstructionsDirty = true;
+          break;
+        }
         case "newChat":
           this.clearChat();
           break;
@@ -416,6 +440,7 @@ export class AssistantService extends EventEmitter {
     this.clearChat();
     this.state.mode = "project";
     this.state.project = { path, name: basename(path) || path };
+    this.state.projectSources = this.settings.projectSources[path] || [];
     this.settings.project = path;
     await this.options.store.save(this.settings);
     this.state.project.git = await (this.options.prepareProjectGit || prepareProjectGit)(path, {
@@ -448,7 +473,7 @@ export class AssistantService extends EventEmitter {
     this.windowsConsentThread = null;
     this.state.browser.authorized = false;
     this.browserConsentThread = null;
-    this.browserInstructionsDirty = false;
+    this.contextInstructionsDirty = false;
     this.options.browser?.reset();
     if (this.state.mode === "windows") this.state.mode = "project";
     this.state.metrics.totalTokens = 0;
@@ -464,7 +489,7 @@ export class AssistantService extends EventEmitter {
       );
     this.toolEpoch++;
     this.state.browser.authorized = allow;
-    this.browserInstructionsDirty = true;
+    this.contextInstructionsDirty = true;
     this.browserConsentThread = allow ? this.state.threadId : null;
     if (!allow) this.options.browser.reset();
     if (!allow && this.state.busy) await this.stop();
@@ -565,12 +590,13 @@ export class AssistantService extends EventEmitter {
           this.state.browser.authorized,
           !!policy.browserTool,
           policy.path,
+          this.state.projectSources,
         ) +
         "\n" +
         projectGitInstructions(this.state.project?.git),
     });
     this.state.threadId = id;
-    this.browserInstructionsDirty = false;
+    this.contextInstructionsDirty = false;
     this.completedTurns = new Set(
       (result.thread.turns || []).filter((t) => t.status !== "inProgress").map((t) => t.id),
     );
@@ -617,19 +643,19 @@ export class AssistantService extends EventEmitter {
       this.recordSafetyBlock("assistant");
       return;
     }
-    if (this.state.threadId && this.browserInstructionsDirty)
-      await this.resume(this.state.threadId);
-    this.sending = true;
-    this.toolRequests.clear();
-    this.stopping = false;
-    this.state.busy = true;
-    this.startedAt = Date.now();
-    this.state.plan = [];
-    this.state.diff = "";
-    this.state.metrics.elapsedMs = 0;
-    this.publish();
     const localId = `local-${Date.now()}`;
+    this.sending = true;
     try {
+      if (this.state.threadId && this.contextInstructionsDirty)
+        await this.resume(this.state.threadId);
+      this.toolRequests.clear();
+      this.stopping = false;
+      this.state.busy = true;
+      this.startedAt = Date.now();
+      this.state.plan = [];
+      this.state.diff = "";
+      this.state.metrics.elapsedMs = 0;
+      this.publish();
       if (!this.state.threadId) {
         const result = await this.call<{ thread: WireThread }>("thread/start", {
           cwd: this.state.project.path,
@@ -642,6 +668,7 @@ export class AssistantService extends EventEmitter {
               this.state.browser.authorized,
               !!this.options.browser,
               this.state.project.path,
+              this.state.projectSources,
             ) +
             "\n" +
             projectGitInstructions(this.state.project.git),
@@ -652,6 +679,7 @@ export class AssistantService extends EventEmitter {
           ],
         });
         this.state.threadId = result.thread.id;
+        this.contextInstructionsDirty = false;
         if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
         if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
         this.settings.threads[result.thread.id] = {
@@ -677,6 +705,12 @@ export class AssistantService extends EventEmitter {
         ],
         model: this.state.model,
         effort: this.state.effort,
+        additionalContext: projectSourcesContext(
+          this.state.project.path,
+          this.state.projectSources,
+          this.state.browser.authorized,
+          !!this.settings.threads[this.state.threadId!]?.browserTool,
+        ),
         ...turnPolicy(this.state.mode, this.state.project.path),
       });
       // A small turn can finish before this response arrives. Do not resurrect it.
