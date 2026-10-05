@@ -28,6 +28,28 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume"), threadId: z.string().min(1).max(200) }).strict(),
   z
     .object({
+      type: z.literal("enqueue"),
+      threadId: z.string().min(1).max(200),
+      id: z.uuid(),
+      text: z.string().trim().min(1).max(100000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("removeQueued"),
+      threadId: z.string().min(1).max(200),
+      id: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("pauseQueue"),
+      threadId: z.string().min(1).max(200),
+      paused: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("projectSources"),
       projectPath: z.string().min(1).max(32768),
       sources: projectSourcesSchema,

@@ -13,6 +13,7 @@ let serverId = 500;
 let textOnlyModel = false;
 const calls = [];
 const threads = new Map();
+let rejectedQueueProbe = false;
 // Recovery tests opt into a file in their temporary directory; never use the user's Codex home.
 const stateFile = process.env.STAG_FIXTURE_STATE;
 if (stateFile) {
@@ -279,6 +280,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         failure(id, "Missing thread");
         break;
       }
+      if (thread.turns.some((turn) => turn.status === "inProgress")) {
+        failure(id, "Concurrent turn rejected by harness");
+        break;
+      }
       const expectedType = {
         "read-only": "readOnly",
         "workspace-write": "workspaceWrite",
@@ -315,6 +320,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         .map((item) => item.text)
         .join("\n");
       const images = p.input.filter((item) => item.type === "image");
+      if (input === "sonda fila rejeitada" && !rejectedQueueProbe) {
+        rejectedQueueProbe = true;
+        failure(id, "Falha sintética recuperável na fila");
+        break;
+      }
       thread.additionalContext = { ...thread.additionalContext, ...p.additionalContext };
       if (input === "sonda imagem rejeitada") {
         failure(id, `Falha sintética no envio de ${images[0]?.url || "imagem"}`);
@@ -327,6 +337,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       };
       thread.turns.push(turn);
       thread.preview = input || "Solicitação com imagens";
+      persist();
       if (!input.includes("desktop sem início"))
         notify("turn/started", { threadId: thread.id, turn });
       notify("item/started", { threadId: thread.id, turnId: turn.id, item: turn.items[0] });
@@ -350,6 +361,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         turnId: turn.id,
         item: { id: "reasoning", type: "reasoning", content: ["PRIVATE_REASONING"] },
       });
+      if (input === "sonda fila sem resposta") break;
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
       // Exact corpus probes check contract delivery and response lifecycle, not LLM semantics.
@@ -1076,6 +1088,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       else {
         reply(id, {});
         finish(thread, turn, "interrupted");
+      }
+      break;
+    }
+    case "_fixture/finishTurn": {
+      const thread = threads.get(p.threadId);
+      const turn = thread?.turns.find((turn) => turn.id === p.turnId);
+      if (!turn || turn.status !== "inProgress") failure(id, "No active synthetic turn");
+      else {
+        reply(id, {});
+        if (!p.status || p.status === "completed") response(thread, turn);
+        else finish(thread, turn, p.status, { message: "Falha sintética controlada" });
       }
       break;
     }

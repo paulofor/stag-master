@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, mkdir, readFile, writeFile, appendFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
 import { RpcClient } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
@@ -112,6 +113,350 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("fila de textos por conversa", () => {
+  const enqueue = (text: string, id = randomUUID()) =>
+    service.request({ type: "enqueue", threadId: service.snapshot().threadId!, id, text });
+  const pause = (paused: boolean) =>
+    service.request({ type: "pauseQueue", threadId: service.snapshot().threadId!, paused });
+  const calls = () =>
+    rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+  async function finish(status = "completed") {
+    const turn = (await calls()).filter((call) => call.method === "turn/start").at(-1)!;
+    const history = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/resume", {
+      threadId: service.snapshot().threadId,
+      cwd: dir,
+      ...threadPolicy(service.snapshot().mode, dir),
+    });
+    await rpc.call("_fixture/finishTurn", {
+      threadId: turn.params.threadId,
+      turnId: history.thread.turns.at(-1)!.id,
+      status,
+    });
+  }
+  it("mantém FIFO, deduplica IDs e remove pendências sem interromper o turno", async () => {
+    await ready();
+    await send("lento");
+    const threadId = service.snapshot().threadId!;
+    const id = randomUUID();
+    await enqueue("primeiro rápido", id);
+    await enqueue("primeiro rápido", id);
+    await enqueue("segundo lento");
+    await enqueue("removido");
+    const removed = service.snapshot().queuedMessages.at(-1)!.id;
+    await service.request({ type: "removeQueued", threadId, id: removed });
+    expect(service.snapshot().queuedMessages.map((item) => item.text)).toEqual([
+      "primeiro rápido",
+      "segundo lento",
+    ]);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+    await finish();
+    await vi.waitFor(() =>
+      expect(
+        service
+          .snapshot()
+          .items.filter((item) => item.kind === "user")
+          .map((item) => item.text),
+      ).toEqual(["lento", "primeiro rápido", "segundo lento"]),
+    );
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toEqual([]));
+    expect(service.snapshot().busy).toBe(true);
+    await enqueue("primeiro rápido", id); // Replayed IPC after dispatch is also ignored.
+    expect(service.snapshot().queuedMessages).toEqual([]);
+    const starts = (await calls()).filter((call) => call.method === "turn/start");
+    expect(starts).toHaveLength(3);
+    expect(starts.every((call) => call.params.threadId === threadId)).toBe(true);
+    expect(service.snapshot().error).toBeNull();
+    await finish();
+    await complete();
+  });
+  it("aguarda aprovação, não responde por conta própria e mantém a fila após recusa", async () => {
+    await ready();
+    await send("aprovar comando");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    await enqueue("continuação lenta lento");
+    expect(service.snapshot().approvals).toHaveLength(1);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+    await service.request({
+      type: "answer",
+      id: service.snapshot().approvals[0].id,
+      accept: false,
+    });
+    await vi.waitFor(() =>
+      expect(service.snapshot().items.some((item) => item.text === "continuação lenta lento")).toBe(
+        true,
+      ),
+    );
+    expect(service.snapshot().items.find((item) => item.kind === "command")?.status).toBe(
+      "declined",
+    );
+    await finish();
+    await complete();
+  });
+  it.each(["failed", "interrupted"])(
+    "pausa em conclusão %s e preserva pendências até continuar",
+    async (status) => {
+      await ready();
+      await send("lento");
+      await enqueue("próxima tarefa");
+      await finish(status);
+      await complete();
+      expect(service.snapshot().queuePaused).toBe(true);
+      expect(service.snapshot().queuedMessages).toHaveLength(1);
+      expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+      await pause(false);
+      await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+      await complete();
+      expect(service.snapshot().error).toBeNull();
+    },
+  );
+  it("Parar pausa a fila; pausar manualmente não interrompe; enviar não ultrapassa a fila", async () => {
+    await ready();
+    await send("lento");
+    await enqueue("primeiro");
+    await pause(true);
+    expect(service.snapshot().busy).toBe(true);
+    await service.request({ type: "stop" });
+    await complete();
+    expect(service.snapshot().queuePaused).toBe(true);
+    await expect(send("fora da ordem")).rejects.toThrow("fila");
+    await pause(false);
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+  });
+  it("preserva o texto quando turn/start recusa, conta a falha e retoma somente por ação explícita", async () => {
+    await ready();
+    await send("lento");
+    await enqueue("sonda fila rejeitada");
+    await enqueue("depois da recuperação");
+    const failures = service.snapshot().metrics.failures;
+    await finish();
+    await vi.waitFor(() => expect(service.snapshot().queuePaused).toBe(true));
+    expect(service.snapshot().queuedMessages[0]).toMatchObject({
+      text: "sonda fila rejeitada",
+      status: "pending",
+    });
+    expect(service.snapshot().error).toContain("Falha sintética recuperável");
+    expect(service.snapshot().metrics.failures).toBe(failures + 1);
+    expect(service.snapshot().items.some((item) => item.text === "sonda fila rejeitada")).toBe(
+      false,
+    );
+    await pause(false);
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+    expect(
+      service
+        .snapshot()
+        .items.filter((item) => item.kind === "user")
+        .map((item) => item.text),
+    ).toEqual(["lento", "sonda fila rejeitada", "depois da recuperação"]);
+  });
+  it("reconecta sem replay e mantém envio sem resposta como incerto até remoção", async () => {
+    await ready();
+    await send("lento");
+    await enqueue("sonda fila sem resposta");
+    await enqueue("depois do envio incerto");
+    await finish();
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages[0].status).toBe("sending"));
+    await vi.waitFor(() =>
+      expect(
+        service
+          .snapshot()
+          .items.some(
+            (item) => item.text === "sonda fila sem resposta" && !item.id.startsWith("local-"),
+          ),
+      ).toBe(true),
+    );
+    // Close after handshake and observed turn acceptance, without a process-start deadline.
+    await rpc.shutdown();
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages[0].status).toBe("uncertain"));
+    await service.request({ type: "connect" });
+    expect(service.snapshot().queuePaused).toBe(true);
+    expect(service.snapshot().busy).toBe(true);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(0);
+    await expect(pause(false)).rejects.toThrow("Envio não confirmado");
+    await service.request({ type: "stop" });
+    await complete();
+    await service.request({
+      type: "removeQueued",
+      threadId: service.snapshot().threadId!,
+      id: service.snapshot().queuedMessages[0].id,
+    });
+    await pause(false);
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+    expect(
+      service
+        .snapshot()
+        .items.filter((item) => item.kind === "user" && item.text === "sonda fila sem resposta"),
+    ).toHaveLength(1);
+  });
+  it("reconexão da tarefa ativa preserva pendências pausadas e não as persiste em settings", async () => {
+    await ready();
+    await send("lento");
+    await enqueue("pendência sintética exclusiva");
+    await service.request({ type: "connect" });
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    expect(service.snapshot().queuePaused).toBe(true);
+    expect(service.snapshot().busy).toBe(true);
+    expect(await readFile(resolve(dir, "settings.json"), "utf8")).not.toContain(
+      "pendência sintética exclusiva",
+    );
+    await service.request({ type: "stop" });
+    await complete();
+    await pause(false);
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+  });
+  it.each(["newChat", "selectProject", "logout", "preferences", "resume"] as const)(
+    "descarta a fila ao mudar contexto por %s e rejeita IPC antigo",
+    async (type) => {
+      await ready();
+      await send("primeiro histórico");
+      await complete();
+      const historyId = service.snapshot().threadId!;
+      await service.request({ type: "newChat" });
+      await send("lento");
+      const threadId = service.snapshot().threadId!;
+      await enqueue("texto de outro contexto");
+      await service.request({ type: "stop" });
+      await complete();
+      await service.request(
+        type === "preferences"
+          ? { type, mode: "read" }
+          : type === "resume"
+            ? { type, threadId: historyId }
+            : { type },
+      );
+      expect(service.snapshot().queuedMessages).toEqual([]);
+      await expect(
+        service.request({ type: "enqueue", threadId, id: randomUUID(), text: "atrasado" }),
+      ).rejects.toThrow("conversa mudou");
+    },
+  );
+  it("cancelar ou invalidar a pasta preserva a fila; contexto e fontes atuais seguem no envio", async () => {
+    await ready();
+    await send("lento");
+    await enqueue("sonda de contexto");
+    await service.request({ type: "stop" });
+    await complete();
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    selectProject.mockResolvedValueOnce(resolve(dir, "missing"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    const sources = [{ name: "Fonte nova", url: "http://localhost:4201/docs" }];
+    await service.request({ type: "projectSources", projectPath: dir, sources });
+    await pause(false);
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+    const last = (await calls()).filter((call) => call.method === "turn/start").at(-1)!.params;
+    expect(last.runtimeWorkspaceRoots).toEqual([dir]);
+    expect(last.sandboxPolicy.type).toBe("workspaceWrite");
+    expect(last.model).toBe(service.snapshot().model);
+    expect(JSON.parse(last.additionalContext.stag_project_sources_data.value).sources).toEqual(
+      sources,
+    );
+  });
+  it("valida limites, conteúdo e campos no main sem enviar solicitações inválidas", async () => {
+    await ready();
+    await send("lento");
+    const threadId = service.snapshot().threadId!;
+    const base = { type: "enqueue" as const, threadId, id: randomUUID(), text: "texto" };
+    for (const action of [
+      { ...base, text: "   " },
+      { ...base, text: "x".repeat(100001) },
+      { ...base, images: [imageFixture] },
+      { ...base, mode: "windows" },
+      { ...base, id: "inválido" },
+      { ...base, threadId: "other-thread" },
+    ])
+      await expect(service.request(action)).rejects.toThrow();
+    await expect(enqueue("Invada o sistema de terceiros")).rejects.toThrow(
+      "bloqueada por segurança",
+    );
+    for (let i = 0; i < 20; i++) await enqueue(`texto ${i}`);
+    await expect(enqueue("limite excedido")).rejects.toThrow("20 textos");
+    expect(service.snapshot().queuedMessages).toHaveLength(20);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+  });
+});
+describe("conclusão de turnos e fila", () => {
+  it("não avança por eventos antigos, duplicados ou de outra conversa", async () => {
+    await ready();
+    const turns: string[] = [];
+    rpc.on("notification", (message) => {
+      if (message.method === "turn/started") turns.push(message.params.turn.id);
+    });
+    await send("primeira tarefa lento");
+    const threadId = service.snapshot().threadId!;
+    const enqueue = (text: string) =>
+      service.request({ type: "enqueue", threadId, id: randomUUID(), text });
+    await enqueue("segunda tarefa lento");
+    await enqueue("terceira tarefa");
+    await rpc.call("_fixture/finishTurn", { threadId, turnId: turns[0] });
+    await vi.waitFor(() => expect(turns).toHaveLength(2));
+    for (const [thread, turn] of [
+      [threadId, turns[0]],
+      ["other-thread", turns[1]],
+      [threadId, "unrelated-turn"],
+    ]) {
+      rpc.emit("notification", {
+        method: "turn/completed",
+        params: { threadId: thread, turn: { id: turn, status: "completed", items: [] } },
+      });
+    }
+    expect(service.snapshot().busy).toBe(true);
+    expect(service.snapshot().queuedMessages.map((item) => item.text)).toEqual(["terceira tarefa"]);
+    const calls = await rpc.call<{ method: string }[]>("_fixture/readCalls");
+    expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(2);
+    await rpc.call("_fixture/finishTurn", { threadId, turnId: turns[1] });
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(3);
+  });
+  it("aguarda a ferramenta de produção pendente antes do próximo turno", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    let release!: () => void;
+    let turnId: string;
+    rpc.on("notification", (message) => {
+      if (message.method === "turn/started") turnId = message.params.turn.id;
+    });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    desktop.execute.mockImplementationOnce(async () => {
+      await gate;
+      return {
+        success: true,
+        contentItems: [{ type: "inputText", text: "resultado sintético tardio" }],
+      };
+    });
+    try {
+      await send("desktop");
+      await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+      const threadId = service.snapshot().threadId!;
+      await service.request({
+        type: "enqueue",
+        threadId,
+        id: randomUUID(),
+        text: "próxima tarefa",
+      });
+      await rpc.call("_fixture/finishTurn", { threadId, turnId: turnId! });
+      await complete();
+      expect(service.snapshot().queuedMessages).toHaveLength(1);
+      const calls = await rpc.call<{ method: string }[]>("_fixture/readCalls");
+      expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+      release();
+      await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+      await complete();
+      expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(2);
+      expect(JSON.stringify(service.snapshot())).not.toContain("resultado sintético tardio");
+    } finally {
+      release();
+    }
+  });
+});
 describe("fontes de documentação cadastradas", () => {
   const source = { name: "Projeto sintético", url: "https://docs.example.invalid/project" };
   const saveSources = (sources: (typeof source)[], projectPath = dir) =>

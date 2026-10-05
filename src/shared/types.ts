@@ -46,6 +46,12 @@ export interface ChatItem {
 export interface RequestImage {
   dataUrl: string;
 }
+export const maxQueuedMessages = 20;
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  status: "pending" | "sending" | "uncertain";
+}
 export interface Question {
   id: string;
   question: string;
@@ -73,6 +79,8 @@ export interface Snapshot {
   threads: ThreadSummary[];
   threadId: string | null;
   busy: boolean;
+  queuedMessages: QueuedMessage[];
+  queuePaused: boolean;
   items: ChatItem[];
   approvals: Approval[];
   plan: { step: string; status: string }[];
@@ -107,6 +115,8 @@ export const emptySnapshot: Snapshot = {
   threads: [],
   threadId: null,
   busy: false,
+  queuedMessages: [],
+  queuePaused: false,
   items: [],
   approvals: [],
   plan: [],
@@ -142,6 +152,9 @@ export type Action =
   | { type: "newChat" }
   | { type: "resume"; threadId: string }
   | { type: "send"; text: string; images?: RequestImage[] }
+  | { type: "enqueue"; threadId: string; id: string; text: string }
+  | { type: "removeQueued"; threadId: string; id: string }
+  | { type: "pauseQueue"; threadId: string; paused: boolean }
   | { type: "stop" }
   | { type: "answer"; id: string; accept?: boolean; answers?: Record<string, string> }
   | { type: "openLink"; url: string }

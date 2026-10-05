@@ -15,6 +15,7 @@ import {
   Globe2,
   History,
   LogOut,
+  ListPlus,
   Monitor,
   MoreHorizontal,
   Plus,
@@ -30,6 +31,7 @@ import remarkGfm from "remark-gfm";
 import { BrowserPane } from "./BrowserPane";
 import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
+import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
 import {
   maxRequestImages,
@@ -39,6 +41,7 @@ import {
 } from "../shared/request-images";
 import {
   emptySnapshot,
+  maxQueuedMessages,
   type Action,
   type Approval,
   type ChatItem,
@@ -164,23 +167,33 @@ export function App() {
     },
     [bridge, clearImages],
   );
-  const canSend =
+  const canSubmit =
     (!!draft.trim() || images.length > 0) &&
     !!state.account &&
     !!state.project &&
     !!state.model &&
     state.connection === "ready" &&
-    !state.busy &&
     !pending &&
     !pasting &&
     !sendingDraft;
-  async function send() {
-    if (!canSend || pasteInProgress.current || sendInProgress.current) return;
+  const canSend = canSubmit && !state.busy && !state.queuedMessages.length;
+  const canEnqueue =
+    canSubmit &&
+    !!draft.trim() &&
+    !images.length &&
+    !!state.threadId &&
+    state.queuedMessages.length < maxQueuedMessages;
+  async function send(queued = false) {
+    if (!(queued ? canEnqueue : canSend) || pasteInProgress.current || sendInProgress.current)
+      return;
     sendInProgress.current = true;
     setSendingDraft(true);
     const text = draft.trim();
     setAtBottom(true);
-    if (await run({ type: "send", text, ...(images.length ? { images } : {}) })) {
+    const action: Action = queued
+      ? { type: "enqueue", text, threadId: state.threadId!, id: crypto.randomUUID() }
+      : { type: "send", text, ...(images.length ? { images } : {}) };
+    if (await run(action)) {
       setDraft("");
       clearImages();
     }
@@ -628,6 +641,7 @@ export function App() {
               </button>
             </section>
           )}
+          <MessageQueue state={state} pending={pending} run={run} />
           <section className="composer" aria-label="Escrever mensagem">
             <ImageStrip
               images={images}
@@ -653,7 +667,9 @@ export function App() {
             <div className="paste-hint" role="status" aria-label="Imagens da solicitação">
               {pasting
                 ? "Preparando imagem…"
-                : "Cole imagens com Ctrl+V · até 4 imagens, 4 MB no total"}
+                : images.length && state.busy
+                  ? "A fila aceita somente texto. Envie as imagens após a tarefa atual."
+                  : "Cole imagens com Ctrl+V · até 4 imagens, 4 MB no total"}
             </div>
             <div className="composer-controls">
               <button
@@ -701,6 +717,18 @@ export function App() {
                   <ChevronDown size={12} />
                 </label>
               </div>
+              {(state.busy || state.queuedMessages.length > 0) && (
+                <button
+                  className="queue-button"
+                  aria-label="Adicionar texto à fila"
+                  title="Enviar este texto quando a tarefa atual terminar"
+                  disabled={!canEnqueue}
+                  onClick={() => void send(true)}
+                >
+                  <ListPlus size={16} />
+                  <span>Enfileirar</span>
+                </button>
+              )}
               {state.busy ? (
                 <button
                   className="send-button stopping"
