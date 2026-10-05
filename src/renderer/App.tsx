@@ -27,6 +27,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrowserPane } from "./BrowserPane";
+import { ProjectGitStatus } from "./ProjectGitStatus";
 import { readPastedImage } from "./request-images";
 import {
   maxRequestImages,
@@ -330,6 +331,7 @@ export function App() {
             {connectionLabel}
           </span>
         </div>
+        <ProjectGitStatus report={state.project?.git} />
         {menu && (
           <>
             <button
@@ -624,7 +626,7 @@ export function App() {
                 }
               }}
             />
-            <div className="paste-hint" role="status">
+            <div className="paste-hint" role="status" aria-label="Imagens da solicitação">
               {pasting
                 ? "Preparando imagem…"
                 : "Cole imagens com Ctrl+V · até 4 imagens, 4 MB no total"}
@@ -633,7 +635,7 @@ export function App() {
               <button
                 className="attach-button icon-button"
                 aria-label="Selecionar pasta do projeto"
-                title="Selecionar pasta e autorizar leitura e escrita nela e nas subpastas"
+                title="Selecionar pasta, autorizar leitura e escrita e preparar seus repositórios Git"
                 disabled={disabledContext}
                 onClick={() => void run({ type: "selectProject" })}
               >

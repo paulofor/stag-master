@@ -10,6 +10,7 @@ import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import memoryCorpus from "../fixtures/memory-scenarios.json";
 import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
+import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
 import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
 import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -20,6 +21,7 @@ let rpc: RpcClient;
 let store: SettingsStore;
 const openExternal = vi.fn(async (_url: string) => {});
 const selectProject = vi.fn<() => Promise<string | null>>();
+const prepareProjectGit = vi.fn<typeof prepareGit>();
 const desktop = {
   execute: vi.fn(async (_args: unknown): Promise<ToolResult> => ({
     success: true,
@@ -42,6 +44,18 @@ beforeEach(async () => {
   dir = await mkdtemp(resolve(".local/service-test-"));
   store = new SettingsStore(resolve(dir, "settings.json"));
   selectProject.mockResolvedValue(dir);
+  prepareProjectGit.mockImplementation((path, options) =>
+    prepareGit(path, {
+      ...options,
+      run: createGitRunner({
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: resolve(dir, "git-home"),
+        USERPROFILE: resolve(dir, "git-home"),
+        XDG_CONFIG_HOME: resolve(dir, "git-home/xdg"),
+      }),
+    }),
+  );
   service = new AssistantService({
     createRpc: () => {
       rpc = new RpcClient({
@@ -58,6 +72,7 @@ beforeEach(async () => {
     store,
     openExternal,
     selectProject,
+    prepareProjectGit,
     desktop,
     browser,
     platform: "win32",
@@ -697,6 +712,7 @@ describe("fluxo local do assistente", () => {
     await send("analise");
     await complete();
     const before = service.snapshot();
+    const preparations = prepareProjectGit.mock.calls.length;
     selectProject.mockResolvedValueOnce(null);
     await service.request({ type: "selectProject" });
     selectProject.mockResolvedValueOnce(resolve(dir, "não existe"));
@@ -705,6 +721,82 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().threadId).toBe(before.threadId);
     expect(service.snapshot().mode).toBe("read");
     expect(service.snapshot().items).toEqual(before.items);
+    expect(prepareProjectGit).toHaveBeenCalledTimes(preparations);
+  });
+  it("preparação Git serializa a seleção, reporta falhas e não impede tarefas independentes", async () => {
+    await ready();
+    let finish!: (value: Awaited<ReturnType<typeof prepareGit>>) => void;
+    prepareProjectGit.mockImplementationOnce((_path, options) => {
+      options?.onProgress?.({
+        phase: "scanning",
+        scanned: 1,
+        found: 1,
+        added: 0,
+        verified: 0,
+        skipped: 0,
+        failures: 0,
+        incomplete: false,
+        issues: [],
+      });
+      return new Promise((done) => {
+        finish = done;
+      });
+    });
+    const pending = service.request({ type: "selectProject" });
+    await vi.waitFor(() => expect(service.snapshot().project?.git?.phase).toBe("scanning"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow("Aguarde");
+    await expect(send("tarefa")).rejects.toThrow("Aguarde");
+    finish({
+      phase: "complete",
+      scanned: 1,
+      found: 1,
+      added: 0,
+      verified: 0,
+      skipped: 0,
+      failures: 1,
+      incomplete: false,
+      issues: [{ path: ".", message: "Configuração Git bloqueada." }],
+    });
+    await pending;
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().project?.git?.failures).toBe(1);
+    const callsBefore = prepareProjectGit.mock.calls.length;
+    await service.request({ type: "preferences", mode: "read" });
+    await send("explique arquitetura");
+    await complete();
+    const id = service.snapshot().threadId!;
+    await service.request({ type: "connect" });
+    await service.request({ type: "resume", threadId: id });
+    expect(prepareProjectGit).toHaveBeenCalledTimes(callsBefore);
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+    for (const call of calls.filter((call) =>
+      ["thread/start", "thread/resume"].includes(call.method),
+    )) {
+      expect(call.params.developerInstructions).toContain("0 status verificados, 1 falhas");
+      expect(call.params.developerInstructions).toContain("não autenticação remota");
+      expect(call.params.developerInstructions).toContain("não use safe.directory=*");
+    }
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().project?.git).toMatchObject({ found: 0, failures: 0 });
+  });
+  it("init com projeto salvo não modifica a confiança Git", async () => {
+    await ready();
+    const count = prepareProjectGit.mock.calls.length;
+    service.dispose();
+    await rpc.shutdown();
+    service = new AssistantService({
+      createRpc: () => rpc,
+      store,
+      openExternal,
+      selectProject,
+      prepareProjectGit,
+      desktop,
+    });
+    await service.init();
+    expect(service.snapshot().project?.path).toBe(dir);
+    expect(service.snapshot().project?.git).toBeUndefined();
+    expect(prepareProjectGit).toHaveBeenCalledTimes(count);
   });
   it("abre aplicação local no navegador integrado após consentimento, com desktop autorizado", async () => {
     await ready();

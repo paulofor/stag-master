@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.8: colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.9: preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Executar no Windows
 
@@ -14,7 +14,7 @@ npm run dev
 ```
 
 1. Clique em **Entrar com ChatGPT** e conclua o login no navegador.
-2. Use **Selecionar projeto** para escolher a pasta de trabalho. A seleção já autoriza leitura e escrita nessa pasta e nas subpastas e ativa **Projeto · leitura e escrita**. O modelo pode ler, criar e editar arquivos e executar testes da tarefa sem novas permissões de rotina.
+2. Use **Selecionar projeto** para escolher a pasta de trabalho. A seleção já autoriza leitura e escrita nessa pasta e nas subpastas e ativa **Projeto · leitura e escrita**. Também autoriza o cadastro dos repositórios encontrados na confiança Git do usuário, conforme explicado abaixo. O modelo pode ler, criar e editar arquivos e executar testes da tarefa sem novas permissões de rotina.
 3. Escolha um modelo disponível e envie a tarefa. Arquivos, histórias de usuário e AGENTS.md dessa pasta ficam acessíveis ao agente. Se quiser impedir alterações, selecione **Leitura** em **Acesso** depois de escolher a pasta; históricos mantêm seu modo original.
 4. Para controlar aplicativos, clique em **Autorizar desktop** ao lado da mensagem e confirme **Continuar** e **Permitir acesso**. Isso abre uma nova conversa no modo Windows; repita a tarefa nela. O projeto e o rascunho continuam selecionados.
 5. O STAG pode listar/focar, capturar a janela, clicar, digitar e rolar **somente em Postman, IntelliJ IDEA, Visual Studio Code e DBeaver**. Outros programas, área de trabalho, barra de tarefas e atalhos globais ficam bloqueados, mesmo com aprovação. O driver aceita um atalho por chamada. Capturas, foco, rolagem, navegação e edição local rotineiras seguem sem novas permissões. Exclusão, envio externo, publicação, pagamentos, credenciais e mudanças no sistema aguardam **Permitir esta ação**, com intenção e alvo visíveis; **Recusar** devolve a recusa sem executar. Interações sem contexto suficiente, Enter/Delete, atalhos desconhecidos/compostos e texto com Enter/Tab também pedem confirmação.
@@ -36,6 +36,16 @@ O agente classifica o efeito de cada interação na tela; o serviço exige confi
 As operações aprovadas executam o script empacotado com política PowerShell definida apenas para o processo filho. Não é necessário mudar a política de execução do usuário ou do computador. Se uma política corporativa ainda bloquear o script, o STAG informa a falha e pede a verificação pelo administrador; essa política tem precedência. A versão 0.2.1 corrige o bloqueio causado pela política local padrão Restricted.
 
 O Codex guarda credenciais e conversas na pasta local da aplicação (`%APPDATA%/STAG/codex`). O aplicativo não lê tokens nem usa a autenticação global de outros clientes.
+
+## Git na pasta e nas subpastas
+
+Ao selecionar a pasta, o STAG procura `.git` na raiz e nas subpastas. Para cada repositório válido, executa o equivalente a `git config --global --add safe.directory "RAIZ_EXATA"`, sem duplicar entradas já existentes, e verifica `git -C "RAIZ_EXATA" status --short --branch`. O aviso **Git pronto** informa quantos foram verificados; **Detalhes do Git** mostra cadastros e pendências. A execução automática desativa callbacks/filtros locais, acesso de rede e a escrita opcional do índice durante essa verificação.
+
+Isso resolve o bloqueio **dubious ownership**, sem pedir usuário ou senha. A confiança fica persistida na configuração global do Git do mesmo usuário que executa o STAG, inclusive para outros clientes Git desse usuário; só as raízes encontradas são acrescentadas. Não é autenticação para push/pull, alteração de permissões NTFS/GPO ou autorização de outros programas. O [Git documenta `safe.directory`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-safedirectory) como uma exceção de confiança por repositório.
+
+A busca não entra em `.git` nem segue links/junctions; worktrees e submódulos só são aceitos quando seus metadados também estão dentro da pasta selecionada. Nenhum curinga é cadastrado. Limites de 20 mil diretórios, 200 repositórios e dois minutos de preparação evitam uma busca indefinida; cada processo Git tem 15 segundos e uma busca interrompida aparece como incompleta, com orientação para selecionar uma subpasta menor. A interface não mostra saídas brutas do Git nem credenciais.
+
+Se o Git não estiver instalado, a configuração estiver bloqueada ou o repositório falhar, o aviso informa a pendência e a conversa continua utilizável. Instale **Git for Windows** se necessário, reabra o STAG e selecione a pasta novamente para repetir a preparação. Abrir o aplicativo, retomar histórico ou mudar para **Leitura** não repete o cadastro; cancelar o seletor mantém o contexto anterior.
 
 ## Imagens na solicitação
 

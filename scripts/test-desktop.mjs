@@ -7,6 +7,7 @@ import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
+import { gitFixture } from "../tests/fixtures/project-git.mjs";
 
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -17,7 +18,10 @@ let site;
 try {
   site = await startBrowserSite();
   await buildBrowserHarness(dir);
-  await mkdir(project);
+  const gitTest = await gitFixture(dir);
+  const nestedRepository = join(project, "equipe", "frontend ação");
+  await gitTest.init(project);
+  await gitTest.init(nestedRepository);
   await mkdir(data);
   await cp("dist", join(dir, "dist"), { recursive: true });
   await cp("native", join(dir, "native"), { recursive: true });
@@ -52,10 +56,15 @@ try {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
-        !/(TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL)/i.test(key) &&
+        !/(TOKEN|SECRET|API_KEY|PASSWORD|CREDENTIAL)|^GIT_/i.test(key) &&
         !["NODE_OPTIONS", "ELECTRON_RUN_AS_NODE", "STAG_DEV_URL"].includes(key),
     ),
   );
+  Object.assign(env, {
+    HOME: gitTest.home,
+    USERPROFILE: gitTest.home,
+    XDG_CONFIG_HOME: gitTest.env.XDG_CONFIG_HOME,
+  });
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
@@ -85,6 +94,29 @@ try {
   await expect(page.getByLabel("Acesso", { exact: true }).locator("option:checked")).toHaveText(
     "Projeto · leitura e escrita",
   );
+  await expect(page.getByRole("region", { name: "Preparação Git", exact: true })).toContainText(
+    "Git pronto: 2 repositório(s) verificado(s).",
+  );
+  const firstGit = await page.evaluate(async () => (await window.stag.getSnapshot()).project.git);
+  assert.equal(firstGit.added, 2);
+  await page.getByRole("button", { name: "projeto-fixture", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).project.git))
+    .toMatchObject({ phase: "complete", added: 0, verified: 2 });
+  const repeatedGit = await page.evaluate(
+    async () => (await window.stag.getSnapshot()).project.git,
+  );
+  assert.equal(repeatedGit.added, 0);
+  assert.equal(repeatedGit.verified, 2);
+  for (const repository of [project, nestedRepository])
+    assert.equal(
+      (
+        await gitTest.git(["-C", repository, "status", "--short", "--branch"], {
+          GIT_TEST_ASSUME_DIFFERENT_OWNER: "1",
+        })
+      ).code,
+      0,
+    );
   const rejected = await page.evaluate(async () => {
     try {
       await window.stag.request({ type: "openLink", url: "javascript:alert(1)" });

@@ -55,7 +55,21 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.items = [];
               break;
             case "selectProject":
-              state.project = { path: "C:\\Projetos\\exemplo", name: "exemplo" };
+              state.project = {
+                path: "C:\\Projetos\\exemplo",
+                name: "exemplo",
+                git: {
+                  phase: "complete",
+                  scanned: 4,
+                  found: 2,
+                  added: 2,
+                  verified: 2,
+                  skipped: 0,
+                  failures: 0,
+                  incomplete: false,
+                  issues: [],
+                },
+              };
               state.mode = "project";
               state.threadId = null;
               state.items = [];
