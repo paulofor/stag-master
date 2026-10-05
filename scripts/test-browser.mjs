@@ -222,7 +222,34 @@ export async function validateBrowser(application, dir, site) {
       "document.cookie='synthetic_session=fixture';localStorage.setItem('synthetic','fixture')",
     );
     console.log("Browser real: descartar sessão sintética e recuperar navegação interrompida.");
+    // Reproduce native window resizing after renderer bounds were accepted, before reset.
+    const previousSize = await application.evaluate(() => {
+      const host = global.browserHarness.host;
+      const size = host.getContentSize();
+      host.setContentSize(320, 240);
+      return size;
+    });
+    await expect
+      .poll(() => application.evaluate(() => global.browserHarness.host.getContentSize()[0]))
+      .toBeLessThan(previousSize[0]);
     await application.evaluate(() => global.browserHarness.browser.reset());
+    const resized = await application.evaluate(() => {
+      const { host, browser } = global.browserHarness;
+      const [width, height] = host.getContentSize();
+      const bounds = browser.view.getBounds();
+      return {
+        inside: bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= height + 1,
+        visible: browser.view.getVisible(),
+      };
+    });
+    assert.equal(resized.inside, true);
+    assert.equal(resized.visible, false);
+    await application.evaluate((_electron, size) => {
+      const { host, browser } = global.browserHarness;
+      host.setContentSize(...size);
+      const [width, height] = host.getContentSize();
+      browser.setBounds({ x: 0, y: 0, width, height });
+    }, previousSize);
     await execute({
       action: "navigate",
       url: site.url,
@@ -231,6 +258,32 @@ export async function validateBrowser(application, dir, site) {
     });
     assert.equal(await dom("document.cookie"), "");
     assert.equal(await dom("localStorage.getItem('synthetic')"), null);
+    // Visibility changes also revalidate stored layout, without changing the current session.
+    await application.evaluate(() => {
+      global.browserHarness.host.setContentSize(320, 240);
+    });
+    await expect
+      .poll(() => application.evaluate(() => global.browserHarness.host.getContentSize()[0]))
+      .toBeLessThan(previousSize[0]);
+    await application.evaluate(() => {
+      const browser = global.browserHarness.browser;
+      browser.setVisible(false);
+      browser.setVisible(true);
+    });
+    assert.equal(
+      await application.evaluate(() => global.browserHarness.browser.view.getVisible()),
+      false,
+    );
+    await application.evaluate((_electron, size) => {
+      const { host, browser } = global.browserHarness;
+      host.setContentSize(...size);
+      const [width, height] = host.getContentSize();
+      browser.setBounds({ x: 0, y: 0, width, height });
+    }, previousSize);
+    assert.equal(await dom("localStorage.getItem('synthetic')"), null);
+    console.log(
+      "Browser real: reset/visibilidade recuperam bounds após reduzir a janela, sem aceitar bounds externos inválidos.",
+    );
     assert.equal(site.effects.submissions, initialSubmissions);
     const canceled = execute({
       action: "navigate",
