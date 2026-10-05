@@ -1256,6 +1256,70 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
     expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_SCREEN");
   });
+  it("edita SQL no DBeaver só com consentimento da conversa e sem nova aprovação rotineira", async () => {
+    await ready();
+    await send("desktop dbeaver editar SQL");
+    await complete();
+    expect(desktop.execute).not.toHaveBeenCalled();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    const approvals: number[] = [];
+    service.on("snapshot", (snapshot) => approvals.push(snapshot.approvals.length));
+    await send("desktop dbeaver editar SQL");
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledExactlyOnceWith({
+      action: "type_text",
+      processId: 7272,
+      text: "SELECT 'synthetic-only';",
+      risk: "routine",
+      intent: "Editar SQL no DBeaver sem executar",
+    });
+    expect(approvals.every((count) => count === 0)).toBe(true);
+    await service.request({ type: "newChat" });
+    await send("desktop dbeaver editar SQL");
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().items.at(-1)?.text).toContain("Autorizar desktop");
+  });
+  it.each([
+    "Alterar dados e esquema na conexão sintética do DBeaver",
+    "Confirmar transação na conexão sintética do DBeaver",
+    "Exportar dados da conexão sintética do DBeaver",
+    "Digitar credencial de teste na conexão sintética do DBeaver",
+  ])("confirma e pode recusar ações de banco sem ampliar o alvo: %s", async (intent) => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send(`desktop dbeaver crítico ${intent}`);
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().approvals[0].detail).toContain(intent);
+    expect(service.snapshot().approvals[0].detail).toContain("Processo: 7272");
+    expect(desktop.execute).not.toHaveBeenCalled();
+    await approve(true);
+    expect(desktop.execute).toHaveBeenCalledExactlyOnceWith({
+      action: "click",
+      processId: 7272,
+      x: 120,
+      y: 180,
+      risk: "critical",
+      intent,
+    });
+    await send(`desktop dbeaver crítico ${intent}`);
+    await approve(false);
+    expect(desktop.execute).toHaveBeenCalledOnce();
+    await send("desktop dbeaver editar SQL");
+    await complete();
+    expect(desktop.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().approvals).toEqual([]);
+  });
+  it("confirma o atalho de executar SQL no DBeaver mesmo declarado rotina", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    await send("desktop dbeaver enter");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().approvals[0].detail).toContain("^{ENTER}");
+    expect(service.snapshot().approvals[0].detail).toContain("executar ou enviar dados");
+    await approve(false);
+    expect(desktop.execute).not.toHaveBeenCalled();
+  });
   it.each([
     "inválido",
     "risco inválido",
@@ -1388,7 +1452,7 @@ describe("fluxo local do assistente", () => {
   it.each([
     "Janela de teste indisponível.",
     "O Windows bloqueou o script de controle do STAG por uma política de execução.",
-    "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code. O alvo mudou.",
+    "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver. O alvo mudou.",
   ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
@@ -1424,7 +1488,7 @@ describe("fluxo local do assistente", () => {
     const resume = calls.find((call) => call.method === "thread/resume")!;
     for (const call of [start, resume]) {
       expect(call.params.developerInstructions).toContain(
-        "restrito exclusivamente a Postman, IntelliJ IDEA e Visual Studio Code",
+        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
       );
       expect(call.params.developerInstructions).toContain("não é ampliada por confirmação crítica");
       expect(call.params.sandbox).toBe("danger-full-access");

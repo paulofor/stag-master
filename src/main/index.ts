@@ -194,9 +194,10 @@ async function start(): Promise<void> {
       const result = await dialog.showMessageBox(window!, {
         type: "warning",
         title: "Acesso ao Windows",
-        message: "Permitir controle de Postman, IntelliJ IDEA e Visual Studio Code nesta conversa?",
+        message:
+          "Permitir controle de Postman, IntelliJ IDEA, Visual Studio Code e DBeaver nesta conversa?",
         detail:
-          "O desktop ficará limitado a esses três aplicativos: capturas somente da janela escolhida, foco, mouse e teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação. Navegação web usa o navegador integrado, com autorização própria. A rotina não pede nova aprovação; exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações incertas exigem confirmação específica. Capturas e títulos dessas janelas são enviados ao ChatGPT. Autorizar inicia nova conversa; revogar ou abrir outra encerra o acesso.",
+          "O desktop ficará limitado a esses quatro aplicativos: capturas somente da janela escolhida, foco, mouse e teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação. Navegação web usa o navegador integrado, com autorização própria. A rotina não pede nova aprovação; exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações incertas exigem confirmação específica. Capturas e títulos dessas janelas são enviados ao ChatGPT. Autorizar inicia nova conversa; revogar ou abrir outra encerra o acesso.",
         buttons: ["Cancelar", "Permitir acesso"],
         defaultId: 0,
         cancelId: 0,

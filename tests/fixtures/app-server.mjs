@@ -682,7 +682,36 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
           break;
         }
-        if (input.includes("desktop sem início")) {
+        if (input.startsWith("desktop dbeaver")) {
+          desktopCall(
+            thread,
+            turn,
+            input.includes("crítico")
+              ? {
+                  action: "click",
+                  processId: 7272,
+                  x: 120,
+                  y: 180,
+                  risk: "critical",
+                  intent: input.split("crítico")[1].trim(),
+                }
+              : input.includes("enter")
+                ? {
+                    action: "send_keys",
+                    processId: 7272,
+                    keys: "^{ENTER}",
+                    risk: "routine",
+                    intent: "Executar consulta na conexão sintética do DBeaver",
+                  }
+                : {
+                    action: "type_text",
+                    processId: 7272,
+                    text: "SELECT 'synthetic-only';",
+                    risk: "routine",
+                    intent: "Editar SQL no DBeaver sem executar",
+                  },
+          );
+        } else if (input.includes("desktop sem início")) {
           // Hold both start signals until the reverse request is answered, without a short timeout.
           desktopCall(thread, turn, { action: "list_windows" }, () => {
             notify("turn/started", { threadId: thread.id, turn });

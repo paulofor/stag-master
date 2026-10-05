@@ -903,7 +903,7 @@ export class AssistantService extends EventEmitter {
               text:
                 isBrowser && browserAccessDenied
                   ? "stag_browser não autorizado nesta conversa. Peça ao cliente para clicar em Autorizar navegador no painel do STAG e aguarde. Se o painel estiver fechado, indique Mostrar navegador (ícone de globo); históricos sem stag_browser precisam de uma nova conversa. Não abra nem controle Chrome/Edge ou outro navegador por windows_desktop, shell ou automação externa como alternativa."
-                  : "Ferramenta não autorizada nesta conversa. O desktop requer Autorizar desktop e permite somente Postman, IntelliJ IDEA e Visual Studio Code; não contorne o bloqueio por comandos ou outra automação.",
+                  : "Ferramenta não autorizada nesta conversa. O desktop requer Autorizar desktop e permite somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver; não contorne o bloqueio por comandos ou outra automação.",
             },
           ],
         });
@@ -920,7 +920,7 @@ export class AssistantService extends EventEmitter {
               type: "inputText",
               text: isBrowser
                 ? "Argumentos de navegador inválidos. Corrija a operação e seu contexto."
-                : "Argumentos de desktop inválidos. Liste as janelas e informe processId em toda outra ação, inclusive screenshot, click e scroll. Somente Postman, IntelliJ IDEA e Visual Studio Code são permitidos; não há captura da tela inteira.",
+                : "Argumentos de desktop inválidos. Liste as janelas e informe processId em toda outra ação, inclusive screenshot, click e scroll. Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver são permitidos; não há captura da tela inteira.",
             },
           ],
         });

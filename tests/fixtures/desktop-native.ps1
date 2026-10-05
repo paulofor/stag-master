@@ -85,9 +85,12 @@ function Add-SyntheticProcess([int]$processId, [string]$name, [string]$product, 
 Add-SyntheticProcess 4242 'Postman' 'Postman' 'Postman, Inc'
 Add-SyntheticProcess 5252 'idea64' 'IntelliJ IDEA' 'JetBrains s.r.o.'
 Add-SyntheticProcess 6262 'Code' 'Visual Studio Code' 'Microsoft Corporation'
+Add-SyntheticProcess 7272 'dbeaver' 'DBeaver Community' 'DBeaver Corp'
+Add-SyntheticProcess 8282 'DBeaver' 'DBeaver' 'DBeaver Corp'
 Add-SyntheticProcess 9001 'chrome' 'Postman' 'Postman, Inc'
 Add-SyntheticProcess 9002 'notepad' 'IntelliJ IDEA' 'Microsoft Corporation'
 Add-SyntheticProcess 9003 'explorer' 'Visual Studio Code' 'Microsoft Corporation'
+Add-SyntheticProcess 9004 'dbeaver-fake' 'DBeaver Community' 'DBeaver Corp'
 function Get-Process {
     param([int]$Id, [string]$ErrorAction)
     if (-not $Id) { return $global:StagProcesses.Values }
@@ -129,9 +132,9 @@ function Assert-Denied($arguments, [string[]]$events = @()) {
 }
 
 $windows = @(Invoke-DesktopContract @{ action = 'list_windows' } | ConvertFrom-Json)
-if ((($windows.processId | Sort-Object) -join ',') -ne '4242,5252,6262') { throw 'Window allowlist failed.' }
+if ((($windows.processId | Sort-Object) -join ',') -ne '4242,5252,6262,7272,8282') { throw 'Window allowlist failed.' }
 Assert-Events @()
-foreach ($processId in @(4242, 5252, 6262)) {
+foreach ($processId in @(4242, 5252, 6262, 7272, 8282)) {
     [StagWindow]::HitWindow = [IntPtr]$processId
     $null = Invoke-DesktopContract @{ action = 'focus_window'; processId = $processId }
     Assert-Events @("focus:$processId")
@@ -148,26 +151,57 @@ foreach ($processId in @(4242, 5252, 6262)) {
     $null = Invoke-DesktopContract @{ action = 'scroll'; processId = $processId; x = 10; y = 20; delta = -240 }
     Assert-Events @("focus:$processId", 'cursor:10,20', 'mouse:2048:4294967056')
 }
-foreach ($processId in @(9001, 9002, 9003, 7777)) {
+foreach ($processId in @(9001, 9002, 9003, 9004, 7777)) {
     foreach ($action in @('focus_window', 'screenshot', 'send_keys', 'type_text', 'click', 'scroll')) {
         Assert-Denied @{ action = $action; processId = $processId; keys = '^s'; text = 'blocked'; x = 10; y = 20; delta = 120 }
     }
 }
-# A matching title/name cannot authorize a different product or untrusted executable.
-$originalProduct = $global:StagProcesses[6262].FileVersionInfo.ProductName
-$global:StagProcesses[6262].FileVersionInfo.ProductName = 'Explorer'
-Assert-Denied @{ action = 'focus_window'; processId = 6262 }
-$global:StagProcesses[6262].FileVersionInfo.ProductName = $originalProduct
-$signature = $global:StagSignatures[$global:StagProcesses[6262].Path]
-$certificate = $signature.SignerCertificate
-$signature.SignerCertificate = [StagCertificate]::new('Untrusted publisher')
-Assert-Denied @{ action = 'type_text'; processId = 6262; text = 'blocked' }
-$signature.SignerCertificate = $null
-Assert-Denied @{ action = 'screenshot'; processId = 6262 }
-$signature.SignerCertificate = $certificate
-$signature.Status = 'NotSigned'
-Assert-Denied @{ action = 'click'; processId = 6262; x = 10; y = 20 }
-$signature.Status = 'Valid'
+# Check every allowed application's identity, not only one vendor's metadata.
+function Assert-IdentityDenied([int]$processId) {
+    foreach ($action in @('focus_window', 'screenshot', 'send_keys', 'type_text', 'click', 'scroll')) {
+        Assert-Denied @{ action = $action; processId = $processId; keys = '^s'; text = 'blocked'; x = 10; y = 20; delta = 120 }
+    }
+    $listed = @(Invoke-DesktopContract @{ action = 'list_windows' } | ConvertFrom-Json)
+    if ($listed.processId -contains $processId) { throw 'Untrusted identity exposed in list_windows.' }
+    Assert-Events @()
+}
+foreach ($processId in @(4242, 5252, 6262, 7272, 8282)) {
+    $process = $global:StagProcesses[$processId]
+    $originalProduct = $process.FileVersionInfo.ProductName
+    $originalPath = $process.Path
+    $signature = $global:StagSignatures[$originalPath]
+    $certificate = $signature.SignerCertificate
+    $process.FileVersionInfo.ProductName = 'Unrecognized product'
+    Assert-IdentityDenied $processId
+    $process.FileVersionInfo.ProductName = $originalProduct
+    $process.Path = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'stag-synthetic', 'renamed.exe')
+    Assert-IdentityDenied $processId
+    $process.Path = $originalPath
+    $signature.SignerCertificate = [StagCertificate]::new('Untrusted publisher')
+    Assert-IdentityDenied $processId
+    $signature.SignerCertificate = $null
+    Assert-IdentityDenied $processId
+    $signature.SignerCertificate = $certificate
+    foreach ($status in @('NotSigned', 'HashMismatch')) {
+        $signature.Status = $status
+        Assert-IdentityDenied $processId
+    }
+    $signature.Status = 'Valid'
+    # Recovery after identity failures must retain the original allowed target.
+    $null = Invoke-DesktopContract @{ action = 'focus_window'; processId = $processId }
+    Assert-Events @("focus:$processId")
+}
+
+# Prefix/suffix lookalikes do not inherit the DBeaver identity.
+foreach ($product in @('DBeaver Community Installer', 'DBeaver Community injected')) {
+    $global:StagProcesses[7272].FileVersionInfo.ProductName = $product
+    Assert-IdentityDenied 7272
+}
+$global:StagProcesses[7272].FileVersionInfo.ProductName = 'DBeaver Community'
+$signature = $global:StagSignatures[$global:StagProcesses[7272].Path]
+$signature.SignerCertificate = [StagCertificate]::new('DBeaver Corp untrusted')
+Assert-IdentityDenied 7272
+$signature.SignerCertificate = [StagCertificate]::new('DBeaver Corp')
 
 [StagWindow]::HitWindow = [IntPtr]4242
 foreach ($invalid in @(

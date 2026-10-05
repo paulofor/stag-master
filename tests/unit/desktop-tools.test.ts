@@ -235,7 +235,7 @@ describe("driver de desktop com processo simulado", () => {
     );
     const tools = new DesktopTools("unused", "win32");
     await expect(tools.execute({ action: "focus_window", processId: 9001 })).rejects.toThrow(
-      "Desktop restrito a Postman, IntelliJ IDEA e Visual Studio Code",
+      "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
     );
     expect(runScript).toHaveBeenCalledOnce();
     await expect(tools.execute({ action: "focus_window", processId: 4242 })).resolves.toEqual(

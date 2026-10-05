@@ -112,7 +112,7 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
     "enviados ao ChatGPT",
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
-    "somente Postman, IntelliJ IDEA e Visual Studio Code",
+    "somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
     "mesmo com aprovação",
@@ -123,7 +123,7 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
   await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(page.getByRole("region", { name: "Controle do desktop" })).toContainText(
-    "Desktop autorizado · Postman, IntelliJ e VS Code",
+    "Desktop autorizado · Postman, IntelliJ, VS Code e DBeaver",
   );
   await input.press("Enter");
   await expect(
