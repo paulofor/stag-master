@@ -45,6 +45,22 @@ describe("contrato contra abuso cibernético", () => {
     expect(desktopTool.description).toContain(cyberToolSafetyDescription);
     expect(browserTool.description).toContain(cyberToolSafetyDescription);
   });
+
+  it("descreve adaptações locais e seus limites nas ferramentas sem liberar acessos", () => {
+    for (const tool of [desktopTool, browserTool]) {
+      expect(tool.description).toContain(
+        "Adaptações de autenticação/autorização da própria aplicação local são permitidas",
+      );
+      expect(tool.description).toContain("isolamento verificado, dados sintéticos");
+      expect(tool.description).toContain("perfil explícito desligado por padrão");
+      expect(tool.description).toContain("falhe fechado fora do teste");
+      expect(tool.description).toContain("Não recuse só pelo termo bypass");
+      expect(tool.description).toContain("Localhost não comprova isolamento");
+      expect(tool.description).toContain(
+        "Preserve sandbox, consentimentos e confirmações críticas",
+      );
+    }
+  });
 });
 
 describe("contrato do desktop limitado", () => {
