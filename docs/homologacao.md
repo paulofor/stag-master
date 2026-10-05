@@ -1,6 +1,24 @@
-# Matriz de homologação da versão 0.4.12
+# Matriz de homologação da versão 0.4.13
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Fila de solicitações — versão 0.4.13
+
+Matriz definida antes dos testes. O serviço recusava mensagens durante uma tarefa e o harness não exercitava solicitações aguardando outro turno. A fila pertence ao serviço principal e à conversa atual, somente em memória. Cada texto passa pelo envio normal, com política, fontes atuais e confirmações preservadas. O botão Enfileirar não interrompe a tarefa nem responde a aprovações.
+
+| Área                       | Cenário e aceite                                                                                                                                                                   | Evidência prevista                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Caminho feliz              | Adicionar vários textos durante a tarefa; iniciar um por vez após sua conclusão; ordem FIFO; entrada removível antes do envio                                                      | Serviço com App Server determinístico + interface + Electron     |
+| Validações                 | Texto obrigatório, até 100 mil caracteres e 20 pendências; somente texto; rejeitar contexto antigo/campos extras; clique/request duplicado não repete turno                        | IPC/schema + serviço + Chromium                                  |
+| Falhas e recuperação       | Parar, falhar ou desconectar pausa a fila; textos preservados; retomada explícita; envio incerto exige conferir histórico/remover item, sem replay automático                      | Fixture com conclusão controlada + reconexão real do subprocesso |
+| Ciclo do agente            | Conclusão rápida antes da resposta, eventos duplicados/antigos, aprovações e tool ainda terminando não causam sobreposição; mesmas fontes, modelo e política no envio              | Serviço + registros RPC sintéticos                               |
+| Isolamento                 | Nova conversa, troca efetiva de pasta/modo/histórico e logout descartam pendências; cancelar/invalidar seleção preserva; reload do renderer preserva; reinício não persiste textos | Serviço + preload/IPC Electron                                   |
+| Segurança                  | Filtro no cadastro e revalidação no envio; fila não concede consentimentos; recusa/aprovação permanecem explícitas                                                                 | Contratos e integração sintética                                 |
+| Observabilidade e métricas | Ordem, quantidade, pausa e estado incerto visíveis; contadores de envio/falha existentes; nenhum conteúdo da fila em logs ou settings                                              | Serviço + interface                                              |
+| Dispositivos e segregação  | Chromium compacto/amplo/Pixel 7 e Electron Linux; projeto/CODEX_HOME temporários, texto inerte, sem contas reais ou inferência paga                                                | check + test:desktop local                                       |
+| Entrega Windows            | IPC, testes de contrato, regressões nativas e instalador 0.4.13 no Windows; Linux não comprova execução Windows                                                                    | Jobs PR/main e artefato versionado                               |
+
+Evidência local: `npm run check` aprovado com 289 contratos, typecheck, build, handshake/schema reais do Codex isolado e 54 cenários Chromium, incluindo compacto/amplo/Pixel 7. `xvfb-run -a npm run test:desktop` aprovou a fila pelo renderer/preload/IPC de produção: aprovação pendente, envio em ordem, conclusão antes da resposta, reload, pausa e descarte. As regressões de combos e do navegador também passaram. `format:check`, sintaxe dos scripts JavaScript e revisão do diff aprovados. A fixture agora recusa turnos sobrepostos e persiste turnos ativos para testar perda de resposta/reconexão; somente dados, projeto e CODEX_HOME sintéticos. Node 22.23.3, sem conta ou inferência paga. Linux bloqueia namespaces bwrap e não comprova Windows: regressões nativas e instalador precisam dos jobs Windows do PR/main. A fila comprova transporte e ordenação, não interpretação semântica dos textos pelo LLM.
 
 ## Seleção de combos no navegador — versão 0.4.12
 

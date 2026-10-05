@@ -4,6 +4,7 @@ import { basename } from "node:path";
 import { z } from "zod";
 import {
   emptySnapshot,
+  maxQueuedMessages,
   type AccessMode,
   type Action,
   type ChatItem,
@@ -125,6 +126,9 @@ export class AssistantService extends EventEmitter {
   private loginId: string | null = null;
   private startedAt = 0;
   private sending = false;
+  private drainingMessages = false;
+  private messageQueueEpoch = 0;
+  private queuedIds = new Set<string>();
   private changing = false;
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
@@ -152,6 +156,7 @@ export class AssistantService extends EventEmitter {
     if (!this.disposed) this.emit("snapshot", this.snapshot());
   }
   private recordSafetyBlock(kind: "assistant" | "status" = "status"): void {
+    this.state.queuePaused = true;
     this.state.metrics.failures++;
     this.state.items.push({
       id: `safety-block-${++this.safetyBlockId}`,
@@ -212,7 +217,11 @@ export class AssistantService extends EventEmitter {
       ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
       action.type === "browserControl";
-    if (changesContext && (this.state.busy || this.sending) && action.type !== "connect")
+    if (
+      changesContext &&
+      (this.state.busy || this.sending || this.drainingMessages) &&
+      action.type !== "connect"
+    )
       throw new Error("Pare a execução antes de mudar a conversa.");
     if (changesContext) this.changing = true;
     this.state.error = null;
@@ -265,7 +274,41 @@ export class AssistantService extends EventEmitter {
           await this.resume(action.threadId);
           break;
         case "send":
+          if (this.state.queuedMessages.length || this.drainingMessages)
+            throw new Error("Continue ou esvazie a fila antes de enviar outra mensagem.");
+          this.state.queuePaused = false;
           await this.send(action.text, action.images || []);
+          break;
+        case "enqueue":
+          this.requireQueueThread(action.threadId);
+          if (this.state.connection !== "ready" || !this.state.account)
+            throw new Error("Reconecte sua conta antes de adicionar à fila.");
+          if (this.queuedIds.has(action.id)) break;
+          if (this.state.queuedMessages.length >= maxQueuedMessages)
+            throw new Error("A fila aceita até 20 textos. Aguarde ou remova uma pendência.");
+          if (cyberSafetyReason([action.text], "request")) throw new Error(cyberSafetyRefusal);
+          this.queuedIds.add(action.id);
+          this.state.queuedMessages.push({ id: action.id, text: action.text, status: "pending" });
+          break;
+        case "removeQueued":
+          this.requireQueueThread(action.threadId);
+          if (this.state.queuedMessages.find((item) => item.id === action.id)?.status === "sending")
+            throw new Error("Este texto já está sendo enviado. Use Parar execução.");
+          this.state.queuedMessages = this.state.queuedMessages.filter(
+            (item) => item.id !== action.id,
+          );
+          break;
+        case "pauseQueue":
+          this.requireQueueThread(action.threadId);
+          if (!action.paused) {
+            if (this.state.connection !== "ready" || !this.state.account)
+              throw new Error("Reconecte sua conta antes de continuar a fila.");
+            if (this.state.queuedMessages.some((item) => item.status === "uncertain"))
+              throw new Error(
+                "Envio não confirmado. Confira o histórico e remova esse item antes de continuar a fila.",
+              );
+          }
+          this.state.queuePaused = action.paused;
           break;
         case "stop":
           await this.stop();
@@ -307,8 +350,69 @@ export class AssistantService extends EventEmitter {
     } finally {
       if (changesContext) this.changing = false;
       this.publish();
+      void this.drainMessageQueue();
     }
     return this.snapshot();
+  }
+  private requireQueueThread(threadId: string): void {
+    if (!this.state.project || !this.state.threadId || this.state.threadId !== threadId)
+      throw new Error("A conversa mudou. Confira a conversa antes de alterar a fila.");
+  }
+  private clearMessageQueue(): void {
+    this.messageQueueEpoch++;
+    this.state.queuedMessages = [];
+    this.state.queuePaused = false;
+    this.queuedIds.clear();
+  }
+  private async drainMessageQueue(): Promise<void> {
+    const canDrain = () =>
+      !this.disposed &&
+      !this.sending &&
+      !this.changing &&
+      !this.state.busy &&
+      !this.state.queuePaused &&
+      !this.state.approvals.length &&
+      this.state.connection === "ready" &&
+      !!this.state.account;
+    const message = this.state.queuedMessages[0];
+    if (this.drainingMessages || !message || message.status !== "pending" || !canDrain()) return;
+    this.drainingMessages = true;
+    const epoch = this.messageQueueEpoch;
+    const rpc = this.rpc;
+    try {
+      // A completed turn can still have a desktop/browser operation finishing locally.
+      await this.toolQueue;
+      if (
+        epoch !== this.messageQueueEpoch ||
+        rpc !== this.rpc ||
+        this.state.queuedMessages[0] !== message ||
+        !canDrain()
+      )
+        return;
+      message.status = "sending";
+      await this.send(message.text, []);
+      if (epoch === this.messageQueueEpoch)
+        this.state.queuedMessages = this.state.queuedMessages.filter((item) => item !== message);
+    } catch (error) {
+      if (epoch === this.messageQueueEpoch && !this.disposed) {
+        // A lost response does not prove that the server rejected the turn. Never replay it.
+        message.status =
+          this.state.connection !== "ready" || rpc !== this.rpc || /demorou/.test(errorText(error))
+            ? "uncertain"
+            : "pending";
+        this.state.queuePaused = true;
+        this.state.error =
+          message.status === "uncertain"
+            ? "Envio não confirmado. Confira o histórico e remova esse item antes de continuar a fila."
+            : errorText(error);
+        this.state.metrics.failures++;
+      }
+    } finally {
+      this.drainingMessages = false;
+      this.publish();
+      // Includes turns completed before turn/start replied and removal while tools settled.
+      void this.drainMessageQueue();
+    }
   }
   private async call<T = unknown>(
     method: string,
@@ -319,6 +423,8 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    if (this.state.queuedMessages.length || this.state.busy || this.sending)
+      this.state.queuePaused = true;
     this.toolEpoch++;
     this.options.browser?.cancel();
     this.stopping = false;
@@ -352,6 +458,7 @@ export class AssistantService extends EventEmitter {
       this.toolEpoch++;
       this.options.browser?.cancel();
       this.state.connection = "error";
+      this.state.queuePaused = true;
       this.state.error = errorText(error);
       this.state.busy = false;
       this.turnId = null;
@@ -381,10 +488,13 @@ export class AssistantService extends EventEmitter {
     const result = await this.call<{
       account: { type: string; email?: string; planType?: string } | null;
     }>("account/read", { refreshToken: false });
+    const previousAccount = this.state.account;
     this.state.account =
       result.account?.type === "chatgpt"
         ? { email: result.account.email || null, plan: result.account.planType || null }
         : null;
+    if (previousAccount && previousAccount.email !== this.state.account?.email)
+      this.clearMessageQueue();
     this.publish();
   }
   private async refreshModels(): Promise<void> {
@@ -459,6 +569,7 @@ export class AssistantService extends EventEmitter {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
     this.toolEpoch++;
+    this.clearMessageQueue();
     this.toolRequests.clear();
     this.stopping = false;
     this.state.threadId = null;
@@ -481,6 +592,7 @@ export class AssistantService extends EventEmitter {
   }
   private async browserConsent(allow: boolean): Promise<void> {
     if (!this.options.browser) throw new Error("Navegador disponível somente no STAG desktop.");
+    if (!allow) this.state.queuePaused = true;
     if (allow && (this.state.busy || this.sending))
       throw new Error("Pare a execução antes de autorizar o navegador.");
     if (allow && this.state.threadId && !this.settings.threads[this.state.threadId]?.browserTool)
@@ -595,6 +707,7 @@ export class AssistantService extends EventEmitter {
         "\n" +
         projectGitInstructions(this.state.project?.git),
     });
+    if (this.state.threadId !== id) this.clearMessageQueue();
     this.state.threadId = id;
     this.contextInstructionsDirty = false;
     this.completedTurns = new Set(
@@ -725,9 +838,11 @@ export class AssistantService extends EventEmitter {
     } finally {
       this.sending = false;
       this.publish();
+      void this.drainMessageQueue();
     }
   }
   private async stop(): Promise<void> {
+    this.state.queuePaused = true;
     if (!this.state.busy) return;
     if (!this.turnId || !this.state.threadId)
       throw new Error("A execução está iniciando. Tente parar em instantes.");
@@ -880,9 +995,11 @@ export class AssistantService extends EventEmitter {
         break;
       case "error":
         this.state.error = text(object(p.error).message) || "Falha na execução.";
+        this.state.queuePaused = true;
         break;
       case "turn/completed": {
         const turn = object(p.turn) as unknown as WireTurn;
+        if (!this.state.busy || !turn.id) return;
         if (this.turnId && turn.id !== this.turnId) return;
         this.toolEpoch++;
         this.completedTurns.add(turn.id);
@@ -892,6 +1009,7 @@ export class AssistantService extends EventEmitter {
         this.state.metrics.elapsedMs = this.startedAt ? Date.now() - this.startedAt : 0;
         this.pending.clear();
         this.state.approvals = [];
+        if (turn.status !== "completed" || this.stopping) this.state.queuePaused = true;
         if (turn.status === "failed") {
           this.state.error = turn.error?.message || "Falha na execução.";
           this.state.metrics.failures++;
@@ -907,6 +1025,7 @@ export class AssistantService extends EventEmitter {
       }
     }
     this.publish();
+    void this.drainMessageQueue();
   }
   private async updateAccount(): Promise<void> {
     try {
@@ -1186,6 +1305,7 @@ export class AssistantService extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
+    this.clearMessageQueue();
     this.projectPreparation.abort();
     this.toolEpoch++;
     this.options.browser?.cancel();

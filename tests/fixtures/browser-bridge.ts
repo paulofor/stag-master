@@ -22,12 +22,24 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         },
       ];
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
+      const queueIds = new Set<string>();
+      const clearQueue = () => {
+        state.queuedMessages = [];
+        state.queuePaused = false;
+        queueIds.clear();
+      };
+      const drainQueue = () => {
+        if (state.busy || state.queuePaused || state.connection !== "ready") return;
+        const next = state.queuedMessages.shift();
+        if (next) void window.stag!.request({ type: "send", text: next.text });
+      };
       const done = () => {
         state.busy = false;
         state.metrics.totalTokens = 1234;
         state.metrics.elapsedMs = 1200;
         if (state.threadId) conversations.set(state.threadId, structuredClone(state.items));
         publish();
+        drainQueue();
       };
       window.stag = {
         getSnapshot: async () => structuredClone(state),
@@ -50,11 +62,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.effort = "medium";
               break;
             case "logout":
+              clearQueue();
               state.account = null;
               state.models = [];
               state.items = [];
               break;
             case "selectProject":
+              clearQueue();
               state.project = {
                 path: "C:\\Projetos\\exemplo",
                 name: "exemplo",
@@ -85,6 +99,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             case "preferences":
               if (action.mode) {
+                clearQueue();
                 state.mode = action.mode;
                 state.items = [];
                 state.threadId = null;
@@ -93,6 +108,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               if (action.effort) state.effort = action.effort;
               break;
             case "newChat":
+              clearQueue();
               state.items = [];
               state.threadId = null;
               state.plan = [];
@@ -127,6 +143,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
             case "browserBounds":
               break;
             case "resume":
+              if (state.threadId !== action.threadId) clearQueue();
               state.threadId = action.threadId;
               state.items = conversations.get(action.threadId) || [];
               break;
@@ -217,6 +234,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                   },
                 ];
               } else if (action.text.includes("erro")) {
+                state.queuePaused = true;
                 state.error = "Codex encerrou. Reconecte para continuar.";
                 state.connection = "error";
                 state.busy = false;
@@ -258,6 +276,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             }
             case "stop":
+              state.queuePaused = true;
               state.approvals = [];
               state.items.push({
                 id: `status-${++count}`,
@@ -265,6 +284,21 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 text: "Execução interrompida.",
               });
               done();
+              break;
+            case "enqueue":
+              if (action.threadId !== state.threadId) throw new Error("A conversa mudou.");
+              if (!queueIds.has(action.id)) {
+                state.queuedMessages.push({ id: action.id, text: action.text, status: "pending" });
+                queueIds.add(action.id);
+              }
+              drainQueue();
+              break;
+            case "removeQueued":
+              state.queuedMessages = state.queuedMessages.filter((item) => item.id !== action.id);
+              break;
+            case "pauseQueue":
+              state.queuePaused = action.paused;
+              drainQueue();
               break;
             case "cancelLogin":
               state.loginPending = false;

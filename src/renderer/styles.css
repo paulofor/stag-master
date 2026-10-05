@@ -612,6 +612,72 @@ textarea::placeholder {
 .send-button.stopping {
   background: #4c5549;
 }
+.queue-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  border: 1px solid #d8ded0;
+  border-radius: 7px;
+  padding: 7px;
+  color: #395747;
+  background: #f3f5ed;
+  font-size: 10px;
+}
+.queue-button:disabled {
+  opacity: 0.45;
+}
+.message-queue {
+  margin-bottom: 9px;
+  padding: 10px 12px;
+  border: 1px solid #dfe4d6;
+  border-radius: 10px;
+  background: #f6f7f1;
+  font-size: 11px;
+  color: #485943;
+}
+.queue-heading,
+.queue-heading button,
+.message-queue li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.queue-heading {
+  justify-content: space-between;
+}
+.queue-hint {
+  margin: 6px 0;
+  color: #69765f;
+  font-size: 10px;
+}
+.message-queue ol {
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+}
+.message-queue li {
+  align-items: flex-start;
+  padding-top: 5px;
+}
+.message-queue details {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.message-queue summary {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.message-queue details p {
+  white-space: pre-wrap;
+}
+.queue-position {
+  padding-top: 1px;
+}
 .footer {
   display: flex;
   align-items: center;

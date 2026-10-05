@@ -222,6 +222,35 @@ try {
   if (process.platform !== "win32") {
     await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
     await expect(page.getByLabel("Modelo", { exact: true })).toHaveValue("fixture-model");
+    console.log("Fila real: preload/IPC, aprovação, reload, ordem, pausa e descarte.");
+    const queue = page.getByRole("region", { name: "Fila de solicitações" });
+    await imageInput.fill("perguntar stack");
+    await imageInput.press("Enter");
+    await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeVisible();
+    await imageInput.fill("primeiro texto rápido");
+    await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
+    await imageInput.fill("segundo texto lento");
+    await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
+    await expect(queue.locator("li")).toHaveCount(2);
+    await page.reload();
+    await expect(queue.locator("li")).toHaveCount(2);
+    await expect(page.locator(".user-message")).toHaveCount(1);
+    await page.getByLabel("Qual stack deseja?", { exact: true }).selectOption("TypeScript");
+    await page.getByRole("button", { name: "Responder", exact: true }).click();
+    await expect(page.locator(".user-message")).toHaveText([
+      "perguntar stack",
+      "primeiro texto rápido",
+      "segundo texto lento",
+    ]);
+    await expect(queue).toHaveCount(0);
+    await imageInput.fill("descartar esta pendência");
+    await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
+    await page.getByRole("button", { name: "Parar execução" }).click();
+    await expect(queue).toContainText("pausada");
+    const queueSettings = await readFile(join(data, "settings.json"), "utf8");
+    assert.ok(!queueSettings.includes("descartar esta pendência"));
+    await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+    await expect(queue).toHaveCount(0);
     await page.getByLabel("Mensagem para o assistente").fill(sourceCorpus.input);
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText(sourceCorpus.unauthorized, { exact: true })).toBeVisible();

@@ -29,6 +29,25 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 });
+test("imagens pendentes não são descartadas nem enviadas pela fila de texto", async ({ page }) => {
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("lento");
+  await input.press("Enter");
+  await input.fill("Analise depois");
+  await paste(page);
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Adicionar texto à fila" })).toBeDisabled();
+  await expect(page.getByLabel("Imagens da solicitação")).toContainText(
+    "fila aceita somente texto",
+  );
+  await expect(input).toHaveValue("Analise depois");
+  await page.getByRole("button", { name: "Remover imagem 1" }).click();
+  await expect(page.getByRole("button", { name: "Adicionar texto à fila" })).toBeEnabled();
+  await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
+  await expect(page.getByRole("region", { name: "Fila de solicitações" })).toContainText(
+    "Analise depois",
+  );
+});
 test("cola, remove e envia texto com imagens sem perder o texto", async ({ page }, info) => {
   if (info.project.name === "desktop") await page.setViewportSize({ width: 1280, height: 900 });
   const input = page.getByLabel("Mensagem para o assistente");
