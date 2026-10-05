@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
+import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import { startImageProvider } from "../tests/fixtures/image-provider.mjs";
 import { gitFixture, verifySandboxGit } from "../tests/fixtures/project-git.mjs";
 await mkdir(".local", { recursive: true });
@@ -186,6 +187,18 @@ try {
     ),
     "Fontes de start devem chegar ao provedor pelo Codex real.",
   );
+  function verifyEngineeringContract() {
+    const delivered = JSON.stringify({
+      input: provider.inputs.at(-1),
+      instructions: provider.instructions.at(-1),
+    });
+    for (const fragment of engineeringCorpus.requiredInstructions)
+      assert.ok(
+        delivered.includes(fragment),
+        `Contrato de engenharia/desenvolvimento local não chegou ao provedor: ${fragment}`,
+      );
+  }
+  verifyEngineeringContract();
   const providerImage = provider.inputs
     .flat()
     .flatMap((item) => item.content || [])
@@ -232,6 +245,7 @@ try {
     }).includes(updatedSources[0].url),
     "Fontes atualizadas em resume devem chegar ao provedor no próximo turno.",
   );
+  verifyEngineeringContract();
   const command = (operation, target, policy) =>
     rpc.call("command/exec", {
       command: [process.execPath, runner, operation, target],

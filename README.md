@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.10: fontes de documentação por projeto, preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.11: orientação para adaptações autorizadas de acesso no desenvolvimento local, fontes de documentação por projeto, preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Fontes de documentação do projeto
 
@@ -93,9 +93,19 @@ Pedidos claramente alheios recebem um redirecionamento breve, sem resposta ao co
 
 O limite é uma orientação de comportamento do modelo, não um bloqueio semântico absoluto por código. O harness usa um corpus sintético para verificar transmissão do contrato, ciclo de resposta, ausência de efeitos nesses cenários e recuperação; não usa uma conta real nem comprova todas as respostas de um LLM.
 
+## Adaptações no desenvolvimento local
+
+O modelo pode ajudar a superar limitações de controle de acesso da própria aplicação em desenvolvimento: login fictício, provedor de identidade simulado, mocks e perfil local que dispense temporariamente autenticação/autorização da API ou banco de teste. O projeto deve estar autorizado e isolado, com dados sintéticos. Termos como **bypass** ou **sem autenticação** não justificam recusa automática. Se o contexto já foi informado, o modelo deve conferir a configuração pertinente e continuar sem repetir perguntas; se faltar, pede apenas o esclarecimento necessário.
+
+A orientação exige perfil explícito desligado por padrão, limitado a loopback e dependências locais de teste, preservação dos controles normais, testes de rejeição fora desse perfil e forma de reverter. Localhost com proxy ou túnel para produção não é isolamento. A exceção não se estende a serviços/dados reais, ambientes compartilhados, terceiros nem à desativação de proteções do Windows, sandbox ou STAG. Leitura, consentimentos e confirmações críticas continuam valendo, inclusive no DBeaver.
+
+Exemplo, quando corresponder ao ambiente: “Minha API e meu banco de teste são deste projeto, isolados em loopback, com dados sintéticos e sem conexão real. Implemente um perfil local com usuário fictício para testar o fluxo; mantenha autenticação e autorização fora dele e valide os limites.” Atualizar e reabrir o STAG aplica o contrato também às conversas retomadas, sem ampliar suas permissões.
+
+Essas são instruções ao modelo; o STAG não implementa automaticamente as travas na aplicação do projeto nem garante a interpretação de todos os pedidos. O harness verifica transmissão, limites do filtro e recuperação usando cenários sintéticos.
+
 ## Recusa de solicitações maliciosas
 
-O contrato do modelo proíbe executar ou facilitar invasões, roubo de dados/credenciais, malware, phishing, ataques de indisponibilidade e evasão de segurança. Essa regra vale em todos os modos e ao retomar históricos; autorizar a pasta, o desktop ou o navegador e confirmar uma ação não libera abuso. O assistente deve recusar a parte maliciosa e oferecer defesa ou remediação. Programação, correção de vulnerabilidades e testes sintéticos isolados continuam permitidos. Tarefas de segurança com alvo, autorização ou escopo ambíguos precisam ser esclarecidas antes de agir.
+O contrato do modelo proíbe executar ou facilitar invasões, roubo de dados/credenciais, malware, phishing, ataques de indisponibilidade e evasão maliciosa de segurança. Essa regra vale em todos os modos e ao retomar históricos; autorizar a pasta, o desktop ou o navegador e confirmar uma ação não libera abuso. O assistente deve recusar a parte maliciosa e oferecer defesa ou remediação. Programação, correção de vulnerabilidades e testes sintéticos isolados continuam permitidos. Tarefas de segurança com alvo, autorização ou escopo ambíguos precisam ser esclarecidas antes de agir.
 
 O serviço bloqueia padrões explícitos em solicitações antes de enviá-las ao Codex, nas respostas a perguntas, nos argumentos de desktop/navegador e na intenção ou comando dos pedidos de aprovação. Uma ação identificada como maliciosa não oferece um botão para liberar sua execução. A recusa fica visível na conversa e permite continuar com uma tarefa legítima. Pedidos recusados antes do envio ficam somente no painel em memória; não criam um turno no histórico do Codex.
 

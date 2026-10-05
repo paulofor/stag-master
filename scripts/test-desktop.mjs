@@ -263,7 +263,18 @@ try {
     assert.equal(blocked.metrics.failures, beforeBlocked.failures + 1);
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
-    for (const id of ["unrelated", "business", "ambiguous-business", "mixed"]) {
+    for (const id of [
+      "unrelated",
+      "business",
+      "ambiguous-business",
+      "mixed",
+      "ambiguous-bypass",
+      "local-auth",
+      "local-database",
+      "local-remote-proxy",
+      "local-unknown-database",
+      "local-untrusted-override",
+    ]) {
       const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
       await page.getByLabel("Mensagem para o assistente").fill(scenario.input);
       await page.getByRole("button", { name: "Enviar mensagem" }).click();
