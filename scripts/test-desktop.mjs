@@ -448,6 +448,8 @@ try {
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     for (const id of [
+      "preventive-request",
+      "preventive-request-english",
       "unrelated",
       "business",
       "ambiguous-business",

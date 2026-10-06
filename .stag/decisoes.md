@@ -1,5 +1,7 @@
 # Decisões
 
+2026-10-06 — Preservar a proteção contra abuso e corrigir recusas indevidas de pedidos preventivos explícitos. A investigação reproduziu “Não permita roubar senhas” bloqueado antes do turno e uma falha inversa em negação da prevenção. O ajuste fica nas menções defensivas das mensagens do cliente; ferramentas e aprovações mantêm a política original. Ampliar o corpus existente e conferir recuperação, métricas e encaminhamento em todos os modos, sem afirmar obediência semântica absoluta. Fonte: relato do cliente, `src/main/cyber-safety.ts` e regressões locais desta tarefa.
+
 2026-10-06 — Preparar servidor em pasta própria, usando Langfuse e OTLP/HTTP. Não ativar coleta no aplicativo nesta etapa. Testes usam somente contas e metadados sintéticos, com stack descartável. Fonte: solicitação e delimitação desta implementação.
 
 2026-10-06 — Web e worker fixados na versão 4.50.0 por digest; o worker aguarda a inicialização do web. O harness verifica ingestão real, chaves por projeto, duplicatas e recuperação. Fonte: `server/compose.yaml` e homologação local.

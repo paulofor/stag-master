@@ -48,15 +48,20 @@ function defensiveMention(prefix: string): boolean {
   // Only the immediate prefix in the same clause counts; a benign earlier sentence cannot
   // override a later malicious instruction. Action arguments never receive this exception.
   const clause = prefix.split(/[\n.;!?]/).at(-1) || "";
-  return (
+  const prohibitsAction = (value: string): boolean =>
     /\b(?:nao (?:e permitido |(?:devo|deve|devemos|pode|podemos|posso|quero|vamos) )?|nunca |jamais |never |do not |don't )$/.test(
-      clause,
+      value,
     ) ||
-    /\b(?:nao|nunca|jamais|never|do not|don't)\b[^\n.;!?]{0,140}\b(?:nem|nor)\s+$/.test(clause) ||
-    /\b(?:evitar|evite|impedir|impeca|prevenir|previna|bloquear|bloqueie|detectar|detecte|mitigar|prevent|block|detect|stop)\s+(?:(?:tentativas?|pedidos?|acoes?|requests?|attempts?)\s+)?(?:(?:de|to|para)\s+)?$/.test(
+    /\b(?:nao|nunca|jamais)\s+(?:permita|permitam|permitir)\s+$/.test(value) ||
+    /\b(?:do not|don't|never)\s+allow\s+(?:(?:users?|a user|anyone)\s+)?(?:to\s+)?$/.test(value) ||
+    /\b(?:nao|nunca|jamais|never|do not|don't)\b[^\n.;!?]{0,140}\b(?:nem|nor)\s+$/.test(value);
+  const prevention =
+    /\b(?:evitar|evite|impedir|impeca|prevenir|previna|bloquear|bloqueie|detectar|detecte|mitigar|proibir|proiba|prevent|block|detect|stop|forbid)\s+(?:(?:tentativas?|pedidos?|acoes?|requests?|attempts?)\s+)?(?:(?:de|to|para)\s+)?$/.exec(
       clause,
-    )
-  );
+    );
+  // Prohibiting prevention ("não permita impedir ...") does not prohibit the abuse itself.
+  if (prevention && prohibitsAction(clause.slice(0, prevention.index))) return false;
+  return prohibitsAction(clause) || prevention !== null;
 }
 
 /** Each field is assessed separately: a benign intent cannot hide a malicious text/URL. */

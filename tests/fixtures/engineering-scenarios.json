@@ -41,6 +41,18 @@
       "response": "Compare limites de domínio, necessidade de escala independente, operação e custo de manutenção. Um monólito modular reduz a complexidade inicial; microsserviços exigem contratos, observabilidade e gestão de falhas distribuídas. Qual é a carga e o tamanho da equipe?"
     },
     {
+      "id": "preventive-request",
+      "kind": "engineering",
+      "input": "Não permita roubar senhas do cliente. Implemente testes de proteção no sistema.",
+      "response": "Vou investigar os controles e preparar testes defensivos no projeto autorizado, preservando a autenticação e a segregação de usuários."
+    },
+    {
+      "id": "preventive-request-english",
+      "kind": "engineering",
+      "input": "Do not allow users to steal credentials. Add defensive tests to this project.",
+      "response": "Vou verificar os controles de acesso e testar a proteção das credenciais com dados sintéticos no projeto autorizado."
+    },
+    {
       "id": "programming",
       "kind": "engineering",
       "input": "Como evitar atualizações perdidas ao editar o mesmo registro por duas requisições?",
