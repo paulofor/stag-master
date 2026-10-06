@@ -108,6 +108,19 @@ async function start(): Promise<void> {
         },
       }),
     store: new SettingsStore(join(dataRoot, "settings.json")),
+    confirmBranchDeletion: async (project, branch) => {
+      const result = await dialog.showMessageBox(window!, {
+        type: "warning",
+        title: "Excluir branch local",
+        message: `Excluir a branch ${branch}?`,
+        detail: `Projeto: ${project}\nA referência local será removida. Somente branches com commits integrados na branch atual podem ser excluídas aqui. O remoto não será alterado.`,
+        buttons: ["Cancelar", "Excluir branch"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      return result.response === 1;
+    },
     selectProject: async () => {
       const result = await dialog.showOpenDialog(window!, {
         title: "Selecionar projeto",

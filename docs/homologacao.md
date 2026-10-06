@@ -1,4 +1,28 @@
-# Matriz de homologação da versão 0.4.26
+# Matriz de homologação da versão 0.4.27
+
+## Branches dos projetos — versão 0.4.27
+
+Matriz definida antes dos testes. A preparação Git existente encontra repositórios, mas descarta suas raízes e não oferece gestão de branches. A nova tela opcional reúne projetos da pasta de trabalho, branch atual, estado local e referências remotas já disponíveis. Criar, trocar, renomear e excluir são operações locais explícitas; edição do código continua na conversa. Não há fetch/push automático nem descarte forçado de alterações.
+
+| Área                   | Cenário e aceite                                                                                                                                                                             | Evidência prevista                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Caminho feliz          | Raiz e subprojetos, nomes Unicode/espaços, pasta sem Git, seletor de projetos e filtro de branches; criar a partir de branch local/remota, trocar, renomear e excluir branch integrada       | Git real isolado + UI + Electron com driver de produção                 |
+| Preservação            | Alterações pendentes impedem troca; branch atual/em outro worktree ou não integrada não pode ser excluída; exclusão exige confirmação, recusa não altera refs                                | Git real + serviço determinístico + Electron                            |
+| Validações             | IPC estrito, ids e revisão vinculados ao projeto; nomes inválidos, referências antigas, links/junctions e metadados externos recusados; revalidação após confirmação                         | Unidade + serviço + IPC real                                            |
+| Integração             | Modo Leitura consulta sem mutações; operações aguardam a fila compartilhada, não concorrem com turnos/aprovações/vídeo; seleção cancelada preserva dados                                     | Serviço e recuperação                                                   |
+| Harness do agente      | Contrato start/resume e contexto de branches nos turnos normais/enfileirados; nomes são dados não confiáveis, observações não ampliam permissões; mudanças externas exigem conferência       | App Server determinístico, sem inferência paga                          |
+| Falhas e limites       | Git ausente, bloqueio de refs/índice, lista parcial, repo vazio/HEAD destacado e falha parcial visíveis; formulário/rascunho preservados e atualização recupera; sem afirmar sucesso incerto | Git real + fixtures + UI                                                |
+| Observabilidade        | Projetos, branch em uso, estado local, resultado e falhas visíveis; métricas de falhas existentes; sem stdout/stderr, URLs remotas ou credenciais                                            | Serviço + UI                                                            |
+| Segregação e segurança | HOME/config Git e projetos sintéticos; sem hooks/filtros executáveis ou rede; nenhuma confiança global nova ao listar; vizinhos e outras conversas isolados                                  | Runner de produção + Git real                                           |
+| Interface e entrega    | Modal acessível sem sidebar, foco/teclado e rascunho preservados; navegador encoberto sem revogar consentimento; amplo, compacto e Pixel 7 sem overflow                                      | Chromium + Electron Linux; Windows nativo e instalador nos jobs PR/main |
+
+Lacuna concreta do harness: os testes Git validavam apenas cadastro de confiança e status. Esta entrega acrescenta ciclos reais de branches, preservação de arquivos, confirmação obsoleta, isolamento e transmissão do contexto ao agente. Linux não comprova execução nativa Windows.
+
+Evidência local: `npm run check` executou typecheck, 467 contratos, build, decoder/ASR reais, smoke Codex com provedor loopback e 84 cenários Chromium. Dois cenários em 360×600 expuseram a barra de contexto ocupando uma segunda linha e deslocando o compositor 10 pixels além da janela. A barra permanece em uma linha com indicador compacto de conexão; os 56 cenários relacionados de conversa, navegador, fontes, vídeo e branches passaram na repetição focalizada. Capturas amplas, compactas e Pixel 7 foram inspecionadas.
+
+A revisão acrescentou confirmação do resultado após escrita, métricas de falhas, revalidação de metadados/operações Git durante aprovação e identidade estável após erro transitório. Os 233 testes de serviço/Git/segurança e os 13 casos finais do gerenciador passaram; a suíte atual contém 471 contratos. O formulário fica vinculado ao repositório original quando uma pasta desaparece. `test:desktop` final comprova essa remoção/recuperação no Electron real, além de criação, troca, renomeação, exclusão recusada/aprovada, Leitura, arquivos preservados e reload. Typecheck/build e o transporte das observações/contrato pelo Codex real foram revalidados. Sintaxe JavaScript e `bash -n`/ShellCheck do hook sintético aprovados; `format:check` e diff revisados antes da publicação.
+
+A limitação Linux de namespaces bwrap permanece no smoke nativo existente; não equivale a acesso negado nem comprova Windows. Os jobs Windows do PR/main devem executar os 471 contratos, driver nativo, empacotamento e o novo ciclo Git no Electron sem credenciais ou projetos reais. Não há deploy web; o instalador é artefato do workflow, com `--publish never` preservado.
 
 ## Reconexão com FortiClient apenas no ícone — versão 0.4.26
 

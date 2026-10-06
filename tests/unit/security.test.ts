@@ -4,6 +4,26 @@ import { codexEnvironment } from "../../src/main/policy";
 import { desktopArguments, DesktopTools } from "../../src/main/desktop-tools";
 
 describe("fronteiras do cliente", () => {
+  it("branches aceitam operações fixas, sem caminhos Git, opções de força ou consentimento do renderer", () => {
+    const base = {
+      type: "changeBranch",
+      projectPath: "synthetic",
+      revision: "f22df552-9b08-4bc9-ae94-d1307a147d67",
+      repositoryId: "b412c04a-9859-4f69-83a3-9f39272124fa",
+      operation: { kind: "delete", branch: "feature" },
+    };
+    expect(actionSchema.parse(base)).toEqual(base);
+    for (const field of ["force", "gitDir", "repositoryPath", "command", "approved"]) {
+      expect(() => actionSchema.parse({ ...base, [field]: true })).toThrow();
+      expect(() =>
+        actionSchema.parse({ ...base, operation: { ...base.operation, [field]: true } }),
+      ).toThrow();
+    }
+    for (const kind of ["push", "pull", "fetch", "reset", "exec"])
+      expect(() =>
+        actionSchema.parse({ ...base, operation: { kind, branch: "feature" } }),
+      ).toThrow();
+  });
   it("não permite RPC arbitrário ou campos extras na ponte", () => {
     expect(() => actionSchema.parse({ type: "rpc", method: "command/exec" })).toThrow();
     expect(() => actionSchema.parse({ type: "connect", command: "unsafe" })).toThrow();

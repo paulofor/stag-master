@@ -13,6 +13,7 @@ import {
   Folder,
   FolderOpen,
   Globe2,
+  GitBranch,
   History,
   Info,
   LogOut,
@@ -34,6 +35,7 @@ import { BrowserPane } from "./BrowserPane";
 import { AboutDialog } from "./AboutDialog";
 import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
+import { ProjectBranchesDialog } from "./ProjectBranchesDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
@@ -112,6 +114,7 @@ export function App() {
   const [menu, setMenu] = useState<"history" | "account" | null>(null);
   const [windowsDialog, setWindowsDialog] = useState(false);
   const [sourcesDialog, setSourcesDialog] = useState(false);
+  const [branchesDialog, setBranchesDialog] = useState(false);
   const [aboutDialog, setAboutDialog] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [browserFocused, setBrowserFocused] = useState(false);
@@ -125,6 +128,7 @@ export function App() {
   }, [composerFocusRequest]);
   useEffect(clearImages, [clearImages, state.project?.path, state.account?.email]);
   useEffect(() => setSourcesDialog(false), [state.project?.path]);
+  useEffect(() => setBranchesDialog(false), [state.project?.path]);
   useEffect(() => {
     if (state.approvals.length) setBrowserFocused(false);
   }, [state.approvals.length]);
@@ -272,7 +276,14 @@ export function App() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (!state.busy && !pending && !sourcesDialog && !windowsDialog && !aboutDialog) {
+        if (
+          !state.busy &&
+          !pending &&
+          !sourcesDialog &&
+          !branchesDialog &&
+          !windowsDialog &&
+          !aboutDialog
+        ) {
           void run({ type: "newChat" });
         }
       }
@@ -283,7 +294,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, state.busy, pending, sourcesDialog, windowsDialog, aboutDialog]);
+  }, [run, state.busy, pending, sourcesDialog, branchesDialog, windowsDialog, aboutDialog]);
   const chosenModel = state.models.find((m) => m.model === state.model);
   const disabledContext = state.busy || pending;
   const visibleError = error || state.error;
@@ -387,6 +398,21 @@ export function App() {
             >
               {state.projectSources.length}
             </span>
+          </button>
+          <button
+            className="project-sources-button"
+            aria-label="Branches dos projetos"
+            title="Consultar e gerenciar branches dos projetos da pasta"
+            disabled={!state.project || disabledContext || !!analysisRunning}
+            onClick={() => {
+              setMenu(null);
+              setError(null);
+              setBranchesDialog(true);
+              void run({ type: "listBranches", projectPath: state.project!.path });
+            }}
+          >
+            <GitBranch size={14} />
+            <span>Branches</span>
           </button>
           <span className="connection" title={state.account?.email || "Codex App Server local"}>
             <span
@@ -1005,6 +1031,29 @@ export function App() {
           </div>
         )}
         {aboutDialog && <AboutDialog close={() => setAboutDialog(false)} />}
+        {branchesDialog && state.project && (
+          <ProjectBranchesDialog
+            key={state.project.path}
+            projectName={state.project.name}
+            data={state.projectBranches}
+            pending={pending}
+            readOnly={state.mode === "read"}
+            error={visibleError}
+            close={() => setBranchesDialog(false)}
+            refresh={() => run({ type: "listBranches", projectPath: state.project!.path })}
+            change={(repositoryId, operation) =>
+              state.projectBranches
+                ? run({
+                    type: "changeBranch",
+                    projectPath: state.project!.path,
+                    revision: state.projectBranches.revision,
+                    repositoryId,
+                    operation,
+                  })
+                : Promise.resolve(false)
+            }
+          />
+        )}
         {sourcesDialog && state.project && (
           <ProjectSourcesDialog
             key={state.project.path}
@@ -1025,7 +1074,7 @@ export function App() {
           projectPath={state.project?.path}
           busy={state.busy}
           pending={pending}
-          obscured={sourcesDialog || aboutDialog}
+          obscured={sourcesDialog || branchesDialog || aboutDialog}
           run={run}
           backToChat={() => setBrowserFocused(false)}
         />

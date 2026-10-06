@@ -13,6 +13,7 @@ import sourceCorpus from "../tests/fixtures/source-scenarios.json" with { type: 
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
 import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
+import { validateProjectBranches } from "./test-project-branches.mjs";
 
 await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -214,6 +215,7 @@ try {
   );
   assert.equal(repeatedGit.added, 0);
   assert.equal(repeatedGit.verified, 2);
+  await validateProjectBranches(application, page, project, nestedRepository, gitTest);
   // Real main/preload persistence works without an account or browser consent on both platforms.
   const source = { name: "Documentação sintética", url: site.url };
   await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();

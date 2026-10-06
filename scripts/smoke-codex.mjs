@@ -28,6 +28,7 @@ try {
       "src/main/browser-tools.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
+      "src/main/project-branches.ts",
       "src/main/project-sources.ts",
       "src/main/request-video.ts",
     ],
@@ -53,12 +54,23 @@ try {
   const { prepareProjectGit, createGitRunner, projectGitInstructions } = await import(
     pathToFileURL(join(dir, "project-git.mjs")).href
   );
+  const { ProjectBranchManager, projectBranchesInstructions, projectBranchesContext } =
+    await import(pathToFileURL(join(dir, "project-branches.mjs")).href);
   const gitTest = await gitFixture(dir);
   const nestedRepository = join(project, "frontend");
   for (const repository of [project, nestedRepository, neighbor]) await gitTest.init(repository);
   const gitReport = await prepareProjectGit(project, { run: createGitRunner(gitTest.env) });
   assert.equal(gitReport.verified, 2);
   assert.equal(gitReport.failures, 0);
+  const projectBranches = await new ProjectBranchManager(createGitRunner(gitTest.env)).list(
+    project,
+  );
+  assert.equal(projectBranches.repositories.length, 2);
+  assert.ok(
+    projectBranches.repositories.every(
+      (repository) => repository.current === "main" && !repository.error,
+    ),
+  );
   const smokeEnvironment = codexEnvironment(join(dir, "home"), gitTest.env);
   const schemas = join(dir, "protocol");
   await promisify(execFile)(
@@ -146,7 +158,9 @@ try {
     developerInstructions:
       assistantInstructions("project", process.platform, false, true, project, sources) +
       "\n" +
-      projectGitInstructions(gitReport),
+      projectGitInstructions(gitReport) +
+      "\n" +
+      projectBranchesInstructions,
     dynamicTools: [desktopTool, browserTool],
   });
   assert.ok(started.thread.id);
@@ -173,6 +187,7 @@ try {
         cwd: project,
         input,
         additionalContext: {
+          ...projectBranchesContext(projectBranches),
           ...projectSourcesContext(project, sourceList, authorized, true),
           ...extraContext,
         },
@@ -206,6 +221,21 @@ try {
       );
   }
   verifyEngineeringContract();
+  function verifyBranchesContract() {
+    const delivered = JSON.stringify({
+      input: provider.inputs.at(-1),
+      instructions: provider.instructions.at(-1),
+    });
+    assert.ok(
+      delivered.includes(projectBranches.observedAt),
+      "Observação das branches deve chegar ao provedor pelo Codex real.",
+    );
+    assert.ok(
+      delivered.includes("Mudanças externas podem tornar a observação obsoleta"),
+      "O contrato de branches deve acompanhar retomadas e contexto por turno.",
+    );
+  }
+  verifyBranchesContract();
   const syntheticVideo = {
     summary: {
       id: "22222222-2222-4222-8222-222222222222",
@@ -317,7 +347,9 @@ try {
     developerInstructions:
       assistantInstructions("project", process.platform, true, true, project, updatedSources) +
       "\n" +
-      projectGitInstructions(gitReport),
+      projectGitInstructions(gitReport) +
+      "\n" +
+      projectBranchesInstructions,
   });
   assert.equal(resumed.thread.id, started.thread.id);
   const resumedImage = resumed.thread.turns
@@ -345,6 +377,7 @@ try {
     "Fontes atualizadas em resume devem chegar ao provedor no próximo turno.",
   );
   verifyEngineeringContract();
+  verifyBranchesContract();
   const command = (operation, target, policy) =>
     rpc.call("command/exec", {
       command: [process.execPath, runner, operation, target],
