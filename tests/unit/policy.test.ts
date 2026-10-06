@@ -54,15 +54,21 @@ describe("contrato contra abuso cibernético", () => {
     expect(browserTool.description).toContain(cyberToolSafetyDescription);
   });
 
-  it("descreve adaptações locais e seus limites nas ferramentas sem liberar acessos", () => {
+  it("descreve desenvolvimento autorizado e seus limites nas ferramentas sem liberar acessos", () => {
     for (const tool of [desktopTool, browserTool]) {
       expect(tool.description).toContain(
-        "Adaptações de autenticação/autorização da própria aplicação local são permitidas",
+        "adaptações de autenticação/autorização da própria aplicação em desenvolvimento ou homologação são permitidas",
       );
-      expect(tool.description).toContain("isolamento verificado, dados sintéticos");
+      expect(tool.description).toContain("teste remoto/compartilhado autorizado");
+      expect(tool.description).toContain("ambiente, destinos e alcance verificados");
       expect(tool.description).toContain("perfil explícito desligado por padrão");
       expect(tool.description).toContain("falhe fechado fora do teste");
       expect(tool.description).toContain("Não recuse só pelo termo bypass");
+      expect(tool.description).toContain("SSO/banco corporativo");
+      expect(tool.description).toContain("Reavalie recusas antigas após esclarecimento do cliente");
+      expect(tool.description).toContain("continue o trabalho local independente");
+      expect(tool.description).toContain("segregação de usuários/tenants");
+      expect(tool.description).toContain("produção, terceiros ou dependências fora da autorização");
       expect(tool.description).toContain("Localhost não comprova isolamento");
       expect(tool.description).toContain(
         "Preserve sandbox, consentimentos e confirmações críticas",

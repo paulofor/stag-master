@@ -1243,11 +1243,21 @@ describe("engenharia e limite de assuntos", () => {
   it.each([
     ["especialização", engineeringInstructions],
     [
-      "permissão local",
-      "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento local são permitidas",
+      "desenvolvimento e homologação",
+      "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento ou homologação são permitidas",
     ],
+    [
+      "SSO corporativo",
+      "SSO, banco corporativo, VPN ou destino remoto não comprovam produção nem tornam o pedido malicioso",
+    ],
+    [
+      "esclarecimento após recusa",
+      "reavalie com esse contexto; não repita a recusa anterior como regra",
+    ],
+    ["trabalho independente", "continue a inspeção e as correções locais independentes"],
     ["isolamento", "Localhost sozinho não comprova isolamento"],
     ["ativação explícita", "perfil/flag explícito e desligado por padrão"],
+    ["falha fechada", "falhe de forma fechada sem liberar acesso"],
   ])("o harness detecta perda parcial do contrato e recupera: %s", async (_name, fragment) => {
     await ready();
     const scenario = engineeringCorpus.scenarios.find((s) => s.id === "local-auth")!;
@@ -1281,6 +1291,40 @@ describe("engenharia e limite de assuntos", () => {
     ).toContain(cyberSafetyInstructions);
     expect(service.snapshot().mode).toBe("project");
     expect(service.snapshot().approvals).toEqual([]);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserva esclarecimento de desenvolvimento ao retomar sem transferir contexto a outra conversa", async () => {
+    await ready();
+    const scenario = engineeringCorpus.scenarios.find((s) => s.id === "development-clarified")!;
+    const missingContext = "Fixture: contexto da solicitação não preservado.";
+    const initial = service.snapshot().metrics;
+    // A terse follow-up alone must not inherit a target or authorization from another thread.
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    await send(scenario.context!);
+    await complete();
+    const threadId = service.snapshot().threadId;
+    await service.request({ type: "connect" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
+    expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
+    const snapshot = service.snapshot();
+    expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
+    expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
+    expect(service.snapshot().metrics.failures).toBe(initial.failures);
+    await service.request({ type: "newChat" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).not.toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().mode).toBe("project");
     expect(desktop.execute).not.toHaveBeenCalled();
     expect(browser.execute).not.toHaveBeenCalled();
   });

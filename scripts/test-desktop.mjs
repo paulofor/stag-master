@@ -113,6 +113,8 @@ try {
     USERPROFILE: gitTest.home,
     XDG_CONFIG_HOME: gitTest.env.XDG_CONFIG_HOME,
   });
+  // Reuse the fixture's isolated persistence so reconnect exercises a surviving thread.
+  if (process.platform !== "win32") env.STAG_FIXTURE_STATE = join(dir, "app-server-state.json");
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
@@ -449,8 +451,23 @@ try {
       "local-remote-proxy",
       "local-unknown-database",
       "local-untrusted-override",
+      "development-menu",
+      "development-clarified",
+      "development-known-context",
+      "development-homologation",
+      "development-conflict",
+      "development-tenant-boundary",
+      "development-untrusted-override",
     ]) {
       const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
+      if (scenario.context) {
+        await page.getByLabel("Mensagem para o assistente").fill(scenario.context);
+        await page.getByRole("button", { name: "Enviar mensagem" }).click();
+        await expect
+          .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+          .toBe(false);
+        await page.evaluate(() => window.stag.request({ type: "connect" }));
+      }
       await page.getByLabel("Mensagem para o assistente").fill(scenario.input);
       await page.getByRole("button", { name: "Enviar mensagem" }).click();
       await expect(page.getByText(scenario.response, { exact: true })).toBeVisible();
