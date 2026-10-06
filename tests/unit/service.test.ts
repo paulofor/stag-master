@@ -20,6 +20,10 @@ import {
 import { VideoAnalysisStore } from "../../src/main/video-analysis";
 import { videoInstructions } from "../../src/shared/request-video";
 import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
+import { ProjectBranchManager, projectBranchesInstructions } from "../../src/main/project-branches";
+import type { BranchOperation } from "../../src/shared/project-branches";
+// @ts-expect-error Shared real Git fixture.
+import { gitFixture } from "../fixtures/project-git.mjs";
 import {
   desktopConfirmationReason,
   type DesktopArguments,
@@ -37,9 +41,11 @@ let dir: string;
 let service: AssistantService;
 let rpc: RpcClient;
 let store: SettingsStore;
+let branchManager: ProjectBranchManager;
 const openExternal = vi.fn(async (_url: string) => {});
 const selectProject = vi.fn<() => Promise<string | null>>();
 const prepareProjectGit = vi.fn<typeof prepareGit>();
+const confirmBranchDeletion = vi.fn(async (_project: string, _branch: string) => true);
 const syntheticVideo = (): PreparedVideo => ({
   summary: {
     id: randomUUID(),
@@ -158,6 +164,16 @@ beforeEach(async () => {
     openExternal,
     selectProject,
     prepareProjectGit,
+    branches: (branchManager = new ProjectBranchManager(
+      createGitRunner({
+        PATH: process.env.PATH,
+        SystemRoot: process.env.SystemRoot,
+        HOME: resolve(dir, "git-home"),
+        USERPROFILE: resolve(dir, "git-home"),
+        XDG_CONFIG_HOME: resolve(dir, "git-home/xdg"),
+      }),
+    )),
+    confirmBranchDeletion,
     desktop,
     pulseCursor,
     browser,
@@ -185,6 +201,7 @@ afterEach(async () => {
     contentItems: [{ type: "inputText", text: "[]" }],
   });
   pulseCursor.mockResolvedValue({ moved: true });
+  confirmBranchDeletion.mockResolvedValue(true);
   browser.execute.mockResolvedValue({
     success: true,
     contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
@@ -818,8 +835,39 @@ describe("vídeo em segundo plano na conversa", () => {
   it("cancelar checkpoint retomado interrompe somente o turno da análise original", async () => {
     await ready();
     await rpc.call("_fixture/videoBehavior", { mode: "hold" });
-    await service.request({ type: "analyzeVideo" });
-    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+    // busy is optimistic, before turn/start reaches the child. Reproduce that boundary
+    // deliberately, then restart only after the fixture has persisted the surviving turn.
+    const original = rpc.call.bind(rpc);
+    let release!: () => void;
+    const dispatch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi
+      .spyOn(rpc, "call")
+      .mockImplementation(
+        async <T>(method: string, params?: Record<string, unknown>): Promise<T> => {
+          if (method === "turn/start") await dispatch;
+          return original<T>(method, params);
+        },
+      );
+    try {
+      await service.request({ type: "analyzeVideo" });
+      await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+      expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(0);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+    await vi.waitFor(async () =>
+      expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1),
+    );
+    const persisted = JSON.parse(await readFile(resolve(dir, "server-state.json"), "utf8"));
+    expect(persisted.loggedIn).toBe(true);
+    expect(
+      persisted.threads
+        .find((thread: { id: string }) => thread.id === service.snapshot().threadId)
+        .turns.at(-1).status,
+    ).toBe("inProgress");
     const id = service.snapshot().videoAnalysis!.id;
     await restart();
     await service.request({ type: "videoAnalysis", id, control: "cancel" });
@@ -3508,5 +3556,208 @@ describe("fluxo local do assistente", () => {
     await send("desktop crítico");
     await approve(true);
     expect((await store.load()).threads[first].mode).toBe("windows");
+  });
+});
+
+describe("tela de branches integrada ao serviço e ao agente", () => {
+  async function project() {
+    const fixture = await gitFixture(dir);
+    await fixture.init(fixture.project);
+    const result = await fixture.git([
+      "-C",
+      fixture.project,
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit",
+      "--no-gpg-sign",
+      "--allow-empty",
+      "-m",
+      "synthetic",
+    ]);
+    expect(result.code).toBe(0);
+    await fixture.git(["-C", fixture.project, "branch", "feature"]);
+    selectProject.mockResolvedValue(fixture.project);
+    await ready();
+    await service.request({ type: "listBranches", projectPath: fixture.project });
+    return fixture;
+  }
+  function change(operation: BranchOperation) {
+    const data = service.snapshot().projectBranches!;
+    return service.request({
+      type: "changeBranch",
+      projectPath: data.projectPath,
+      revision: data.revision,
+      repositoryId: data.repositories[0].id,
+      operation,
+    });
+  }
+  it("não declara sucesso quando a releitura falha após o Git alterar a branch", async () => {
+    const fixture = await project();
+    const original = branchManager.list.bind(branchManager);
+    const list = vi.spyOn(branchManager, "list").mockImplementationOnce(async (...args) => {
+      const data = await original(...args);
+      data.repositories[0].error = "Falha sintética após escrita";
+      return data;
+    });
+    await expect(
+      change({ kind: "create", name: "criada", from: "refs/heads/main" }),
+    ).rejects.toThrow("confirmar o estado resultante");
+    expect(service.snapshot().projectBranches?.message).toBeNull();
+    expect(
+      (await fixture.git(["-C", fixture.project, "branch", "--list", "criada"])).stdout,
+    ).toContain("criada");
+    list.mockRestore();
+    await service.request({ type: "listBranches", projectPath: fixture.project });
+    expect(
+      service
+        .snapshot()
+        .projectBranches!.repositories[0].branches.some((branch) => branch.name === "criada"),
+    ).toBe(true);
+    expect(service.snapshot().metrics.failures).toBeGreaterThan(0);
+  });
+  it("informa branches ao iniciar/retomar e na fila; consulta e mutações respeitam Leitura", async () => {
+    const fixture = await project();
+    await send("Explique o sistema");
+    await complete();
+    await change({ kind: "switch", branch: "feature" });
+    await send("Continue a tarefa");
+    await complete();
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    await service.request({ type: "connect" });
+    const reconnected = await rpc.call<any[]>("_fixture/readCalls");
+    expect(reconnected.some((call) => call.method === "thread/resume")).toBe(true);
+    for (const call of [...calls, ...reconnected].filter((call) =>
+      ["thread/start", "thread/resume"].includes(call.method),
+    ))
+      expect(call.params.developerInstructions).toContain(projectBranchesInstructions);
+    const turns = calls.filter((call) => call.method === "turn/start");
+    expect(
+      JSON.parse(turns[0].params.additionalContext.stag_project_branches.value).repositories[0]
+        .current,
+    ).toBe("main");
+    expect(turns.at(-1).params.additionalContext.stag_project_branches.kind).toBe("untrusted");
+    expect(
+      JSON.parse(turns.at(-1).params.additionalContext.stag_project_branches.value).repositories[0]
+        .current,
+    ).toBe("feature");
+    await send("lento");
+    await service.request({
+      type: "enqueue",
+      threadId: service.snapshot().threadId!,
+      id: randomUUID(),
+      text: "continue na branch",
+    });
+    await service.request({ type: "stop" });
+    await complete();
+    await change({ kind: "switch", branch: "main" });
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    expect(service.snapshot().queuePaused).toBe(true);
+    await service.request({
+      type: "pauseQueue",
+      threadId: service.snapshot().threadId!,
+      paused: false,
+    });
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+    const queued = (await rpc.call<any[]>("_fixture/readCalls"))
+      .filter((call) => call.method === "turn/start")
+      .at(-1);
+    expect(
+      JSON.parse(queued.params.additionalContext.stag_project_branches.value).repositories[0]
+        .current,
+    ).toBe("main");
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "listBranches", projectPath: fixture.project });
+    await expect(change({ kind: "switch", branch: "feature" })).rejects.toThrow("modo Leitura");
+    await send("Consulte a branch");
+    await complete();
+    const read = (await rpc.call<any[]>("_fixture/readCalls"))
+      .filter((call) => call.method === "turn/start")
+      .at(-1);
+    expect(read.params.sandboxPolicy.type).toBe("readOnly");
+    expect(service.snapshot().mode).toBe("read");
+  });
+  it("isola projetos e referências antigas; seleção cancelada e inválida preserva a tela", async () => {
+    const fixture = await project();
+    const before = service.snapshot().projectBranches!;
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().projectBranches).toEqual(before);
+    selectProject.mockResolvedValueOnce(resolve(dir, "missing"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    expect(service.snapshot().projectBranches).toEqual(before);
+    await fixture.git(["-C", fixture.project, "branch", "changed-outside"]);
+    await expect(change({ kind: "switch", branch: "feature" })).rejects.toThrow(
+      "repositório mudou",
+    );
+    expect(
+      service
+        .snapshot()
+        .projectBranches!.repositories[0].branches.some(
+          (branch) => branch.name === "changed-outside",
+        ),
+    ).toBe(true);
+    const neighbor = resolve(dir, "neighbor");
+    await mkdir(neighbor);
+    selectProject.mockResolvedValueOnce(neighbor);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().projectBranches).toBeNull();
+    await expect(
+      service.request({
+        type: "changeBranch",
+        projectPath: before.projectPath,
+        revision: before.revision,
+        repositoryId: before.repositories[0].id,
+        operation: { kind: "switch", branch: "feature" },
+      }),
+    ).rejects.toThrow("projeto mudou");
+    await send("Explique o novo projeto");
+    await complete();
+    const turn = (await rpc.call<any[]>("_fixture/readCalls"))
+      .filter((call) => call.method === "turn/start")
+      .at(-1);
+    expect(JSON.parse(turn.params.additionalContext.stag_project_branches.value)).toEqual({
+      observed: false,
+    });
+  });
+  it("não concorre com execução e confirmação; parar descarta uma exclusão aprovada tardiamente", async () => {
+    await project();
+    await send("lento");
+    await expect(change({ kind: "switch", branch: "feature" })).rejects.toThrow("Pare");
+    await service.request({ type: "stop" });
+    await complete();
+    let release!: (value: boolean) => void;
+    confirmBranchDeletion.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const removal = change({ kind: "delete", branch: "feature" });
+    const rejected = expect(removal).rejects.toThrow("interrompida");
+    await vi.waitFor(() => expect(confirmBranchDeletion).toHaveBeenCalled());
+    await expect(send("Não concorrer")).rejects.toThrow("Aguarde");
+    await service.request({ type: "stop" });
+    release(true);
+    await rejected;
+    expect(service.snapshot().projectBranches).toBeNull();
+    await service.request({ type: "listBranches", projectPath: service.snapshot().project!.path });
+    expect(
+      service
+        .snapshot()
+        .projectBranches!.repositories[0].branches.some((branch) => branch.name === "feature"),
+    ).toBe(true);
+    confirmBranchDeletion.mockResolvedValueOnce(false);
+    await change({ kind: "delete", branch: "feature" });
+    expect(service.snapshot().projectBranches?.message).toContain("cancelada");
+    await change({ kind: "delete", branch: "feature" });
+    expect(
+      service
+        .snapshot()
+        .projectBranches!.repositories[0].branches.some((branch) => branch.name === "feature"),
+    ).toBe(false);
+    expect(service.snapshot().metrics.failures).toBeGreaterThan(0);
   });
 });

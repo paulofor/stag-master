@@ -1,8 +1,19 @@
 import { z } from "zod";
 import { requestImagesSchema } from "./request-images";
 import { projectSourcesSchema } from "./project-sources";
+import { branchOperationSchema } from "./project-branches";
 
 export const actionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("listBranches"), projectPath: z.string().min(1).max(32768) }).strict(),
+  z
+    .object({
+      type: z.literal("changeBranch"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      repositoryId: z.uuid(),
+      operation: branchOperationSchema,
+    })
+    .strict(),
   z
     .object({
       type: z.enum([

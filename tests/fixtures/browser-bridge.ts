@@ -57,6 +57,65 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         request: async (action: Action) => {
           state.error = null;
           switch (action.type) {
+            case "listBranches":
+              state.projectBranches ||= {
+                projectPath: action.projectPath,
+                revision: crypto.randomUUID(),
+                observedAt: new Date().toISOString(),
+                incomplete: false,
+                issues: [],
+                message: null,
+                repositories: ["frontend", "servicos/api"].map((path) => ({
+                  id: crypto.randomUUID(),
+                  path,
+                  name: path,
+                  current: "main",
+                  detached: false,
+                  unborn: false,
+                  dirty: false,
+                  error: null,
+                  branches: ["main", "feature/cadastro", "origin/desenvolvimento"].map((name) => ({
+                    name,
+                    ref: name.startsWith("origin/") ? `refs/remotes/${name}` : `refs/heads/${name}`,
+                    kind: name.startsWith("origin/") ? "remote" : "local",
+                    current: name === "main",
+                    occupied: false,
+                  })),
+                })),
+              };
+              state.projectBranches.revision = crypto.randomUUID();
+              break;
+            case "changeBranch": {
+              if (state.mode === "read") throw new Error("Modo Leitura");
+              const repo = state.projectBranches!.repositories.find(
+                (repo) => repo.id === action.repositoryId,
+              )!;
+              const operation = action.operation;
+              if (operation.kind === "create")
+                repo.branches.push({
+                  name: operation.name,
+                  ref: `refs/heads/${operation.name}`,
+                  kind: "local",
+                  current: false,
+                  occupied: false,
+                });
+              if (operation.kind === "switch") {
+                repo.current = operation.branch;
+                for (const branch of repo.branches)
+                  branch.current = branch.name === operation.branch;
+              }
+              if (operation.kind === "rename") {
+                const branch = repo.branches.find((branch) => branch.name === operation.branch)!;
+                branch.name = operation.name;
+                branch.ref = `refs/heads/${operation.name}`;
+                if (branch.current) repo.current = operation.name;
+              }
+              if (operation.kind === "delete")
+                repo.branches = repo.branches.filter((branch) => branch.name !== operation.branch);
+              state.projectBranches!.revision = crypto.randomUUID();
+              state.projectBranches!.message = "Operação local concluída.";
+              break;
+            }
             case "mouseMovement":
               if (state.mode !== "windows" || !state.threadId || state.threadId !== action.threadId)
                 throw new Error("Autorize o desktop na conversa atual.");
@@ -140,6 +199,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             case "selectProject":
               clearQueue();
+              state.projectBranches = null;
               state.project = {
                 path: "C:\\Projetos\\exemplo",
                 name: "exemplo",

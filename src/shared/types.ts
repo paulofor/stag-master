@@ -1,4 +1,5 @@
 import type { PendingVideo, VideoAnalysisSummary } from "./request-video";
+import type { BranchOperation, ProjectBranches } from "./project-branches";
 export type AccessMode = "read" | "project" | "windows";
 export type RpcId = number | string;
 export interface Model {
@@ -73,6 +74,7 @@ export interface Snapshot {
   loginPending: boolean;
   project: Project | null;
   projectSources: DocumentationSource[];
+  projectBranches: ProjectBranches | null;
   models: Model[];
   model: string;
   effort: string;
@@ -113,6 +115,7 @@ export const emptySnapshot: Snapshot = {
   loginPending: false,
   project: null,
   projectSources: [],
+  projectBranches: null,
   models: [],
   model: "",
   effort: "",
@@ -151,6 +154,14 @@ export type Action =
   | { type: "logout" }
   | { type: "selectProject" }
   | { type: "projectSources"; projectPath: string; sources: DocumentationSource[] }
+  | { type: "listBranches"; projectPath: string }
+  | {
+      type: "changeBranch";
+      projectPath: string;
+      revision: string;
+      repositoryId: string;
+      operation: BranchOperation;
+    }
   | {
       type: "preferences";
       model?: string;

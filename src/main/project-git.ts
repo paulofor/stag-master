@@ -5,9 +5,13 @@ import { delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { ProjectGitReport } from "../shared/types";
 
 type GitResult = { code: number; stdout: string };
-export type GitRunner = (args: string[], signal?: AbortSignal) => Promise<GitResult>;
+export type GitRunner = (
+  args: string[],
+  signal?: AbortSignal,
+  input?: { indexFile?: string; text?: string },
+) => Promise<GitResult>;
 
-class GitFailure extends Error {}
+export class GitFailure extends Error {}
 
 /** No shell, repository cwd, inherited Git overrides or authentication payloads. */
 export function createGitRunner(
@@ -31,19 +35,21 @@ export function createGitRunner(
         .join(delimiter);
   }
   Object.assign(env, { GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_NO_LAZY_FETCH: "1" });
-  return (args, signal) =>
+  return (args, signal, input) =>
     new Promise((done, reject) => {
       if (signal?.aborted) return reject(new GitFailure("Preparação Git interrompida."));
       const child = spawn(executable, args, {
         cwd: base.HOME || base.USERPROFILE || homedir(),
-        env,
+        env: { ...env, ...(input?.indexFile ? { GIT_INDEX_FILE: input.indexFile } : {}) },
         windowsHide: true,
         shell: false,
-        stdio: ["ignore", "pipe", "ignore"],
+        stdio: ["pipe", "pipe", "ignore"],
       });
       let stdout = "";
       let bytes = 0;
       let failure: GitFailure | null = null;
+      child.stdin.on("error", () => {}); // EPIPE is reported by the child's exit status.
+      child.stdin.end(input?.text);
       const stop = (message: string) => {
         failure ||= new GitFailure(message);
         child.kill();
@@ -87,7 +93,7 @@ function pathKey(path: string): string {
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-async function checkedPath(root: string, path: string, directory: boolean): Promise<string> {
+export async function checkedPath(root: string, path: string, directory: boolean): Promise<string> {
   if (!inside(root, path)) throw new Error("Caminho fora da pasta selecionada.");
   const resolved = await realpath(path);
   if (!inside(root, resolved) || pathKey(resolved) !== pathKey(path))
@@ -105,7 +111,7 @@ async function smallFile(root: string, path: string): Promise<string> {
 }
 
 /** Support worktrees/submodules only when their administrative paths also stay in the root. */
-async function gitDirectory(root: string, repository: string): Promise<string> {
+export async function gitDirectory(root: string, repository: string): Promise<string> {
   await checkedPath(root, repository, true);
   let path = join(repository, ".git");
   const info = await lstat(path);
@@ -138,17 +144,16 @@ async function gitDirectory(root: string, repository: string): Promise<string> {
   return path;
 }
 
-export async function prepareProjectGit(
-  root: string,
-  options: {
-    run?: GitRunner;
-    signal?: AbortSignal;
-    onProgress?: (report: ProjectGitReport) => void;
-    maxDirectories?: number;
-    maxRepositories?: number;
-    maxDurationMs?: number;
-  } = {},
-): Promise<ProjectGitReport> {
+export interface ProjectGitOptions {
+  run?: GitRunner;
+  signal?: AbortSignal;
+  onProgress?: (report: ProjectGitReport) => void;
+  maxDirectories?: number;
+  maxRepositories?: number;
+  maxDurationMs?: number;
+}
+
+export async function discoverProjectRepositories(root: string, options: ProjectGitOptions = {}) {
   const report: ProjectGitReport = {
     phase: "scanning",
     scanned: 0,
@@ -166,7 +171,6 @@ export async function prepareProjectGit(
       report.issues.push({ path: relative(root, path) || ".", message });
   };
   const publish = () => options.onProgress?.(structuredClone(report));
-  const run = options.run || createGitRunner();
   const deadline = Date.now() + (options.maxDurationMs ?? 120000);
   const expired = () => options.signal?.aborted || Date.now() >= deadline;
   const pending = [root];
@@ -208,6 +212,76 @@ export async function prepareProjectGit(
   }
   if (expired()) report.incomplete = true;
 
+  return { report, repositories, deadline };
+}
+
+export async function safeGitArguments(
+  root: string,
+  repository: string,
+  run: GitRunner,
+  signal?: AbortSignal,
+) {
+  await gitDirectory(root, repository);
+  const filters = await run(
+    [
+      "-C",
+      repository,
+      "config",
+      "--includes",
+      "--name-only",
+      "--get-regexp",
+      "^filter\\..*\\.(clean|smudge|process|required)$",
+    ],
+    signal,
+  );
+  if (![0, 1].includes(filters.code))
+    throw new GitFailure("Não foi possível verificar os filtros locais do Git.");
+  const filterOverrides = filters.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .flatMap((key) => {
+      if (!/^filter\.[^\r\n\0]+\.(clean|smudge|process|required)$/.test(key))
+        throw new GitFailure("Filtro Git inválido; verificação interrompida.");
+      return ["-c", `${key}=${key.endsWith(".required") ? "false" : ""}`];
+    });
+  return [
+    "--no-optional-locks",
+    "--no-replace-objects",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    `core.worktree=${gitPath(repository)}`,
+    "-c",
+    "core.bare=false",
+    "-c",
+    "submodule.recurse=false",
+    "-c",
+    "status.submoduleSummary=false",
+    "-c",
+    "protocol.allow=never",
+    "-c",
+    "credential.helper=",
+    ...filterOverrides,
+    "-C",
+    repository,
+  ];
+}
+
+export async function prepareProjectGit(
+  root: string,
+  options: ProjectGitOptions = {},
+): Promise<ProjectGitReport> {
+  const { report, repositories, deadline } = await discoverProjectRepositories(root, options);
+  const run = options.run || createGitRunner();
+  const publish = () => options.onProgress?.(structuredClone(report));
+  const expired = () => options.signal?.aborted || Date.now() >= deadline;
+  const issue = (path: string, message: string) => {
+    report.failures++;
+    if (report.issues.length < 30)
+      report.issues.push({ path: relative(root, path) || ".", message });
+  };
   let trusted: Set<string> | null = null;
   for (const repository of repositories) {
     if (expired()) {
@@ -250,58 +324,11 @@ export async function prepareProjectGit(
         trusted.add(pathKey(repository));
       }
       await gitDirectory(root, repository);
-      // Keep normal repository discovery: --git-dir would bypass Git's ownership check.
-      const location = ["-C", repository];
-      const filters = await run(
-        [
-          ...location,
-          "config",
-          "--includes",
-          "--name-only",
-          "--get-regexp",
-          "^filter\\..*\\.(clean|smudge|process|required)$",
-        ],
-        options.signal,
-      );
-      if (![0, 1].includes(filters.code))
-        throw new GitFailure("Não foi possível verificar os filtros locais do Git.");
-      const filterOverrides = filters.stdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .flatMap((key) => {
-          if (!/^filter\.[^\r\n\0]+\.(clean|smudge|process|required)$/.test(key))
-            throw new GitFailure("Filtro Git inválido; verificação interrompida.");
-          return ["-c", `${key}=${key.endsWith(".required") ? "false" : ""}`];
-        });
-      // Override callbacks/worktree redirection from the now-trusted local config. No network,
-      // submodule traversal, optional index write, credential access or raw output in the UI.
+      // Normal -C discovery preserves Git's ownership check; explicit --git-dir bypasses it.
+      const args = await safeGitArguments(root, repository, run, options.signal);
       await gitDirectory(root, repository);
       const status = await run(
-        [
-          "--no-optional-locks",
-          "-c",
-          "core.fsmonitor=false",
-          "-c",
-          "core.hooksPath=",
-          "-c",
-          `core.worktree=${gitPath(repository)}`,
-          "-c",
-          "core.bare=false",
-          "-c",
-          "submodule.recurse=false",
-          "-c",
-          "status.submoduleSummary=false",
-          "-c",
-          "protocol.allow=never",
-          "-c",
-          "credential.helper=",
-          ...filterOverrides,
-          ...location,
-          "status",
-          "--short",
-          "--branch",
-          "--ignore-submodules=all",
-        ],
+        [...args, "status", "--short", "--branch", "--ignore-submodules=all"],
         options.signal,
       );
       if (status.code !== 0)

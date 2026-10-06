@@ -29,8 +29,13 @@ import {
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
-import { prepareProjectGit, projectGitInstructions } from "./project-git";
+import { prepareProjectGit, projectGitInstructions, GitFailure } from "./project-git";
 import { projectSourcesContext } from "./project-sources";
+import {
+  ProjectBranchManager,
+  projectBranchesContext,
+  projectBranchesInstructions,
+} from "./project-branches";
 import {
   videoContext,
   videoMessage,
@@ -91,6 +96,8 @@ interface Options {
   store: SettingsStore;
   selectProject: () => Promise<string | null>;
   prepareProjectGit?: typeof prepareProjectGit;
+  branches?: ProjectBranchManager;
+  confirmBranchDeletion?: (project: string, branch: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<void>;
   desktop: Pick<DesktopTools, "execute" | "confirmationReason">;
   pulseCursor?: (signal: AbortSignal) => Promise<CursorPulseResult>;
@@ -164,6 +171,8 @@ export class AssistantService extends EventEmitter {
   private completedTurns = new Set<string>();
   private safetyBlockId = 0;
   private projectPreparation = new AbortController();
+  private branches: ProjectBranchManager;
+  private branchController: AbortController | null = null;
   private videoPreparation: AbortController | null = null;
   private videoWork: Promise<void> = Promise.resolve();
   private preparedVideo: PreparedVideo | null = null;
@@ -177,6 +186,7 @@ export class AssistantService extends EventEmitter {
   private analysisInterruptRequested = false;
   constructor(private options: Options) {
     super();
+    this.branches = options.branches || new ProjectBranchManager();
     this.state = structuredClone(emptySnapshot);
     this.state.platform = options.platform || process.platform;
     this.state.browser.available = !!options.browser;
@@ -420,6 +430,8 @@ export class AssistantService extends EventEmitter {
         "logout",
         "selectProject",
         "projectSources",
+        "listBranches",
+        "changeBranch",
         "browserSession",
         "preferences",
         "newChat",
@@ -446,6 +458,95 @@ export class AssistantService extends EventEmitter {
     this.state.error = null;
     try {
       switch (action.type) {
+        case "listBranches":
+        case "changeBranch": {
+          const path = this.state.project?.path;
+          if (!path || path !== action.projectPath)
+            throw new Error("O projeto mudou. Reabra Branches na pasta desejada.");
+          if (this.analysis?.working || this.videoPreparation || this.state.approvals.length)
+            throw new Error(
+              "Pause a análise e conclua as ações pendentes antes de gerenciar branches.",
+            );
+          if (action.type === "changeBranch" && this.state.mode === "read")
+            throw new Error(
+              "O modo Leitura permite apenas consultar branches. Selecione Projeto para alterá-las.",
+            );
+          const controller = new AbortController();
+          this.branchController = controller;
+          const epoch = this.toolEpoch;
+          if (action.type === "changeBranch") this.state.queuePaused = true;
+          const execution = this.toolQueue.then(async () => {
+            if (this.disposed || controller.signal.aborted || epoch !== this.toolEpoch)
+              throw new Error("Operação de branches cancelada. Atualize a lista.");
+            if (action.type === "listBranches") {
+              this.state.projectBranches = await this.branches.list(path, controller.signal);
+            } else {
+              let result;
+              try {
+                result = await this.branches.change(
+                  path,
+                  action.revision,
+                  action.repositoryId,
+                  action.operation,
+                  this.options.confirmBranchDeletion || (async () => false),
+                  controller.signal,
+                );
+              } finally {
+                // Even a failed command can have partial effects. Refresh evidence, never replay it.
+                this.state.projectBranches = null;
+                if (!controller.signal.aborted && !this.disposed)
+                  this.state.projectBranches = await this.branches.list(path, controller.signal);
+              }
+              if (this.state.projectBranches) this.state.projectBranches.message = result.message;
+              if (result.changed) {
+                this.contextInstructionsDirty = true;
+                const repo = this.state.projectBranches?.repositories.find(
+                  (repo) => repo.id === action.repositoryId,
+                );
+                const operation = action.operation;
+                const confirmed =
+                  repo &&
+                  !repo.error &&
+                  (operation.kind === "switch"
+                    ? repo.current === operation.branch
+                    : operation.kind === "delete"
+                      ? !repo.branches.some(
+                          (branch) => branch.kind === "local" && branch.name === operation.branch,
+                        )
+                      : repo.branches.some(
+                          (branch) => branch.kind === "local" && branch.name === operation.name,
+                        ));
+                if (!confirmed) {
+                  if (this.state.projectBranches) this.state.projectBranches.message = null;
+                  throw new GitFailure(
+                    "O comando Git terminou, mas não foi possível confirmar o estado resultante. Atualize a lista e confira o projeto antes de tentar novamente.",
+                  );
+                }
+                if (this.state.threadId)
+                  this.state.items.push({
+                    id: `branches-${randomUUID()}`,
+                    kind: "status",
+                    text: result.message,
+                  });
+              }
+            }
+            this.state.metrics.failures +=
+              (this.state.projectBranches?.repositories.filter((repo) => repo.error).length || 0) +
+              (this.state.projectBranches?.issues.length || 0);
+          });
+          this.toolQueue = execution.catch(() => {});
+          try {
+            await execution;
+          } catch (error) {
+            if (error instanceof GitFailure) throw error;
+            throw new Error(
+              "Não foi possível concluir a operação de branches. Atualize a lista e confira o estado antes de tentar novamente.",
+            );
+          } finally {
+            if (this.branchController === controller) this.branchController = null;
+          }
+          break;
+        }
         case "mouseMovement":
           this.setMouseMovement(action);
           break;
@@ -1004,6 +1105,7 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.branchController?.abort();
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.browser?.cancel();
@@ -1107,6 +1209,8 @@ export class AssistantService extends EventEmitter {
     this.clearChat();
     this.state.mode = "project";
     this.state.project = { path, name: basename(path) || path };
+    this.branches.clear();
+    this.state.projectBranches = null;
     this.state.projectSources = this.settings.projectSources[path] || [];
     this.restoreBrowserProfile();
     this.settings.project = path;
@@ -1271,7 +1375,9 @@ export class AssistantService extends EventEmitter {
           this.state.projectSources,
         ) +
         "\n" +
-        projectGitInstructions(this.state.project?.git),
+        projectGitInstructions(this.state.project?.git) +
+        "\n" +
+        projectBranchesInstructions,
     });
     if (policy.backgroundVideo) {
       const turns: WireTurn[] = [];
@@ -1319,7 +1425,9 @@ export class AssistantService extends EventEmitter {
             this.state.projectSources,
           ) +
           "\n" +
-          projectGitInstructions(project.git),
+          projectGitInstructions(project.git) +
+          "\n" +
+          projectBranchesInstructions,
         serviceName: "stag_desktop",
         dynamicTools: [
           ...(this.state.mode === "windows" ? [desktopTool] : []),
@@ -1416,6 +1524,7 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          ...projectBranchesContext(this.state.projectBranches),
           ...projectSourcesContext(
             this.state.project.path,
             this.state.projectSources,
@@ -1451,6 +1560,7 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    this.branchController?.abort();
     this.disableMouseMovement();
     this.analysis?.detach();
     this.state.queuePaused = true;
@@ -1949,6 +2059,7 @@ export class AssistantService extends EventEmitter {
     this.clearMessageQueue();
     this.clearVideo();
     this.projectPreparation.abort();
+    this.branchController?.abort();
     this.toolEpoch++;
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
