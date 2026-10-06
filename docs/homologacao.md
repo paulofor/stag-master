@@ -1,6 +1,23 @@
-# Matriz de homologação da versão 0.4.13
+# Matriz de homologação da versão 0.4.14
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Quebras de linha na solicitação — versão 0.4.14
+
+Matriz definida antes dos testes. O campo interceptava Enter para enviar, a dica ensinava esse atalho e o harness esperava esse envio. Enter passa a inserir uma nova linha pelo comportamento nativo do textarea; o envio continua pelo botão. As regressões verificam que editar o rascunho não inicia turno nem adiciona texto à fila, inclusive com imagens ou aprovação pendente. A primeira rodada revelou perda de foco após o clique: o foco era solicitado antes de o render habilitar o campo. A restauração passa a ocorrer após esse render, também quando o envio falha.
+
+| Área                       | Cenário e aceite                                                                                                                         | Evidência prevista                                  |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Caminho feliz              | Enter e Shift+Enter inserem novas linhas; o botão envia o texto completo uma vez, limpa o rascunho e devolve o foco ao campo             | Chromium compacto/amplo/Pixel 7 + Electron          |
+| Validações e imagens       | Rascunho só com quebras de linha mantém envio desabilitado; Enter preserva anexos e não envia imagem sem texto                           | Chromium + clipboard nativo Electron                |
+| Fila e aprovações          | Durante execução/pergunta pendente, Enter edita sem enviar, enfileirar, interromper ou responder; Enfileirar preserva as linhas internas | Interface + preload/IPC/App Server determinístico   |
+| Falhas e recuperação       | Envio falho preserva rascunho multilinha, anexo e foco; novo clique funciona sem duplicar a solicitação                                  | Fixture de falha + interface                        |
+| Integração                 | Envio explícito transporta quebras de linha pelo fluxo normal e conserva fila, consentimentos e política original                        | Harness Electron + regressões de serviço existentes |
+| Observabilidade e métricas | Dica informa Enter para nova linha; Enter não cria mensagem/turno nem incrementa chamadas locais                                         | Interface + snapshots sintéticos                    |
+| Segregação e dispositivos  | Chromium 640×900/1280×900/Pixel 7 e Electron; texto, imagens, projetos e CODEX_HOME sintéticos, sem conta ou inferência paga             | check + test:desktop local                          |
+| Entrega Windows            | Contratos, teste desktop nativo e instalador 0.4.14 pelo workflow; Linux não comprova execução nativa Windows                            | Jobs Windows do PR/main + artefato                  |
+
+Evidência local: `npm run check` aprovado com typecheck, 289 contratos, build, handshake/schema reais do Codex isolado e 54 cenários Chromium compacto/amplo/Pixel 7. Os cenários afetados foram repetidos após corrigir o foco e passaram. `xvfb-run -a npm run test:desktop` aprovou Enter/Shift+Enter nativos, ausência de envio e de incremento de chamadas ao editar, clipboard com pixels sintéticos, envio explícito, fila multilinha, perguntas pendentes, recuperação e navegador de produção. Screenshots compacto/Pixel 7 inspecionados; Node 22.23.3 e dependências do lockfile. Sintaxe JavaScript e diff revisados; nenhum script shell alterado. O diagnóstico de espera de combos mostra apenas estado de conexão, tipos de aprovação e status das ferramentas, sem argumentos ou conteúdo da fila. Linux bloqueia namespaces bwrap e não comprova Windows nativo: regressões nativas e instalador precisam dos jobs Windows do PR/main.
 
 ## Fila de solicitações — versão 0.4.13
 
@@ -137,7 +154,7 @@ Matriz definida antes dos testes. O compositor, o IPC e o serviço aceitam somen
 
 | Área                       | Cenário e aceite                                                                                                                                                          | Evidência prevista                                              |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Caminho feliz              | Ctrl+V no textarea cria prévia; remover um anexo não altera texto/outros anexos; botão/Enter envia pixels e texto; imagem sem texto também inicia turno                   | Chromium + Electron com clipboard nativo + serviço bidirecional |
+| Caminho feliz              | Ctrl+V no textarea cria prévia; remover um anexo não altera texto/outros anexos; botão envia pixels e texto; imagem sem texto também inicia turno                         | Chromium + Electron com clipboard nativo + serviço bidirecional |
 | Validação                  | Recusar tipo não raster, URL remota/local, base64 inválido, MIME falsificado, imagem incompleta, dimensões excessivas, quantidade e volume acima do limite antes do turno | Schemas compartilhados + IPC/decoder nativo + fixture estrita   |
 | Recuperação                | Falha preserva rascunho e imagens; novo envio não duplica mensagem; parar/recusar aprovação permite próxima tarefa; colagem assíncrona não reaparece em outra conversa    | Serviço + Chromium + Electron                                   |
 | Isolamento                 | Nova conversa, troca de projeto, histórico e logout descartam anexos pendentes; cancelamento do seletor preserva o contexto; imagens não são gravadas nas configurações   | Chromium + serviço com projetos/CODEX_HOME temporários          |
@@ -285,7 +302,7 @@ Evidência local: `npm run check` aprovado com 122 testes de contrato, build, ha
 | Empacotamento   | Main, tags e PRs geram artefatos sem ativar publisher, solicitar token de release ou enviar arquivos                                     | CLI e evento de artefato do electron-builder real, com CI simulado |
 | Observabilidade | Estado da conexão, comandos, diffs, plano e tokens visíveis; métricas apenas contadores locais; logs sem conteúdo/autenticação           | Unidade e E2E                                                      |
 | Dados de teste  | Fake OAuth, projetos temporários, CODEX_HOME temporário, sem autenticação real nem automação real de desktop nos testes de navegador     | Fixtures e teste real de handshake                                 |
-| Interface       | Painel único, rolagem, Enter/Shift+Enter, parar, foco e leitores de tela, Markdown sem HTML executável                                   | E2E Chromium                                                       |
+| Interface       | Painel único, rolagem, Enter/Shift+Enter para nova linha, envio pelo botão, parar, foco e leitores de tela, Markdown sem HTML executável | E2E Chromium                                                       |
 | Dimensões       | 640×900, 390×844 (Pixel 7), 1280×800; sem overflow horizontal                                                                            | E2E e screenshots locais                                           |
 
 ## Controle autorizado do desktop

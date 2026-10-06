@@ -14,16 +14,22 @@ test("fila visível, ordem, remoção e envio só depois da resposta atual", asy
   const add = page.getByRole("button", { name: "Adicionar texto à fila" });
   const queue = page.getByRole("region", { name: "Fila de solicitações" });
   await input.fill("perguntar primeiro");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(add).toBeDisabled();
   await input.fill("perguntar segundo");
-  await input.press("Enter"); // Enter never silently enqueues or interrupts.
-  await expect(input).toHaveValue("perguntar segundo");
+  await input.press("Enter");
+  await input.pressSequentially("continuação da solicitação");
+  const second = "perguntar segundo\ncontinuação da solicitação";
+  await expect(input).toHaveValue(second);
+  await expect(queue).toHaveCount(0);
+  await expect(page.locator(".user-message")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeVisible();
   await add.dblclick();
   await expect(input).toHaveValue("");
   await expect(queue.locator("li")).toHaveCount(1);
   await input.fill("texto removível");
   await add.click();
+  await expect(input).toBeFocused();
   await input.fill("último texto da fila");
   await add.click();
   await queue.getByRole("button", { name: "Remover texto 2 da fila" }).click();
@@ -36,19 +42,23 @@ test("fila visível, ordem, remoção e envio só depois da resposta atual", asy
   );
   await page.getByLabel("Qual stack deseja?", { exact: true }).selectOption("TypeScript");
   await page.getByRole("button", { name: "Responder", exact: true }).click();
-  await expect(page.locator(".user-message")).toHaveText([
-    "perguntar primeiro",
-    "perguntar segundo",
-  ]);
+  await expect(page.locator(".user-message")).toHaveText(["perguntar primeiro", second]);
   await expect(queue).toContainText("último texto da fila");
   await page.getByLabel("Qual stack deseja?", { exact: true }).selectOption("TypeScript");
   await page.getByRole("button", { name: "Responder", exact: true }).click();
   await expect(queue).toHaveCount(0);
   await expect(page.locator(".user-message")).toHaveText([
     "perguntar primeiro",
-    "perguntar segundo",
+    second,
     "último texto da fila",
   ]);
+  expect(
+    await page.evaluate(async () =>
+      (await window.stag!.getSnapshot()).items
+        .filter((item) => item.kind === "user")
+        .map((item) => item.text),
+    ),
+  ).toEqual(["perguntar primeiro", second, "último texto da fila"]);
 });
 
 test("parar preserva fila pausada, continuar envia e nova conversa descarta", async ({ page }) => {
@@ -56,7 +66,7 @@ test("parar preserva fila pausada, continuar envia e nova conversa descarta", as
   const input = page.getByLabel("Mensagem para o assistente");
   const queue = page.getByRole("region", { name: "Fila de solicitações" });
   await input.fill("lento");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await input.fill("outra tarefa lento");
   await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
   await queue.getByRole("button", { name: "Pausar fila" }).click();
@@ -91,7 +101,7 @@ test("falha no cadastro preserva rascunho e não duplica o texto na recuperaçã
   });
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("lento");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await input.fill("preservar este rascunho");
   await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
   await expect(page.getByRole("alert")).toContainText("Falha sintética");

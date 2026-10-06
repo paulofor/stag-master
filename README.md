@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.13: fila de textos para depois da tarefa atual, seleção de combos no navegador integrado, orientação para adaptações autorizadas de acesso no desenvolvimento local, fontes de documentação por projeto, preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.14: Enter para nova linha na solicitação e envio pelo botão, fila de textos para depois da tarefa atual, seleção de combos no navegador integrado, orientação para adaptações autorizadas de acesso no desenvolvimento local, fontes de documentação por projeto, preparação automática dos repositórios Git ao selecionar a pasta, colagem de imagens nas solicitações, memória do sistema e do negócio em `.stag` por projeto, especialização em engenharia de sistemas e respostas limitadas a sistemas e ao negócio em construção, conversa em tempo real, navegador lateral controlado pelo modelo, Markdown, pasta e subpastas com leitura/escrita autorizadas ao selecionar, modelos/níveis de esforço descobertos da conta, histórico por projeto, parar execução, desktop limitado a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver com confirmação nos pontos críticos, comandos/diffs/plano e métricas de tokens. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Fila de solicitações
 
@@ -65,7 +65,7 @@ Se o Git não estiver instalado, a configuração estiver bloqueada ou o reposit
 
 ## Imagens na solicitação
 
-Copie uma captura ou imagem **PNG/JPEG** e use **Ctrl+V** no campo da mensagem. Confira as miniaturas e remova qualquer anexo pelo **X**. Você pode acrescentar a descrição ou enviar somente a imagem com **Enter** ou o botão de envio. **Shift+Enter** continua criando uma nova linha.
+Copie uma captura ou imagem **PNG/JPEG** e use **Ctrl+V** no campo da mensagem. Confira as miniaturas e remova qualquer anexo pelo **X**. Você pode acrescentar a descrição ou enviar somente a imagem pelo botão de envio. **Enter** e **Shift+Enter** criam uma nova linha no rascunho, inclusive durante uma execução; para adicionar um texto à fila, clique em **Enfileirar**.
 
 Cada mensagem aceita até quatro imagens e **4 MB no total**, com até 8192 pixels por lado e 20 megapixels por imagem. Imagens inválidas são recusadas; uma falha de envio preserva texto e anexos para tentar novamente. Nova conversa, seleção de outro contexto, abertura de histórico e saída da conta descartam os anexos pendentes. Cancelar a seleção de pasta preserva o contexto.
 

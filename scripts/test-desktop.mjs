@@ -171,6 +171,23 @@ try {
   await imageInput.press("Control+v");
   await expect(imageInput).toHaveValue("Tarefa sintética colada");
   await expect(page.locator(".composer img")).toHaveCount(0);
+  const beforeEditing = await page.evaluate(async () => window.stag.getSnapshot());
+  await expect(page.locator(".footer-hint")).toContainText("Enter para nova linha");
+  await imageInput.fill("Primeira linha");
+  await imageInput.press("Enter");
+  await imageInput.pressSequentially("Segunda linha");
+  await imageInput.press("Shift+Enter");
+  await imageInput.pressSequentially("Terceira linha");
+  await expect(imageInput).toHaveValue("Primeira linha\nSegunda linha\nTerceira linha");
+  await expect(page.locator(".user-message")).toHaveCount(0);
+  const afterEditing = await page.evaluate(async () => window.stag.getSnapshot());
+  assert.equal(afterEditing.threadId, beforeEditing.threadId);
+  assert.equal(afterEditing.metrics.requests, beforeEditing.metrics.requests);
+  assert.equal(afterEditing.busy, false);
+  await imageInput.fill("");
+  await imageInput.press("Enter");
+  await expect(imageInput).toHaveValue("\n");
+  await expect(page.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
   await imageInput.fill("");
   // The real OS clipboard event reaches the sandboxed renderer; no clipboard API is exposed.
   await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, dataUrl) => {
@@ -186,8 +203,13 @@ try {
   await imageInput.press("Control+v");
   await expect(page.locator(".composer img")).toHaveCount(1);
   assert.equal(await page.locator(".composer img").evaluate((img) => img.naturalWidth), 2);
+  await imageInput.press("Enter");
+  await expect(imageInput).toHaveValue("\n");
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  await expect(page.locator(".user-message")).toHaveCount(0);
   await page.getByRole("button", { name: "Remover imagem 1" }).click();
   await expect(page.locator(".composer img")).toHaveCount(0);
+  await imageInput.fill("");
   const invalidPixelsRejected = await page.evaluate(async (dataUrl) => {
     const bytes = Uint8Array.from(atob(dataUrl.split(",")[1]), (c) => c.charCodeAt(0));
     // Valid PNG header/dimensions but no IDAT/IEND: the production native decoder must reject it.
@@ -225,9 +247,17 @@ try {
     console.log("Fila real: preload/IPC, aprovação, reload, ordem, pausa e descarte.");
     const queue = page.getByRole("region", { name: "Fila de solicitações" });
     await imageInput.fill("perguntar stack");
-    await imageInput.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeVisible();
+    await expect(imageInput).toBeFocused();
     await imageInput.fill("primeiro texto rápido");
+    await imageInput.press("Enter");
+    await imageInput.pressSequentially("continuação da solicitação");
+    const firstQueuedText = "primeiro texto rápido\ncontinuação da solicitação";
+    await expect(imageInput).toHaveValue(firstQueuedText);
+    await expect(queue).toHaveCount(0);
+    await expect(page.locator(".user-message")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
     await imageInput.fill("segundo texto lento");
     await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
@@ -239,9 +269,17 @@ try {
     await page.getByRole("button", { name: "Responder", exact: true }).click();
     await expect(page.locator(".user-message")).toHaveText([
       "perguntar stack",
-      "primeiro texto rápido",
+      firstQueuedText,
       "segundo texto lento",
     ]);
+    assert.deepEqual(
+      await page.evaluate(async () =>
+        (await window.stag.getSnapshot()).items
+          .filter((item) => item.kind === "user")
+          .map((item) => item.text),
+      ),
+      ["perguntar stack", firstQueuedText, "segundo texto lento"],
+    );
     await expect(queue).toHaveCount(0);
     await imageInput.fill("descartar esta pendência");
     await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
@@ -270,12 +308,22 @@ try {
     await imageInput.focus();
     await imageInput.press("Control+v");
     await expect(page.locator(".composer img")).toHaveCount(1);
+    const beforeImageEnter = await page.evaluate(async () => window.stag.getSnapshot());
     await imageInput.press("Enter");
+    await expect(imageInput).toHaveValue("\n");
+    await expect(page.locator(".composer img")).toHaveCount(1);
+    await expect(page.locator(".user-message")).toHaveCount(0);
+    assert.equal(
+      (await page.evaluate(async () => window.stag.getSnapshot())).metrics.requests,
+      beforeImageEnter.metrics.requests,
+    );
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(
       page.getByText("Recebi 1 imagem(ns) sintética(s).", { exact: true }),
     ).toBeVisible();
     await expect(page.locator(".user-message img")).toHaveCount(1);
     await expect(page.locator(".composer img")).toHaveCount(0);
+    await expect(imageInput).toBeFocused();
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     const beforeBlocked = await page.evaluate(
       async () => (await window.stag.getSnapshot()).metrics,
@@ -447,7 +495,7 @@ try {
     await page.screenshot({ path: ".local/screenshots/electron-browser-panel.png" });
     const input = page.getByLabel("Mensagem para o assistente");
     await input.fill(sourceCorpus.input);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText(sourceCorpus.complete, { exact: true })).toBeVisible();
     await expect(page.getByLabel("Endereço do navegador")).toHaveValue(source.url);
     await expect
@@ -470,15 +518,28 @@ try {
       }, code);
     const comboTask = `navegador combo real ${new URL("combos", site.url).href}`;
     await input.fill(comboTask);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect
-      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
-      .toBe(false);
+      .poll(() =>
+        page.evaluate(async () => {
+          const state = await window.stag.getSnapshot();
+          return state.busy
+            ? {
+                connection: state.connection,
+                approvals: state.approvals.map((approval) => approval.kind),
+                tools: state.items
+                  .filter((item) => item.kind === "tool")
+                  .map((item) => item.status),
+              }
+            : null;
+        }),
+      )
+      .toBeNull();
     assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 1);
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
     const criticalComboTask = comboTask.replace("navegador", "navegador crítico");
     await input.fill(criticalComboTask);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 0);
     await page.getByRole("button", { name: "Recusar", exact: true }).click();
@@ -487,7 +548,7 @@ try {
       .toBe(false);
     assert.equal(await comboDom("document.querySelector('#native').selectedIndex"), 0);
     await input.fill(criticalComboTask);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     await comboDom(
       "document.querySelector('#native').options[7].value='SYNTHETIC_CHANGED_AFTER_APPROVAL'",
@@ -502,7 +563,7 @@ try {
       /alvo mudou/,
     );
     await input.fill(criticalComboTask);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Permitir esta ação" }).click();
     await expect
@@ -514,7 +575,7 @@ try {
       /SYNTHETIC_INTERNAL|SYNTHETIC_CHANGED_AFTER_APPROVAL/,
     );
     await input.fill(`navegador envio real ${site.url}`);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     assert.equal(site.effects.submissions, 0);
     await page.getByRole("button", { name: "Recusar", exact: true }).click();
@@ -524,7 +585,7 @@ try {
     await expect(page.getByText("Navegador: recusado.", { exact: true }).last()).toBeVisible();
     assert.equal(site.effects.submissions, 0);
     await input.fill(`navegador envio real ${site.url}`);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Permitir esta ação" }).click();
     await expect.poll(() => site.effects.submissions).toBe(1);
@@ -532,7 +593,7 @@ try {
       .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
       .toBe(false);
     await input.fill(`navegador senha real ${site.url}`);
-    await input.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).not.toContainText(
       "feito pelo modelo",

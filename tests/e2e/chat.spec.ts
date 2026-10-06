@@ -92,16 +92,37 @@ test("painel compacto, onboarding e conversa Markdown", async ({ page }, info) =
   );
   expect(errors).toEqual([]);
 });
-test("Enter envia e Shift+Enter mantém o rascunho", async ({ page }) => {
+test("Enter e Shift+Enter criam linhas sem enviar; o botão envia o texto completo", async ({
+  page,
+}, info) => {
   await ready(page);
   const input = page.getByLabel("Mensagem para o assistente");
-  await input.fill("Primeira linha");
-  await input.press("Shift+Enter");
-  await input.pressSequentially("Segunda linha");
-  await expect(input).toHaveValue("Primeira linha\nSegunda linha");
+  const send = page.getByRole("button", { name: "Enviar mensagem" });
+  await expect(page.locator(".footer-hint")).toContainText("Enter para nova linha");
   await input.press("Enter");
-  await expect(page.locator(".user-message")).toContainText("Segunda linha");
+  await expect(input).toHaveValue("\n");
+  await expect(send).toBeDisabled();
+  await input.fill("Primeira linha");
+  await input.press("Enter");
+  await input.pressSequentially("Segunda linha");
+  await input.press("Shift+Enter");
+  await input.pressSequentially("Terceira linha");
+  const text = "Primeira linha\nSegunda linha\nTerceira linha";
+  await expect(input).toHaveValue(text);
+  await expect(page.locator(".user-message")).toHaveCount(0);
+  expect(await page.evaluate(async () => (await window.stag!.getSnapshot()).threadId)).toBeNull();
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-multiline-request.png` });
+  await send.click();
+  await expect(page.locator(".user-message")).toHaveCount(1);
+  expect(
+    await page.evaluate(async () =>
+      (await window.stag!.getSnapshot()).items
+        .filter((item) => item.kind === "user")
+        .map((item) => item.text),
+    ),
+  ).toEqual([text]);
   await expect(input).toHaveValue("");
+  await expect(input).toBeFocused();
 });
 test("aprovação recusada e histórico restaurado", async ({ page }) => {
   await ready(page);
@@ -121,13 +142,13 @@ test("pergunta obrigatória e interrupção", async ({ page }) => {
   await ready(page);
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("perguntar");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByRole("button", { name: "Responder", exact: true })).toBeDisabled();
   await page.getByLabel("Qual stack deseja?", { exact: true }).selectOption("TypeScript");
   await page.getByRole("button", { name: "Responder", exact: true }).click();
   await expect(page.getByText("Resposta recebida. Fluxo concluído.")).toBeVisible();
   await input.fill("lento");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByLabel("Acesso", { exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Parar execução" }).click();
   await expect(page.getByText("Execução interrompida.")).toBeVisible();
@@ -167,13 +188,13 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
   await expect(page.getByRole("region", { name: "Controle do desktop" })).toContainText(
     "Desktop autorizado · Postman, IntelliJ, VS Code e DBeaver",
   );
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(
     page.getByText("Desktop: captura e navegação sintéticas concluídas.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
   await input.fill("desktop crítico enviar requisição");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Confirmar ação no desktop?", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toContainText(
     "Enviar requisição ao serviço externo",
@@ -183,7 +204,7 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
   await page.getByRole("button", { name: "Recusar", exact: true }).click();
   await expect(page.getByText("Desktop: ação recusada.", { exact: true })).toBeVisible();
   await input.fill("desktop crítico enviar requisição");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Confirmar ação no desktop?", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Permitir esta ação", exact: true }).click();
   await expect(
@@ -218,7 +239,7 @@ test("erro permite reconectar e Markdown não executa HTML/imagens remotas", asy
   await ready(page);
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("erro");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByRole("alert")).toContainText("Reconecte");
   await page.getByRole("button", { name: "Reconectar", exact: true }).click();
   const remoteRequests: string[] = [];
@@ -226,7 +247,7 @@ test("erro permite reconectar e Markdown não executa HTML/imagens remotas", asy
     if (request.url().includes("example.invalid")) remoteRequests.push(request.url());
   });
   await input.fill("html");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Texto seguro.", { exact: false })).toBeVisible();
   expect(
     await page.evaluate(() => (window as Window & { hacked?: boolean }).hacked),
