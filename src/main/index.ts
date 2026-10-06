@@ -127,6 +127,7 @@ async function start(): Promise<void> {
           : desktop.execute(input, approved);
       },
     },
+    pulseCursor: (signal) => desktop.pulseCursor(signal),
     browser,
     video: {
       select: async () => {
@@ -224,9 +225,43 @@ async function start(): Promise<void> {
         "browserSession",
         "analyzeVideo",
         "videoAnalysis",
+        "mouseMovement",
       ].includes(action.type)
     )
       authorizationRevision++;
+    if (
+      action.type === "mouseMovement" &&
+      action.enabled &&
+      !service!.snapshot().mouseMovement.enabled
+    ) {
+      const snapshot = service!.snapshot();
+      if (
+        process.platform !== "win32" ||
+        snapshot.mode !== "windows" ||
+        snapshot.connection !== "ready" ||
+        !snapshot.account ||
+        snapshot.threadId !== action.threadId
+      )
+        throw new Error(
+          "Autorize o desktop e inicie uma conversa Windows antes de ativar o movimento do mouse.",
+        );
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "question",
+        title: "Movimento periódico do mouse",
+        message: "Mover o mouse a cada cinco minutos nesta conversa?",
+        detail:
+          "O cursor se desloca até 2 pixels e retorna quando o alvo continua válido, sem cliques, teclas ou troca de foco. Funciona somente sobre Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano, sem botões do mouse pressionados. FortiClient e outros aplicativos são omitidos. Continua com o STAG minimizado; desligar, parar, desconectar, trocar de conversa ou fechar encerra os movimentos. Não garante impedir suspensão, bloqueio ou expiração de sessões e não altera políticas do Windows.",
+        buttons: ["Cancelar", "Ativar movimento"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error(
+          "A conversa ou autorização mudou durante a confirmação. Ative novamente na conversa atual.",
+        );
+    }
     if (action.type === "videoAnalysis" && action.control === "retry") {
       const summary = service!.snapshot().videoAnalysis;
       if (!summary || summary.id !== action.id || summary.status !== "uncertain")

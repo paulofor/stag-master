@@ -8,6 +8,15 @@ describe("fronteiras do cliente", () => {
     expect(() => actionSchema.parse({ type: "rpc", method: "command/exec" })).toThrow();
     expect(() => actionSchema.parse({ type: "connect", command: "unsafe" })).toThrow();
   });
+  it("movimento periódico só aceita a opção e o thread, sem comandos ou parâmetros nativos", () => {
+    const action = { type: "mouseMovement", threadId: "synthetic", enabled: true };
+    expect(actionSchema.parse(action)).toEqual(action);
+    for (const field of ["x", "y", "interval", "processId", "stagPeriodicMovement", "script"])
+      expect(() => actionSchema.parse({ ...action, [field]: 1 })).toThrow();
+    expect(() =>
+      desktopArguments.parse({ action: "nudge_cursor", stagPeriodicMovement: true }),
+    ).toThrow();
+  });
   it("permite só http(s) e origens oficiais para OAuth", () => {
     for (const url of [
       "file:///C:/Windows",

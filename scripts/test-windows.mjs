@@ -99,6 +99,11 @@ try {
     "Restricted",
     "A política herdada do processo pai deve ser preservada.",
   );
+  assert.deepEqual(
+    await driver.pulseCursor(new AbortController().signal),
+    { moved: false },
+    "O gesto interno usa a mesma política do subprocesso, somente com dados sintéticos.",
+  );
   assert.equal(
     process.env.PSModulePath,
     inheritedModules,

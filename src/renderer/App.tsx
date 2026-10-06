@@ -18,6 +18,7 @@ import {
   LogOut,
   ListPlus,
   Monitor,
+  MousePointer2,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -659,24 +660,65 @@ export function App() {
             />
           )}
           {state.platform === "win32" && (
-            <section className="desktop-access" aria-label="Controle do desktop">
-              <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
-                <Monitor size={14} />
-                {state.mode === "windows"
-                  ? "Desktop autorizado · Postman, IntelliJ, VS Code, DBeaver e FortiClient"
-                  : "Desktop · Postman, IntelliJ, VS Code, DBeaver e FortiClient"}
-              </span>
-              <button
-                className="text-button"
-                disabled={disabledContext || !state.account || !state.project}
-                onClick={() => {
-                  if (state.mode === "windows") void run({ type: "preferences", mode: "project" });
-                  else setWindowsDialog(true);
-                }}
-              >
-                {state.mode === "windows" ? "Revogar acesso" : "Autorizar desktop"}
-              </button>
-            </section>
+            <>
+              <section className="desktop-access" aria-label="Controle do desktop">
+                <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
+                  <Monitor size={14} />
+                  {state.mode === "windows"
+                    ? "Desktop autorizado · Postman, IntelliJ, VS Code, DBeaver e FortiClient"
+                    : "Desktop · Postman, IntelliJ, VS Code, DBeaver e FortiClient"}
+                </span>
+                <button
+                  className="text-button"
+                  disabled={disabledContext || !state.account || !state.project}
+                  onClick={() => {
+                    if (state.mode === "windows")
+                      void run({ type: "preferences", mode: "project" });
+                    else setWindowsDialog(true);
+                  }}
+                >
+                  {state.mode === "windows" ? "Revogar acesso" : "Autorizar desktop"}
+                </button>
+              </section>
+              {state.mode === "windows" && (
+                <section className="mouse-movement" aria-label="Movimento periódico do mouse">
+                  <button
+                    className="text-button"
+                    aria-pressed={state.mouseMovement.enabled}
+                    disabled={
+                      pending ||
+                      (!state.mouseMovement.enabled &&
+                        (state.mode !== "windows" ||
+                          !state.threadId ||
+                          !state.account ||
+                          state.connection !== "ready"))
+                    }
+                    title="Ative numa conversa Windows autorizada. Move até 2 pixels e retorna, somente sobre uma janela permitida em primeiro plano, sem clicar."
+                    onClick={() =>
+                      state.threadId &&
+                      void run({
+                        type: "mouseMovement",
+                        threadId: state.threadId,
+                        enabled: !state.mouseMovement.enabled,
+                      })
+                    }
+                  >
+                    <MousePointer2 size={13} />
+                    {state.mouseMovement.enabled
+                      ? "Desligar movimento do mouse"
+                      : "Mover mouse a cada 5 min"}
+                  </button>
+                  <span role="status">
+                    {state.mouseMovement.status}
+                    {state.mouseMovement.enabled && (
+                      <span className="mouse-movement-counts">
+                        {` · ${state.mouseMovement.moves} movimento(s) · ${state.mouseMovement.skipped} intervalo(s) omitido(s)`}
+                      </span>
+                    )}
+                  </span>
+                </section>
+              )}
+            </>
           )}
           <VideoAnalysisPanel state={state} pending={pending} run={run} />
           <MessageQueue state={state} pending={pending} run={run} />

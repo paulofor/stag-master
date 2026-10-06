@@ -2,7 +2,15 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.23: análise de vídeos longos em segundo plano com pausa e retomada, painel do navegador ampliado para reduzir rolagem horizontal, correção de recusas indevidas de pedidos preventivos, acesso autorizado no desenvolvimento e homologação, vídeos com extração de imagens e transcrição local para as anotações do projeto, diagnóstico de certificados HTTPS, sessões de sites opcionais por projeto, consulta visual e reconexão VPN pelo FortiClient com confirmação por ação, crédito a Paulo Forestieri, Enter para nova linha e envio pelo botão, fila de textos, fontes de documentação, imagens coladas e memória em `.stag`. Preserva a proteção contra abuso, engenharia de sistemas, painel único, navegador lateral, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.24: botão opcional de movimento periódico do mouse, análise de vídeos longos em segundo plano com pausa e retomada, painel do navegador ampliado para reduzir rolagem horizontal, correção de recusas indevidas de pedidos preventivos, acesso autorizado no desenvolvimento e homologação, vídeos com extração de imagens e transcrição local para as anotações do projeto, diagnóstico de certificados HTTPS, sessões de sites opcionais por projeto, consulta visual e reconexão VPN pelo FortiClient com confirmação por ação, crédito a Paulo Forestieri, Enter para nova linha e envio pelo botão, fila de textos, fontes de documentação, imagens coladas e memória em `.stag`. Preserva a proteção contra abuso, engenharia de sistemas, painel único, navegador lateral, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+
+## Movimento periódico do mouse
+
+No Windows, autorize o desktop, inicie a conversa e clique em **Mover mouse a cada 5 min**. Confirme a ativação. A cada cinco minutos, o main tenta deslocar o cursor até dois pixels e retornar, sem cliques, teclas ou troca de foco; não consome turnos do assistente.
+
+O cursor precisa estar sobre **Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano**, com o executável/produto/assinatura reconhecidos e sem botões do mouse pressionados. FortiClient, outros aplicativos, sobreposições e alvos alterados são omitidos. O painel mostra o estado e as contagens; uma falha desliga a opção e permite ativar novamente.
+
+Funciona com o STAG minimizado. **Desligar movimento do mouse**, **Parar**, pausar/cancelar vídeo, revogar desktop, trocar de conversa/projeto, desconectar ou fechar desligam e descartam movimentos pendentes. Reload da interface conserva o estado do main; reinício exige ativação explícita. Não há persistência de consentimento nem garantia de impedir suspensão, bloqueio ou expiração de sessões; as políticas do Windows permanecem preservadas.
 
 ## Vídeos longos em segundo plano
 

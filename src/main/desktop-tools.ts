@@ -59,6 +59,8 @@ export const desktopArguments = z.discriminatedUnion("action", [
     .strict(),
 ]);
 export type DesktopArguments = z.infer<typeof desktopArguments>;
+const cursorPulseSchema = z.object({ moved: z.boolean() }).strict();
+export type CursorPulseResult = z.infer<typeof cursorPulseSchema>;
 export interface ToolResult {
   contentItems: ({ type: "inputText"; text: string } | { type: "inputImage"; imageUrl: string })[];
   success: boolean;
@@ -253,8 +255,13 @@ export class DesktopTools {
       : reason;
   }
   private async invoke(
-    input: DesktopArguments,
-    context: { stagCheckOnly?: true; stagCriticalApproved?: true } = {},
+    input: DesktopArguments | { action: "nudge_cursor" },
+    context: {
+      stagCheckOnly?: true;
+      stagCriticalApproved?: true;
+      stagPeriodicMovement?: true;
+    } = {},
+    signal?: AbortSignal,
   ): Promise<{ stdout: string }> {
     if (this.platform !== "win32")
       throw new Error("Controle de desktop disponível somente no Windows.");
@@ -272,8 +279,10 @@ export class DesktopTools {
         timeout: 15000,
         maxBuffer: 16 * 1024 * 1024,
         env: windowsPowerShellEnvironment(),
+        signal,
       },
     );
+    const closed = new Promise<void>((resolve) => invocation.child.once("close", () => resolve()));
     invocation.child.stdin?.on("error", () => {});
     invocation.child.stdin?.end(encoded);
     let result;
@@ -305,8 +314,19 @@ export class DesktopTools {
         );
       }
       throw error;
+    } finally {
+      await closed;
     }
     return result;
+  }
+  /** Fixed main-only gesture. Neither the model nor renderer can supply a target or coordinates. */
+  async pulseCursor(signal?: AbortSignal): Promise<CursorPulseResult> {
+    const result = await this.invoke(
+      { action: "nudge_cursor" },
+      { stagPeriodicMovement: true },
+      signal,
+    );
+    return cursorPulseSchema.parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
   }
   async execute(raw: unknown, approved = false): Promise<ToolResult> {
     const input = desktopArguments.parse(raw);

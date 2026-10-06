@@ -12,13 +12,20 @@ public static class StagWindow {
     public static bool BlockFocus, ChangeAfterMove, ChangeAfterCapture, MoveAfterCapture;
     public static bool LoseFocusAfterMove, ChangeProcessAfterFocus, ChangeAfterFirstClick;
     public static int LoseFocusAfterKeys;
+    public static int CursorX = 10, CursorY = 20, CursorReads;
+    public static bool ButtonsHeld, UserMovesAfterNudge, MoveDuringCheck, BlockDestination, ButtonsAfterNudge;
     public static IntPtr HitWindow = new IntPtr(4242);
     public static IntPtr Foreground = new IntPtr(4242);
     public static bool SetProcessDPIAware() { return true; }
     public static bool IsWindowVisible(IntPtr window) { return window != IntPtr.Zero; }
     public static uint WindowProcessId(IntPtr window) { return (uint)window.ToInt64(); }
     public static IntPtr GetAncestor(IntPtr window, uint flags) { return window; }
-    public static IntPtr WindowAt(int x, int y) { return HitWindow; }
+    public static IntPtr WindowAt(int x, int y) { return BlockDestination && x == 12 ? new IntPtr(9001) : HitWindow; }
+    public static int[] Cursor() {
+        if (MoveDuringCheck && ++CursorReads == 2) CursorX++;
+        return new int[] { CursorX, CursorY };
+    }
+    public static bool ButtonsPressed() { return ButtonsHeld || (ButtonsAfterNudge && Events.Count > 0); }
     public static int[] Bounds(IntPtr window) {
         return new int[] { MoveAfterCapture && Events.Contains("capture:" + window) ? -190 : -200, 0, 800, 600 };
     }
@@ -39,6 +46,8 @@ public static class StagWindow {
     }
     public static bool SetCursorPos(int x, int y) {
         Events.Add("cursor:" + x + "," + y);
+        CursorX = UserMovesAfterNudge ? 400 : x;
+        CursorY = y;
         if (ChangeAfterMove) HitWindow = new IntPtr(9001);
         if (LoseFocusAfterMove) Foreground = new IntPtr(9001);
         return true;
@@ -308,4 +317,69 @@ Assert-Denied @{ action = 'screenshot'; processId = 4242 } @('capture:4242')
 # Rejection never expands the list; the next allowed operation still succeeds.
 $null = Invoke-DesktopContract @{ action = 'send_keys'; processId = 4242; keys = '^s' }
 Assert-Events @('focus:4242', 'keys:^s')
+
+# Periodic gesture runs the production dispatcher, without real windows or input APIs.
+function Reset-PulseFixture {
+    [StagWindow]::Foreground = [IntPtr]4242
+    [StagWindow]::HitWindow = [IntPtr]4242
+    [StagWindow]::CursorX = 10
+    [StagWindow]::CursorY = 20
+    [StagWindow]::CursorReads = 0
+    [StagWindow]::ButtonsHeld = $false
+    [StagWindow]::UserMovesAfterNudge = $false
+    [StagWindow]::MoveDuringCheck = $false
+    [StagWindow]::BlockDestination = $false
+    [StagWindow]::ButtonsAfterNudge = $false
+    [StagWindow]::LoseFocusAfterMove = $false
+    [StagWindow]::ChangeAfterMove = $false
+}
+function Assert-Pulse([bool]$moved, [string[]]$events = @()) {
+    $result = Invoke-DesktopContract @{ action = 'nudge_cursor'; stagPeriodicMovement = $true } | ConvertFrom-Json
+    if ($result.moved -ne $moved) { throw 'Unexpected movement result.' }
+    Assert-Events $events
+}
+Reset-PulseFixture
+Assert-Denied @{ action = 'nudge_cursor' }
+foreach ($processId in @(4242, 5252, 6262, 7272)) {
+    Reset-PulseFixture
+    [StagWindow]::Foreground = [IntPtr]$processId
+    [StagWindow]::HitWindow = [IntPtr]$processId
+    Assert-Pulse $true @('cursor:12,20', 'cursor:10,20')
+}
+foreach ($processId in @(8383, 8484, 8585, 9001, 9002, 9003, 9005)) {
+    Reset-PulseFixture
+    [StagWindow]::Foreground = [IntPtr]$processId
+    [StagWindow]::HitWindow = [IntPtr]$processId
+    Assert-Pulse $false
+}
+foreach ($flag in @('ButtonsHeld', 'MoveDuringCheck', 'BlockDestination')) {
+    Reset-PulseFixture
+    [StagWindow]::$flag = $true
+    Assert-Pulse $false
+}
+Reset-PulseFixture
+[StagWindow]::HitWindow = [IntPtr]9001
+Assert-Pulse $false
+Reset-PulseFixture
+$originalSignature = $global:StagSignatures[$global:StagProcesses[4242].Path]
+$global:StagSignatures[$global:StagProcesses[4242].Path] = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [StagCertificate]::new('Synthetic wrong publisher') }
+Assert-Pulse $false
+$global:StagSignatures[$global:StagProcesses[4242].Path] = $originalSignature
+$originalProduct = $global:StagProcesses[4242].FileVersionInfo.ProductName
+$global:StagProcesses[4242].FileVersionInfo.ProductName = 'Synthetic wrong product'
+Assert-Pulse $false
+$global:StagProcesses[4242].FileVersionInfo.ProductName = $originalProduct
+foreach ($flag in @('UserMovesAfterNudge', 'ButtonsAfterNudge', 'LoseFocusAfterMove', 'ChangeAfterMove')) {
+    Reset-PulseFixture
+    [StagWindow]::$flag = $true
+    Assert-Pulse $true @('cursor:12,20')
+}
+Reset-PulseFixture
+[StagWindow]::CursorX = 599
+Assert-Pulse $true @('cursor:597,20', 'cursor:599,20')
+Reset-PulseFixture
+[StagWindow]::CursorX = -199
+Assert-Pulse $true @('cursor:-197,20', 'cursor:-199,20')
+Reset-PulseFixture
+Assert-Pulse $true @('cursor:12,20', 'cursor:10,20')
 Write-Output "Native desktop dispatcher: $contracts synthetic contracts OK; no real desktop APIs executed."
