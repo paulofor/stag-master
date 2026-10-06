@@ -598,7 +598,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             ),
           )
         ) {
-          response(thread, turn, "Fixture: contexto de negócio não preservado.");
+          response(thread, turn, "Fixture: contexto da solicitação não preservado.");
         } else response(thread, turn, engineeringScenario.response);
         break;
       }

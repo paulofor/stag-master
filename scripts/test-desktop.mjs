@@ -113,6 +113,8 @@ try {
     USERPROFILE: gitTest.home,
     XDG_CONFIG_HOME: gitTest.env.XDG_CONFIG_HOME,
   });
+  // Reuse the fixture's isolated persistence so reconnect exercises a surviving thread.
+  if (process.platform !== "win32") env.STAG_FIXTURE_STATE = join(dir, "app-server-state.json");
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
@@ -125,9 +127,16 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("button", { name: "Entrar com ChatGPT" })).toBeVisible();
+  // ready marks the handshake; Windows still issues account/read after sandbox setup.
+  // With this fresh, unauthenticated home: account/read, plus setupStart on Windows.
   await expect
-    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).connection))
-    .toBe("ready");
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = await window.stag.getSnapshot();
+        return { connection: state.connection, requests: state.metrics.requests };
+      }),
+    )
+    .toEqual({ connection: "ready", requests: process.platform === "win32" ? 2 : 1 });
   const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());
   const accountMenu = page.getByRole("button", { name: "Conta e conexão", exact: true });
   await accountMenu.click();
@@ -449,8 +458,23 @@ try {
       "local-remote-proxy",
       "local-unknown-database",
       "local-untrusted-override",
+      "development-menu",
+      "development-clarified",
+      "development-known-context",
+      "development-homologation",
+      "development-conflict",
+      "development-tenant-boundary",
+      "development-untrusted-override",
     ]) {
       const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
+      if (scenario.context) {
+        await page.getByLabel("Mensagem para o assistente").fill(scenario.context);
+        await page.getByRole("button", { name: "Enviar mensagem" }).click();
+        await expect
+          .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+          .toBe(false);
+        await page.evaluate(() => window.stag.request({ type: "connect" }));
+      }
       await page.getByLabel("Mensagem para o assistente").fill(scenario.input);
       await page.getByRole("button", { name: "Enviar mensagem" }).click();
       await expect(page.getByText(scenario.response, { exact: true })).toBeVisible();

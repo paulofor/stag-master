@@ -154,6 +154,43 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+
+it("handshake pronto ainda pode ter configuração Windows pendente antes de account/read", async () => {
+  const before = service.snapshot().metrics.requests;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let setupPending = false;
+  const original = RpcClient.prototype.call;
+  const spy = vi.spyOn(RpcClient.prototype, "call").mockImplementation(async function <T>(
+    this: RpcClient,
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (method === "windowsSandbox/setupStart") {
+      setupPending = true;
+      await gate;
+    }
+    return original.call(this, method, params) as Promise<T>;
+  });
+  // Hold only the post-handshake setup; never shorten process startup deadlines.
+  const connecting = service.request({ type: "connect" });
+  try {
+    await vi.waitFor(() => expect(setupPending).toBe(true));
+    expect(service.snapshot().connection).toBe("ready");
+    expect(service.snapshot().metrics.requests).toBe(before + 1);
+    release();
+    await connecting;
+    expect(service.snapshot().account).toBeNull();
+    expect(service.snapshot().metrics.requests).toBe(before + 2);
+    expect(service.snapshot().error).toBeNull();
+  } finally {
+    release();
+    await connecting.finally(() => spy.mockRestore());
+  }
+});
+
 describe("vídeo para as anotações do projeto", () => {
   const attach = async () => {
     await service.request({ type: "selectVideo" });
@@ -1243,11 +1280,21 @@ describe("engenharia e limite de assuntos", () => {
   it.each([
     ["especialização", engineeringInstructions],
     [
-      "permissão local",
-      "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento local são permitidas",
+      "desenvolvimento e homologação",
+      "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento ou homologação são permitidas",
     ],
+    [
+      "SSO corporativo",
+      "SSO, banco corporativo, VPN ou destino remoto não comprovam produção nem tornam o pedido malicioso",
+    ],
+    [
+      "esclarecimento após recusa",
+      "reavalie com esse contexto; não repita a recusa anterior como regra",
+    ],
+    ["trabalho independente", "continue a inspeção e as correções locais independentes"],
     ["isolamento", "Localhost sozinho não comprova isolamento"],
     ["ativação explícita", "perfil/flag explícito e desligado por padrão"],
+    ["falha fechada", "falhe de forma fechada sem liberar acesso"],
   ])("o harness detecta perda parcial do contrato e recupera: %s", async (_name, fragment) => {
     await ready();
     const scenario = engineeringCorpus.scenarios.find((s) => s.id === "local-auth")!;
@@ -1281,6 +1328,40 @@ describe("engenharia e limite de assuntos", () => {
     ).toContain(cyberSafetyInstructions);
     expect(service.snapshot().mode).toBe("project");
     expect(service.snapshot().approvals).toEqual([]);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+
+  it("preserva esclarecimento de desenvolvimento ao retomar sem transferir contexto a outra conversa", async () => {
+    await ready();
+    const scenario = engineeringCorpus.scenarios.find((s) => s.id === "development-clarified")!;
+    const missingContext = "Fixture: contexto da solicitação não preservado.";
+    const initial = service.snapshot().metrics;
+    // A terse follow-up alone must not inherit a target or authorization from another thread.
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    await send(scenario.context!);
+    await complete();
+    const threadId = service.snapshot().threadId;
+    await service.request({ type: "connect" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
+    expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
+    const snapshot = service.snapshot();
+    expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
+    expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
+    expect(service.snapshot().metrics.failures).toBe(initial.failures);
+    await service.request({ type: "newChat" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).not.toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().mode).toBe("project");
     expect(desktop.execute).not.toHaveBeenCalled();
     expect(browser.execute).not.toHaveBeenCalled();
   });
