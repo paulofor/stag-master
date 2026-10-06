@@ -2903,6 +2903,126 @@ describe("fluxo local do assistente", () => {
       await complete();
       expect(desktop.execute).toHaveBeenCalledOnce();
     });
+    it("abre console ausente, confirma reconexão separadamente e verifica estado pela mesma fila", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      let visible = false;
+      let connected = false;
+      desktop.execute.mockImplementation(async (raw, approved) => {
+        const args = raw as DesktopArguments;
+        if (args.action === "open_forticlient") {
+          expect(approved).toBe(true);
+          visible = true;
+        } else if (args.action === "click") {
+          expect(approved).toBe(true);
+          expect(visible).toBe(true);
+          connected = true;
+        }
+        return {
+          success: true,
+          contentItems: [{ type: "inputText", text: JSON.stringify({ visible, connected }) }],
+        };
+      });
+      await send("desktop forticlient abrir reconectar duplicado");
+      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+      expect(visible).toBe(false);
+      expect(service.snapshot().approvals[0].detail).toContain("somente para a abertura");
+      await service.request({
+        type: "answer",
+        id: service.snapshot().approvals[0].id,
+        accept: true,
+      });
+      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+      expect(service.snapshot().approvals[0].detail).toContain("Reconectar o perfil VPN sintético");
+      expect(visible).toBe(true);
+      expect(connected).toBe(false);
+      await approve(true);
+      expect(connected).toBe(true);
+      expect(desktop.execute.mock.calls.map(([raw]) => (raw as DesktopArguments).action)).toEqual([
+        "list_windows",
+        "open_forticlient",
+        "list_windows",
+        "screenshot",
+        "click",
+        "screenshot",
+      ]);
+      expect(service.snapshot().items.at(-1)?.text).toContain("estado visível conferido");
+    });
+    it("recusa abertura sem iniciar reconexão, recupera e mantém idempotência", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send("desktop forticlient abrir reconectar duplicado");
+      await approve(false);
+      expect(desktop.execute).toHaveBeenCalledExactlyOnceWith({ action: "list_windows" });
+      desktop.execute.mockClear();
+      await send("desktop forticlient abrir duplicado");
+      await approve(true);
+      expect(desktop.execute).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ action: "open_forticlient" }),
+        true,
+      );
+    });
+    it.each(["stop", "newChat", "revoke", "disconnect"])(
+      "descarta abertura pendente ao %s e recusa aprovação antiga",
+      async (control) => {
+        await ready();
+        await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+        await send("desktop forticlient abrir");
+        await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+        const id = service.snapshot().approvals[0].id;
+        if (control === "disconnect") await rpc.shutdown();
+        else {
+          await service.request({ type: "stop" });
+          await complete();
+          if (control === "revoke") await service.request({ type: "preferences", mode: "project" });
+          else if (control === "newChat") await service.request({ type: "newChat" });
+        }
+        await vi.waitFor(() => expect(service.snapshot().approvals).toEqual([]));
+        await expect(service.request({ type: "answer", id, accept: true })).rejects.toThrow(
+          "já foi resolvido",
+        );
+        expect(desktop.execute).not.toHaveBeenCalled();
+      },
+    );
+    it.each(["read", "project"] as const)(
+      "não abre FortiClient em %s nem herda autorização de outro thread",
+      async (mode) => {
+        await ready();
+        await service.request({ type: "preferences", mode });
+        await send("desktop forticlient abrir forçar");
+        await complete();
+        expect(desktop.execute).not.toHaveBeenCalled();
+        expect(desktop.confirmationReason).not.toHaveBeenCalled();
+        expect(service.snapshot().approvals).toEqual([]);
+        await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+        await send("desktop forticlient abrir");
+        await approve(true);
+        await service.request({ type: "newChat" });
+        await send("desktop forticlient abrir forçar");
+        await complete();
+        expect(desktop.execute).toHaveBeenCalledOnce();
+        expect(service.snapshot().approvals).toEqual([]);
+      },
+    );
+    it("falha ao abrir após confirmação encerra o request e permite nova tentativa", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send("desktop forticlient abrir reconectar");
+      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+      // The first list runs before opening; fail the next invocation, the approved opening.
+      desktop.execute.mockRejectedValueOnce(new Error("Instalação FortiClient sintética mudou."));
+      await approve(true);
+      expect(
+        desktop.execute.mock.calls.some(([raw]) => (raw as DesktopArguments).action === "click"),
+      ).toBe(false);
+      expect(service.snapshot().metrics.failures).toBeGreaterThan(0);
+      await send("desktop forticlient abrir");
+      await approve(true);
+      expect(desktop.execute.mock.calls.at(-1)).toEqual([
+        expect.objectContaining({ action: "open_forticlient" }),
+        true,
+      ]);
+    });
     it.each(["conectar", "texto", "atalho"])(
       "confirma %s declarado routine uma vez, permite recusa e recupera",
       async (probe) => {
@@ -2990,15 +3110,37 @@ describe("fluxo local do assistente", () => {
       await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
       await send("desktop forticlient consultar");
       await complete();
+      const startedCalls =
+        await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
       await service.request({ type: "connect" });
       const calls =
         await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
       const resume = calls.find((call) => call.method === "thread/resume");
       expect(resume?.params?.developerInstructions).toContain("No FortiClient");
       expect(resume?.params?.developerInstructions).toContain("mesmo declarados routine");
+      expect(resume?.params?.developerInstructions).toContain("open_forticlient");
+      expect(resume?.params).not.toHaveProperty("dynamicTools");
+      const start = startedCalls.find((call) => call.method === "thread/start");
+      expect(start?.params?.dynamicTools).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "windows_desktop",
+            inputSchema: expect.objectContaining({
+              properties: expect.objectContaining({
+                action: expect.objectContaining({
+                  enum: expect.arrayContaining(["open_forticlient"]),
+                }),
+              }),
+            }),
+          }),
+        ]),
+      );
       await send("desktop forticlient consultar");
       await complete();
       expect(desktop.execute).toHaveBeenCalledTimes(2);
+      await send("desktop forticlient abrir");
+      await approve(true);
+      expect(desktop.execute).toHaveBeenCalledTimes(3);
     });
   });
   it("edita SQL no DBeaver só com consentimento da conversa e sem nova aprovação rotineira", async () => {

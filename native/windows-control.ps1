@@ -12,6 +12,24 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 public static class StagWindow {
+    // Fixed FortiClient launcher: no shell, arguments, service control or tray automation.
+    public static string[] ProgramDirectories() {
+        return new string[] {
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)
+        };
+    }
+    public static IDisposable LockExecutable(string path) {
+        return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+    }
+    public static void OpenFortiClient(string path) {
+        var start = new System.Diagnostics.ProcessStartInfo(path);
+        start.UseShellExecute = false;
+        start.WorkingDirectory = Path.GetDirectoryName(path);
+        using (var process = System.Diagnostics.Process.Start(start)) {
+            if (process == null) throw new Exception("STAG_FORTICLIENT_DENIED: Console launch failed.");
+        }
+    }
     [StructLayout(LayoutKind.Sequential)] private struct Point { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -71,6 +89,73 @@ public static class StagWindow {
 }
 '@
 [void][StagWindow]::SetProcessDPIAware()
+
+function Get-StagFortiClientExecutable {
+    # Known Windows folders, never environment paths or values supplied by the model/renderer.
+    foreach ($root in @([StagWindow]::ProgramDirectories() | Select-Object -Unique)) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not [IO.Path]::IsPathRooted($root)) { continue }
+        $path = $root
+        $missing = $false
+        foreach ($segment in @('', 'Fortinet', 'FortiClient', 'FortiClient.exe')) {
+            if ($segment) { $path = [IO.Path]::Combine($path, $segment) }
+            if (-not (Test-Path -LiteralPath $path)) { $missing = $true; break }
+            try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
+            catch { throw 'STAG_FORTICLIENT_DENIED: Instalacao indisponivel.' }
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $item.PSIsContainer -ne ($segment -ne 'FortiClient.exe') -or
+                $item.FullName -ine [IO.Path]::GetFullPath($path)) {
+                throw 'STAG_FORTICLIENT_DENIED: Caminho de instalacao nao reconhecido.'
+            }
+        }
+        if ($missing) { continue }
+        if ($item.Name -ine 'FortiClient.exe' -or
+            [string]$item.VersionInfo.ProductName -notmatch '^FortiClient(?: VPN| Standalone)?$') {
+            throw 'STAG_FORTICLIENT_DENIED: Produto nao reconhecido.'
+        }
+        try { $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName -ErrorAction Stop }
+        catch { throw 'STAG_FORTICLIENT_DENIED: Assinatura indisponivel.' }
+        if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -notmatch '^Fortinet,? Inc\.?$') {
+            throw 'STAG_FORTICLIENT_DENIED: Assinatura do fornecedor nao reconhecida.'
+        }
+        return $item.FullName
+    }
+    throw 'STAG_FORTICLIENT_UNAVAILABLE: Console oficial nao encontrado.'
+}
+
+# Opening a tray-only console is a fixed, separately approved operation. It never interacts with Explorer/FortiTray.
+if ($request.action -eq 'open_forticlient') {
+    if ($request.stagCheckOnly -ne $true -and
+        ($request.stagCriticalApproved -isnot [bool] -or $request.stagCriticalApproved -ne $true)) {
+        throw 'STAG_DESKTOP_APPROVAL_REQUIRED: Abertura do FortiClient requer confirmacao especifica.'
+    }
+    try { $executable = Get-StagFortiClientExecutable }
+    catch {
+        if ($_.Exception.Message -match 'STAG_FORTICLIENT_UNAVAILABLE') {
+            throw 'STAG_FORTICLIENT_UNAVAILABLE: Console oficial nao encontrado.'
+        }
+        throw 'STAG_FORTICLIENT_DENIED: Instalacao oficial nao pode ser verificada.'
+    }
+    if ($request.stagCheckOnly -eq $true) {
+        '{"requiresConfirmation":true}'
+        return
+    }
+    $lease = $null
+    try {
+        # Prevent replacing/writing the executable while its identity is rechecked and it is started.
+        $lease = [StagWindow]::LockExecutable($executable)
+        if ((Get-StagFortiClientExecutable) -ine $executable) {
+            throw 'STAG_FORTICLIENT_DENIED: Instalacao mudou apos verificacao.'
+        }
+        [StagWindow]::OpenFortiClient($executable)
+    } catch {
+        throw 'STAG_FORTICLIENT_DENIED: Console oficial nao pode ser aberto.'
+    } finally {
+        if ($lease) { $lease.Dispose() }
+    }
+    '{"opened":true}'
+    return
+}
 
 function Get-StagAllowedProcess([int]$processId) {
     try { $target = Get-Process -Id $processId -ErrorAction Stop }

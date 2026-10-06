@@ -3,6 +3,7 @@ import {
   DesktopTools,
   desktopArguments,
   desktopConfirmationReason,
+  desktopApproval,
   withoutAssistantWindow,
   windowsPowerShellEnvironment,
   type DesktopArguments,
@@ -183,6 +184,88 @@ describe("confirmação pelo efeito da interação", () => {
     { action: "click", processId: 8383, x: 0, y: 0, stagCheckOnly: true },
   ])("recusa classificação inválida ou metadados em operação sem contexto: %j", (input) => {
     expect(desktopArguments.safeParse(input).success).toBe(false);
+  });
+});
+
+describe("abertura do console FortiClient sem automação do ícone", () => {
+  const input: DesktopArguments = {
+    action: "open_forticlient",
+    risk: "critical",
+    intent: "Abrir console para conferir a VPN sintética",
+  };
+  it("inspeciona instalação sem abrir, exige confirmação e não permite efeito seguinte", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: '{"requiresConfirmation":true}' }), { child }),
+    );
+    const reason = await new DesktopTools("unused", "win32").confirmationReason(input);
+    expect(reason).toContain("somente para a abertura");
+    expect(desktopApproval(input, reason).detail).toContain(input.intent);
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      ...input,
+      stagCheckOnly: true,
+    });
+  });
+  it("abre somente no caminho aprovado e orienta verificar o estado sem afirmar conexão", async () => {
+    const tools = new DesktopTools("unused", "win32");
+    await expect(tools.execute(input)).rejects.toThrow("confirmação específica");
+    expect(runScript).not.toHaveBeenCalled();
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: '{"opened":true}' }), { child }),
+    );
+    const result = await tools.execute(input, true);
+    expect(result.success).toBe(true);
+    expect(result.contentItems[0]).toMatchObject({
+      text: expect.stringContaining("Isso não comprova conexão da VPN"),
+    });
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      ...input,
+      stagCriticalApproved: true,
+    });
+  });
+  it.each([
+    { ...input, risk: "routine" },
+    { action: "open_forticlient", risk: "critical" },
+    ...["processId", "path", "args", "profile", "stagCriticalApproved", "stagCheckOnly"].map(
+      (key) => ({ ...input, [key]: key === "processId" ? 8383 : "synthetic" }),
+    ),
+  ])("recusa controle arbitrário e marcadores externos: %j", (args) => {
+    expect(desktopArguments.safeParse(args).success).toBe(false);
+  });
+  it.each([
+    ["STAG_FORTICLIENT_UNAVAILABLE", "não foi encontrado"],
+    ["STAG_FORTICLIENT_DENIED", "instalação verificada"],
+  ])("falha %s preserva diagnóstico sem expor caminho ou configuração", async (code, expected) => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.reject(
+          Object.assign(new Error("synthetic error"), { stderr: `${code}: PRIVATE_PATH` }),
+        ),
+        { child },
+      ),
+    );
+    const error = await new DesktopTools("unused", "win32")
+      .confirmationReason(input)
+      .catch((error: Error) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(expected);
+    expect(JSON.stringify(error)).not.toContain("PRIVATE_PATH");
+    expect((error as Error).message).not.toContain("PRIVATE_PATH");
+    expect(child.once).toHaveBeenCalledWith("close", expect.any(Function));
+  });
+  it.each([{}, { requiresConfirmation: false }, { requiresConfirmation: true, path: "PRIVATE" }])(
+    "inspeção inválida falha fechada: %j",
+    async (inspection) => {
+      runScript.mockImplementationOnce(() =>
+        Object.assign(Promise.resolve({ stdout: JSON.stringify(inspection) }), { child }),
+      );
+      await expect(new DesktopTools("unused", "win32").confirmationReason(input)).rejects.toThrow();
+    },
+  );
+  it("não aceita resposta que declare conexão sem evidência", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: '{"opened":true,"connected":true}' }), { child }),
+    );
+    await expect(new DesktopTools("unused", "win32").execute(input, true)).rejects.toThrow();
   });
 });
 

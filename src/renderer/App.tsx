@@ -974,7 +974,9 @@ export function App() {
               </p>
               <p>
                 No FortiClient, o STAG pode consultar o estado da VPN durante a tarefa. Cliques,
-                digitação e atalhos sempre pedem confirmação, inclusive para reconectar a VPN.
+                digitação e atalhos sempre pedem confirmação, inclusive para reconectar a VPN. Se
+                houver apenas o ícone, pode abrir o console oficial com confirmação própria. Senha e
+                MFA exigem sua interação manual.
               </p>
               <p className="muted small">
                 A mudança inicia uma nova conversa. Seu projeto continua selecionado.

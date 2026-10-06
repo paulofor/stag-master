@@ -887,7 +887,52 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
           break;
         }
-        if (input.startsWith("desktop forticlient")) {
+        if (input.startsWith("desktop forticlient abrir")) {
+          const opening = {
+            action: "open_forticlient",
+            risk: "critical",
+            intent: "Abrir console oficial para conferir o perfil VPN sintético",
+          };
+          const connect = () => {
+            desktopCall(thread, turn, { action: "list_windows" }, () => {
+              desktopCall(thread, turn, { action: "screenshot", processId: 8383 }, () => {
+                desktopCall(
+                  thread,
+                  turn,
+                  {
+                    action: "click",
+                    processId: 8383,
+                    x: 120,
+                    y: 180,
+                    risk: "critical",
+                    intent: "Reconectar o perfil VPN sintético no FortiClient",
+                  },
+                  () => {
+                    desktopCall(thread, turn, { action: "screenshot", processId: 8383 }, () => {
+                      response(
+                        thread,
+                        turn,
+                        "VPN sintética: estado visível conferido após reconexão.",
+                      );
+                    });
+                  },
+                );
+              });
+            });
+          };
+          const open = () =>
+            desktopCall(
+              thread,
+              turn,
+              opening,
+              input.includes("reconectar") ? connect : null,
+              {},
+              input.includes("duplicado"),
+            );
+          if (input.includes("reconectar"))
+            desktopCall(thread, turn, { action: "list_windows" }, open);
+          else open();
+        } else if (input.startsWith("desktop forticlient")) {
           const action = input.includes("consultar")
             ? "screenshot"
             : input.includes("texto")

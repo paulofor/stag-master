@@ -14,6 +14,13 @@ const interactionContext = {
 };
 export const desktopArguments = z.discriminatedUnion("action", [
   z.object({ action: z.literal("list_windows") }).strict(),
+  z
+    .object({
+      action: z.literal("open_forticlient"),
+      risk: z.literal("critical"),
+      intent: z.string().trim().min(1).max(500),
+    })
+    .strict(),
   z.object({ action: z.literal("screenshot"), processId: targetProcess }).strict(),
   z.object({ action: z.literal("focus_window"), processId: targetProcess }).strict(),
   z
@@ -69,8 +76,8 @@ export const desktopTool = {
   type: "function",
   name: "windows_desktop",
   description:
-    "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. No DBeaver, inspecionar a interface e editar SQL sem executá-lo são rotina; alterar dados/esquema, confirmar transações, importar/exportar ou enviar dados, usar credenciais e ações de efeito incerto exigem confirmação específica com conexão, alvo e efeito concretos. Não presuma que a conexão é local ou de teste. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
-    " No FortiClient, consulte o estado visível da VPN durante a tarefa por list_windows, foco, captura e rolagem. Clique, digitação e atalhos sempre exigem confirmação específica, mesmo declarados routine. Reconectar/desconectar VPN, usar credenciais ou alterar configurações é critical: informe perfil/conexão e efeito concreto em intent. Capture depois para conferir o estado; não presuma conectividade. Não leia nem armazene senhas, tokens ou configuração VPN; senha/MFA, SSO externo e bloqueio corporativo requerem ação manual. Não desative proteção/EMS nem ignore certificados; não controle serviços Fortinet ou FortiTray, nem use shell/outro navegador como alternativa. Não prometa monitoramento permanente ou reconexão em segundo plano após a tarefa." +
+    "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações, exceto open_forticlient, exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o FortiClient estiver apenas no ícone e não aparecer, use open_forticlient com risk critical e intent para solicitar a abertura do console oficial instalado. Essa ação fixa não recebe processId, caminho, argumentos ou perfil; verifica produto/assinatura Fortinet e exige confirmação própria. Depois use list_windows e screenshot; a abertura não comprova conexão e não autoriza as interações seguintes. Se o schema do histórico não incluir open_forticlient, peça uma nova conversa Windows com Autorizar desktop. Para os outros programas, peça ao cliente para abri-los manualmente ou verificar a instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. No DBeaver, inspecionar a interface e editar SQL sem executá-lo são rotina; alterar dados/esquema, confirmar transações, importar/exportar ou enviar dados, usar credenciais e ações de efeito incerto exigem confirmação específica com conexão, alvo e efeito concretos. Não presuma que a conexão é local ou de teste. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
+    " No FortiClient, consulte o estado visível da VPN durante a tarefa por list_windows, foco, captura e rolagem. Clique, digitação e atalhos sempre exigem confirmação específica, mesmo declarados routine. Reconectar/desconectar VPN, usar credenciais ou alterar configurações é critical: informe perfil/conexão e efeito concreto em intent. Se a tela mostrar Conectado ou Desconectar, preserve a conexão; não clique em Desconectar para tentar reconectar. Capture depois para conferir o estado; não presuma conectividade. Não leia nem armazene senhas, tokens ou configuração VPN; senha/MFA, SSO externo e bloqueio corporativo requerem ação manual. Não desative proteção/EMS nem ignore certificados; não controle serviços Fortinet ou FortiTray, nem use shell/outro navegador como alternativa. Não prometa monitoramento permanente ou reconexão em segundo plano após a tarefa." +
     cyberToolSafetyDescription +
     engineeringToolDescription,
   inputSchema: {
@@ -80,6 +87,7 @@ export const desktopTool = {
         type: "string",
         enum: [
           "list_windows",
+          "open_forticlient",
           "focus_window",
           "send_keys",
           "type_text",
@@ -92,7 +100,7 @@ export const desktopTool = {
         type: "integer",
         minimum: 1,
         description:
-          "Obrigatório em toda ação exceto list_windows. Processo permitido obtido em list_windows; validado novamente antes da execução.",
+          "Obrigatório em toda ação exceto list_windows e open_forticlient. Processo permitido obtido em list_windows; validado novamente antes da execução.",
       },
       keys: { type: "string", description: "Obrigatório para send_keys; sintaxe SendKeys .NET." },
       text: {
@@ -127,23 +135,33 @@ export const desktopTool = {
         type: "string",
         enum: ["routine", "critical"],
         description:
-          "Em click/type_text/send_keys: routine para navegação/edição local reversível; critical para exclusão, envio externo, publicação, pagamentos, credenciais ou mudanças no sistema. Sem contexto há confirmação.",
+          "Em open_forticlient: obrigatoriamente critical. Em click/type_text/send_keys: routine para navegação/edição local reversível; critical para exclusão, envio externo, publicação, pagamentos, credenciais ou mudanças no sistema. Sem contexto há confirmação.",
       },
       intent: {
         type: "string",
         minLength: 1,
         maxLength: 500,
-        description: "Em click/type_text/send_keys: efeito concreto esperado e alvo da interação.",
+        description:
+          "Em open_forticlient (obrigatório) e click/type_text/send_keys: efeito concreto esperado e alvo da interação.",
       },
     },
     required: ["action"],
-    anyOf: [{ properties: { action: { const: "list_windows" } } }, { required: ["processId"] }],
+    anyOf: [
+      { properties: { action: { const: "list_windows" } } },
+      {
+        properties: { action: { const: "open_forticlient" }, risk: { const: "critical" } },
+        required: ["risk", "intent"],
+      },
+      { required: ["processId"] },
+    ],
     additionalProperties: false,
   },
 };
 
 /** Coordinates alone cannot establish intent. Legacy or uncertain interactions still ask. */
 export function desktopConfirmationReason(input: DesktopArguments): string | null {
+  if (input.action === "open_forticlient")
+    return "Abrir o console oficial do FortiClient para consultar ou reconectar a VPN. A configuração do próprio FortiClient pode iniciar uma conexão ao abrir. Esta confirmação vale somente para a abertura; qualquer interação seguinte exige nova confirmação.";
   if (input.action !== "click" && input.action !== "type_text" && input.action !== "send_keys")
     return null;
   if (!input.risk || !input.intent)
@@ -183,6 +201,8 @@ function desktopOperationDetail(input: DesktopArguments): string {
   switch (input.action) {
     case "list_windows":
       return "Listar somente janelas de Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient.";
+    case "open_forticlient":
+      return "Abrir somente o FortiClient oficial instalado, sem argumentos ou controle do ícone/barra de tarefas. Depois, listar e capturar a janela para conferir perfil e estado da VPN.";
     case "screenshot":
       return `Capturar somente a janela do processo ${input.processId}.`;
     case "focus_window":
@@ -240,6 +260,13 @@ export class DesktopTools {
   async confirmationReason(raw: unknown): Promise<string | null> {
     const input = desktopArguments.parse(raw);
     const reason = desktopConfirmationReason(input);
+    if (input.action === "open_forticlient") {
+      const result = await this.invoke(input, { stagCheckOnly: true });
+      z.object({ requiresConfirmation: z.literal(true) })
+        .strict()
+        .parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
+      return reason;
+    }
     if (input.action !== "click" && input.action !== "type_text" && input.action !== "send_keys")
       return null;
     // Inspect the signed target through the same driver, without input events or window capture.
@@ -307,6 +334,16 @@ export class DesktopTools {
           "A interação no FortiClient exige confirmação específica. Nenhuma entrada foi enviada. Liste/capture o alvo novamente e solicite uma nova ação com perfil/conexão e efeito concretos; não contorne a confirmação.",
         );
       }
+      if (/STAG_FORTICLIENT_UNAVAILABLE/.test(detail)) {
+        throw new Error(
+          "O console oficial do FortiClient não foi encontrado nas pastas de instalação reconhecidas. Abra a Console FortiClient pelo ícone manualmente e liste as janelas novamente. Nenhuma conexão foi confirmada.",
+        );
+      }
+      if (/STAG_FORTICLIENT_DENIED/.test(detail)) {
+        throw new Error(
+          "Não foi possível abrir uma instalação verificada do FortiClient. Confira a instalação oficial ou abra o console manualmente. Não altere proteção, certificados, serviços ou políticas corporativas para contornar a falha. Nenhuma conexão foi confirmada.",
+        );
+      }
       if (/STAG_DESKTOP_DENIED/.test(detail)) {
         throw new Error(
           "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
@@ -330,7 +367,25 @@ export class DesktopTools {
   }
   async execute(raw: unknown, approved = false): Promise<ToolResult> {
     const input = desktopArguments.parse(raw);
+    if (input.action === "open_forticlient" && approved !== true)
+      throw new Error(
+        "A abertura do FortiClient exige confirmação específica. Nenhum console foi aberto.",
+      );
     const result = await this.invoke(input, approved ? { stagCriticalApproved: true } : {});
+    if (input.action === "open_forticlient") {
+      z.object({ opened: z.literal(true) })
+        .strict()
+        .parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
+      return {
+        success: true,
+        contentItems: [
+          {
+            type: "inputText",
+            text: "A abertura do console oficial do FortiClient foi solicitada. Isso não comprova conexão da VPN. Use list_windows e screenshot para conferir o perfil e o estado visível; qualquer clique, texto ou atalho requer outra confirmação. Senha/MFA/SSO externo e bloqueios corporativos exigem ação manual.",
+          },
+        ],
+      };
+    }
     if (input.action === "screenshot") {
       const capture = z
         .object({

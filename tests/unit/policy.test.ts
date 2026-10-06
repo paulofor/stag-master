@@ -102,6 +102,8 @@ describe("contrato do desktop limitado", () => {
       expect(instructions).toContain("editar SQL sem executá-lo são rotina");
       expect(instructions).toContain("Não presuma que uma conexão é local ou de teste");
       expect(instructions).toContain("No FortiClient");
+      expect(instructions).toContain("open_forticlient");
+      expect(instructions).toContain("a abertura não comprova conexão");
       expect(instructions).toContain("mesmo declarados routine");
       expect(instructions).toContain("perfil/conexão visível");
       expect(instructions).toContain("senha/MFA, SSO externo");
@@ -116,6 +118,10 @@ describe("contrato do desktop limitado", () => {
       "Clique, digitação e atalhos sempre exigem confirmação",
     );
     expect(desktopTool.inputSchema.anyOf).toContainEqual({ required: ["processId"] });
+    expect(desktopTool.inputSchema.properties.action.enum).toContain("open_forticlient");
+    expect(desktopTool.description).toContain(
+      "não recebe processId, caminho, argumentos ou perfil",
+    );
   });
 });
 

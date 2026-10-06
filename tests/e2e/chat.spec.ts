@@ -164,6 +164,50 @@ test("modo Windows exige consentimento e cancelamento preserva modo", async ({ p
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(mode).toHaveValue("windows");
 });
+test("FortiClient abre console e reconecta com confirmações distintas, recusa e recuperação", async ({
+  page,
+}, info) => {
+  if (info.project.name === "desktop") await page.setViewportSize({ width: 360, height: 600 });
+  await ready(page);
+  await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
+  const consent = await page.getByRole("dialog", { name: "Trabalhar no Windows" }).boundingBox();
+  expect(consent!.y).toBeGreaterThanOrEqual(0);
+  expect(consent!.y + consent!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  const input = page.getByLabel("Mensagem para o assistente");
+  const approval = page.getByRole("region", { name: "Solicitação do assistente" });
+  await input.fill("desktop forticlient abrir reconectar");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await expect(approval).toContainText("somente para a abertura");
+  await page.getByRole("button", { name: "Recusar", exact: true }).click();
+  await expect(approval).toHaveCount(0);
+  await expect(page.getByText("Desktop: ação recusada.", { exact: true })).toBeVisible();
+  await input.fill("desktop forticlient abrir reconectar");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await page.getByRole("button", { name: "Permitir esta ação", exact: true }).click();
+  await expect(approval).toContainText("Reconectar o perfil VPN sintético");
+  await expect(
+    page.getByText("Console sintético aberto; isso não comprova conexão da VPN.", { exact: true }),
+  ).toBeVisible();
+  const allow = page.getByRole("button", { name: "Permitir esta ação", exact: true });
+  await expect(allow).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Parar execução", exact: true })).toBeInViewport({
+    ratio: 1,
+  });
+  await page.screenshot({
+    path: `.local/screenshots/forticlient-${info.project.name}.png`,
+    fullPage: true,
+  });
+  await allow.click();
+  await expect(
+    page.getByText("VPN sintética: estado visível conferido após reconexão.", { exact: true }),
+  ).toBeVisible();
+  await expect(approval).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+});
+
 test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revogado", async ({
   page,
 }, info) => {
@@ -179,6 +223,9 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
     "inclusive para reconectar a VPN",
+  );
+  await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
+    "pode abrir o console oficial com confirmação própria",
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
     "mesmo com aprovação",

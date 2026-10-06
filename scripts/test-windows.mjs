@@ -79,6 +79,16 @@ try {
     "Sem política de processo, o script deve ser bloqueado.",
   );
   const driver = new DesktopTools(fixture);
+  const opening = {
+    action: "open_forticlient",
+    risk: "critical",
+    intent: "Abrir console VPN sintético",
+  };
+  assert.match(await driver.confirmationReason(opening), /somente para a abertura/);
+  await assert.rejects(driver.execute(opening), /confirmação específica/);
+  const opened = await driver.execute(opening, true);
+  assert.equal(opened.success, true);
+  assert.match(opened.contentItems[0].text, /Isso não comprova conexão da VPN/);
   for (const args of [
     { action: "list_windows" },
     {
