@@ -1,4 +1,25 @@
-# Matriz de homologação da versão 0.4.24
+# Matriz de homologação da versão 0.4.25
+
+## Fluxo completo com usuário provisório no desenvolvimento — versão 0.4.25
+
+Matriz definida antes dos testes. O cliente relatou que, mesmo após esclarecer o ambiente de desenvolvimento e pedir a funcionalidade completa, o assistente criou um perfil somente de leitura e desabilitou alterações. O contrato permitia adaptar o acesso, mas não distinguia as roles do usuário provisório da autoridade do desenvolvedor nem explicitava a preservação das operações de escrita e do conjunto de empresas de teste autorizado. A correção orienta implementar o fluxo solicitado, com dados e regras de negócio completos, dentro do ambiente e alcance autorizados.
+
+Lacuna concreta do harness: o corpus não cobria usuário provisório sem roles, CRUD/remessa completos, autorização para todas as empresas da base de teste ou correção de uma adaptação anterior indevidamente limitada a leitura. Reutilizar o corpus, serviço, teste de perda parcial do contrato, smoke Codex e integração Electron existentes; nenhuma whitelist ou executor novo.
+
+| Área                          | Cenário e aceite                                                                                                                                                                  | Evidência prevista                                            |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Caminho feliz                 | Usuário provisório sem roles não impede adaptar o código autorizado; orientar consulta, cadastro, edição e geração de remessa com regras e validações completas                   | Corpus sintético, contrato start/resume e descrições de tools |
+| Dados e alcance               | Todas as empresas/dados da base de desenvolvimento explicitamente autorizada são elegíveis; empresas externas ao escopo, produção e dependências não autorizadas mantêm controles | Corpus positivo e de limites, filtro existente                |
+| Correção de escopo            | Pedido de fluxo completo não se converte em somente leitura, botões desabilitados, dados reduzidos ou regras substituídas; restrição anterior deve ser reavaliada                 | Corpus, reconexão e isolamento por conversa                   |
+| Validações                    | Perfil desligado por padrão, destinos verificados, falha fechada fora do teste e reversão; modo Leitura, sandbox, consentimentos e confirmação na execução crítica preservados    | Políticas e regressões existentes de aprovação/recusa         |
+| Recuperação                   | Perda das cláusulas de autoridade, escrita, dados e recuperação detectada; reconexão restaura contrato e contexto sem transferir autorização entre conversas                      | App Server determinístico e serviço real                      |
+| Integrações e observabilidade | Pedido legítimo segue turno normal, sem erro local ou aprovação artificial; respostas e métricas conferidas sem ferramentas reais ou raciocínio bruto                             | Serviço, Codex real com provedor loopback e Electron          |
+| Segregação e dispositivos     | Apenas projetos/CODEX_HOME temporários e texto sintético; Chromium compacto/amplo/Pixel 7 e Electron Linux; nenhum acesso ao sistema ou banco citado pelo cliente                 | check + test:desktop + format:check                           |
+| Entrega                       | Diff e validações locais antes do PR; verificar jobs PR/main e instalador Windows 0.4.25                                                                                          | Workflow Desktop CI e artefato versionado                     |
+
+São testes de transmissão, filtragem e recuperação, com respostas predefinidas; não comprovam obediência semântica absoluta do LLM nem corrigem o código do sistema D-1001. Linux não comprova execução nativa Windows; essa verificação pertence ao job Windows do PR/main.
+
+Evidência local: as duas regressões de contrato falharam com as instruções anteriores e passaram após o ajuste. `npm run check` aprovou typecheck, 428 contratos, build, decoder/ASR reais, Codex isolado com provedor loopback e 78 cenários Chromium, incluindo Pixel 7 e janelas compacta/ampla. `xvfb-run -a npm run test:desktop` aprovou os quatro novos cenários pela ponte/IPC de produção, reconexão, aprovações, navegador real e recuperação. `format:check`, sintaxe do script JavaScript e diff aprovados; os três contratos de configuração do servidor também passaram. Nenhuma conta, projeto ou base corporativa real foi usada. O kernel Linux bloqueia namespaces bwrap; operações nativas de arquivo nesse sandbox e a execução Windows dependem do job Windows, sem usar publicação como teste local nem afirmar obediência semântica do modelo.
 
 ## Movimento periódico do mouse — versão 0.4.24
 

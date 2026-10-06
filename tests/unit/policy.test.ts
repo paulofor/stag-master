@@ -69,6 +69,15 @@ describe("contrato contra abuso cibernético", () => {
       expect(tool.description).toContain("SSO/banco corporativo");
       expect(tool.description).toContain("Reavalie recusas antigas após esclarecimento do cliente");
       expect(tool.description).toContain("continue o trabalho local independente");
+      expect(tool.description).toContain("roles do usuário provisório não definem a autoridade");
+      expect(tool.description).toContain("Não imponha somente leitura");
+      expect(tool.description).toContain(
+        "dados, cálculos, validações e regras de negócio completos",
+      );
+      expect(tool.description).toContain("todas as empresas de teste explicitamente autorizadas");
+      expect(tool.description).toContain(
+        "Implementar escrita não dispensa confirmar a execução crítica",
+      );
       expect(tool.description).toContain("segregação de usuários/tenants");
       expect(tool.description).toContain("produção, terceiros ou dependências fora da autorização");
       expect(tool.description).toContain("Localhost não comprova isolamento");

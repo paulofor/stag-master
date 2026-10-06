@@ -1,6 +1,6 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "description": "Assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
