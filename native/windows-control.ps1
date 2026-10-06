@@ -70,7 +70,8 @@ function Get-StagAllowedProcess([int]$processId) {
         'idea' { $product = '^IntelliJ IDEA(?: (?:Community|Ultimate) Edition)?$'; $publisher = '^JetBrains s\.r\.o\.?$' }
         'code' { $product = '^(?:Microsoft )?Visual Studio Code$'; $publisher = '^Microsoft Corporation$' }
         'dbeaver' { $product = '^DBeaver(?: Community)?$'; $publisher = '^DBeaver Corp$' }
-        default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver.' }
+        'forticlient' { $product = '^FortiClient(?: VPN| Standalone)?$'; $publisher = '^Fortinet,? Inc\.?$' }
+        default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient.' }
     }
     # A title, renamed executable or model-provided name cannot grant access.
     if (-not $target.Path -or [IO.Path]::GetFileName($target.Path) -ine ($name + '.exe') -or
@@ -143,6 +144,18 @@ function ConvertTo-StagLiteralKeys([string]$text) {
 if ($request.action -ne 'list_windows') {
     if (-not $request.processId -or [int]$request.processId -le 0) { throw 'STAG_DESKTOP_DENIED: processId obrigatorio.' }
     $target = Get-StagAllowedProcess ([int]$request.processId)
+}
+
+# Classify the verified executable, never a title, model-provided name or risk label.
+$fortiInteraction = $request.action -in @('click', 'type_text', 'send_keys') -and
+    $target -and $target.ProcessName -ieq 'FortiClient'
+if ($request.stagCheckOnly -eq $true) {
+    if ($request.action -notin @('click', 'type_text', 'send_keys')) { throw 'STAG_DESKTOP_DENIED: Inspecao invalida.' }
+    @{ processId = $target.Id; requiresConfirmation = [bool]$fortiInteraction } | ConvertTo-Json -Compress
+    return
+}
+if ($fortiInteraction -and $request.stagCriticalApproved -ne $true) {
+    throw 'STAG_DESKTOP_APPROVAL_REQUIRED: FortiClient requer confirmacao especifica antes de enviar entrada.'
 }
 
 switch ($request.action) {

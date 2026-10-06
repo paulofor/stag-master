@@ -67,7 +67,8 @@ export const desktopTool = {
   type: "function",
   name: "windows_desktop",
   description:
-    "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. No DBeaver, inspecionar a interface e editar SQL sem executá-lo são rotina; alterar dados/esquema, confirmar transações, importar/exportar ou enviar dados, usar credenciais e ações de efeito incerto exigem confirmação específica com conexão, alvo e efeito concretos. Não presuma que a conexão é local ou de teste. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
+    "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient no desktop Windows após autorização da conversa. list_windows mostra somente esses programas, identificados pelo executável, produto e assinatura do fornecedor. Todas as demais ações exigem processId de list_windows, inclusive screenshot/click/scroll. Screenshot captura apenas a janela desse processo; as coordenadas são físicas e devem usar a origem informada na captura. O driver recusa outros processos, sobreposições e atalhos globais, mesmo após aprovação. Envie um atalho por chamada; não use sequências para trocar de aplicativo. Se o programa não aparecer, peça ao cliente para abri-lo manualmente ou verificar sua instalação oficial; não contorne a lista com shell ou outra automação. Para abrir ou interagir com páginas web, inclusive localhost, use exclusivamente stag_browser no painel do STAG. Não use esta ferramenta para abrir/controlar Chrome, Edge, Firefox ou outro navegador externo; sem autorização de stag_browser, peça Autorizar navegador e aguarde. Capturas, foco, rolagem e interações rotineiras não pedem nova aprovação. Em click, type_text e send_keys, sempre informe intent (efeito concreto e alvo) e risk: routine para navegação/edição local reversível, critical para excluir dados, enviar dados ou mensagens a terceiros, publicar/deploy, pagar/comprar, usar credenciais ou alterar segurança/configuração do sistema. No DBeaver, inspecionar a interface e editar SQL sem executá-lo são rotina; alterar dados/esquema, confirmar transações, importar/exportar ou enviar dados, usar credenciais e ações de efeito incerto exigem confirmação específica com conexão, alvo e efeito concretos. Não presuma que a conexão é local ou de teste. A confirmação é por ação crítica, não autoriza outras ações. Contexto ausente, Enter/Delete, atalhos desconhecidos/compostos ou texto com quebra de linha/tabulação também exigem confirmação. Avalie o efeito na tela, não apenas o gesto; nunca marque uma ação crítica como routine nem use outra ferramenta para contornar recusa. Liste janelas antes de focar, digitar ou enviar atalhos. type_text digita texto literal; send_keys usa sintaxe .NET (ex.: ^s para Ctrl+S). Capture antes de clicar/rolar; use coordenadas físicas em pixels. click permite botão esquerdo/direito/meio e clique duplo. scroll usa delta (120 por passo, positivo sobe). Capture novamente para verificar o resultado." +
+    " No FortiClient, consulte o estado visível da VPN durante a tarefa por list_windows, foco, captura e rolagem. Clique, digitação e atalhos sempre exigem confirmação específica, mesmo declarados routine. Reconectar/desconectar VPN, usar credenciais ou alterar configurações é critical: informe perfil/conexão e efeito concreto em intent. Capture depois para conferir o estado; não presuma conectividade. Não leia nem armazene senhas, tokens ou configuração VPN; senha/MFA, SSO externo e bloqueio corporativo requerem ação manual. Não desative proteção/EMS nem ignore certificados; não controle serviços Fortinet ou FortiTray, nem use shell/outro navegador como alternativa. Não prometa monitoramento permanente ou reconexão em segundo plano após a tarefa." +
     cyberToolSafetyDescription +
     engineeringToolDescription,
   inputSchema: {
@@ -160,8 +161,10 @@ export function desktopConfirmationReason(input: DesktopArguments): string | nul
   return null;
 }
 
-export function desktopApproval(input: DesktopArguments): Pick<Approval, "title" | "detail"> {
-  const reason = desktopConfirmationReason(input);
+export function desktopApproval(
+  input: DesktopArguments,
+  reason = desktopConfirmationReason(input),
+): Pick<Approval, "title" | "detail"> {
   return {
     title: "Confirmar ação no desktop?",
     detail: [
@@ -177,7 +180,7 @@ export function desktopApproval(input: DesktopArguments): Pick<Approval, "title"
 function desktopOperationDetail(input: DesktopArguments): string {
   switch (input.action) {
     case "list_windows":
-      return "Listar somente janelas de Postman, IntelliJ IDEA, Visual Studio Code e DBeaver.";
+      return "Listar somente janelas de Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient.";
     case "screenshot":
       return `Capturar somente a janela do processo ${input.processId}.`;
     case "focus_window":
@@ -232,12 +235,34 @@ export class DesktopTools {
     private script: string,
     private platform = process.platform,
   ) {}
-  async execute(raw: unknown): Promise<ToolResult> {
+  async confirmationReason(raw: unknown): Promise<string | null> {
     const input = desktopArguments.parse(raw);
+    const reason = desktopConfirmationReason(input);
+    if (input.action !== "click" && input.action !== "type_text" && input.action !== "send_keys")
+      return null;
+    // Inspect the signed target through the same driver, without input events or window capture.
+    const result = await this.invoke(input, { stagCheckOnly: true });
+    const inspection = z
+      .object({ processId: targetProcess, requiresConfirmation: z.boolean() })
+      .strict()
+      .parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
+    if (inspection.processId !== input.processId)
+      throw new Error("A inspeção não pertence ao processo solicitado.");
+    return inspection.requiresConfirmation
+      ? "Interação no FortiClient: pode conectar/desconectar a VPN, usar credenciais ou alterar a segurança da rede. Confirme o perfil/conexão e o efeito concreto na intenção. Esta confirmação vale somente para esta ação."
+      : reason;
+  }
+  private async invoke(
+    input: DesktopArguments,
+    context: { stagCheckOnly?: true; stagCriticalApproved?: true } = {},
+  ): Promise<{ stdout: string }> {
     if (this.platform !== "win32")
       throw new Error("Controle de desktop disponível somente no Windows.");
     // JSON goes through stdin, never interpolated in shell or PowerShell code.
-    const encoded = Buffer.from(JSON.stringify(input), "utf8").toString("base64");
+    // Context is owned by main; the strict public schema rejects these internal approval markers.
+    const encoded = Buffer.from(JSON.stringify({ ...input, ...context }), "utf8").toString(
+      "base64",
+    );
     const invocation = executeFile(
       "powershell.exe",
       // Apply only to this approved subprocess; Group Policy still takes precedence.
@@ -268,14 +293,24 @@ export class DesktopTools {
           { cause: error },
         );
       }
+      if (/STAG_DESKTOP_APPROVAL_REQUIRED/.test(detail)) {
+        throw new Error(
+          "A interação no FortiClient exige confirmação específica. Nenhuma entrada foi enviada. Liste/capture o alvo novamente e solicite uma nova ação com perfil/conexão e efeito concretos; não contorne a confirmação.",
+        );
+      }
       if (/STAG_DESKTOP_DENIED/.test(detail)) {
         throw new Error(
-          "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
+          "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient. O alvo não foi autorizado ou mudou durante a ação. Liste as janelas novamente; se necessário, peça ao cliente para abrir o programa oficial ou remover a sobreposição. Não contorne o bloqueio por shell, outro aplicativo ou automação.",
           { cause: error },
         );
       }
       throw error;
     }
+    return result;
+  }
+  async execute(raw: unknown, approved = false): Promise<ToolResult> {
+    const input = desktopArguments.parse(raw);
+    const result = await this.invoke(input, approved ? { stagCriticalApproved: true } : {});
     if (input.action === "screenshot") {
       const capture = z
         .object({
@@ -300,7 +335,7 @@ export class DesktopTools {
         contentItems: [
           {
             type: "inputText",
-            text: `Janela do processo ${capture.processId}: ${width}×${height} pixels. Origem física: x=${x}, y=${y}. Para clicar/rolar, some a origem às coordenadas na imagem e use processId=${capture.processId}. Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver são permitidos.`,
+            text: `Janela do processo ${capture.processId}: ${width}×${height} pixels. Origem física: x=${x}, y=${y}. Para clicar/rolar, some a origem às coordenadas na imagem e use processId=${capture.processId}. Somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient são permitidos.`,
           },
           { type: "inputImage", imageUrl: `data:image/png;base64,${capture.imageBase64}` },
         ],

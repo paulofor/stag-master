@@ -646,8 +646,8 @@ export function App() {
               <span className={state.mode === "windows" ? "desktop-authorized" : ""}>
                 <Monitor size={14} />
                 {state.mode === "windows"
-                  ? "Desktop autorizado · Postman, IntelliJ, VS Code e DBeaver"
-                  : "Desktop · Postman, IntelliJ, VS Code e DBeaver"}
+                  ? "Desktop autorizado · Postman, IntelliJ, VS Code, DBeaver e FortiClient"
+                  : "Desktop · Postman, IntelliJ, VS Code, DBeaver e FortiClient"}
               </span>
               <button
                 className="text-button"
@@ -828,14 +828,18 @@ export function App() {
               </div>
               <h2 id="windows-title">Trabalhar no Windows</h2>
               <p>
-                O STAG poderá controlar somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver
-                pelo desktop, com capturas apenas da janela escolhida, mouse e teclado. Outros
-                programas e atalhos globais ficam bloqueados, mesmo com aprovação. Páginas web usam
-                o navegador integrado, autorizado separadamente. Capturas e edição local rotineiras
-                seguem sem novas permissões. Exclusão, envio externo, publicação, pagamentos,
-                credenciais e mudanças no sistema pedem confirmação, assim como interações sem
-                contexto suficiente. Capturas e títulos dessas janelas são enviados ao ChatGPT para
-                realizar a tarefa.
+                O STAG poderá controlar somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver
+                e FortiClient pelo desktop, com capturas apenas da janela escolhida, mouse e
+                teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação.
+                Páginas web usam o navegador integrado, autorizado separadamente. Capturas e edição
+                local rotineiras seguem sem novas permissões. Exclusão, envio externo, publicação,
+                pagamentos, credenciais e mudanças no sistema pedem confirmação, assim como
+                interações sem contexto suficiente. Capturas e títulos dessas janelas são enviados
+                ao ChatGPT para realizar a tarefa.
+              </p>
+              <p>
+                No FortiClient, o STAG pode consultar o estado da VPN durante a tarefa. Cliques,
+                digitação e atalhos sempre pedem confirmação, inclusive para reconectar a VPN.
               </p>
               <p className="muted small">
                 A mudança inicia uma nova conversa. Seu projeto continua selecionado.

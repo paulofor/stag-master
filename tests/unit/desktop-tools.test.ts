@@ -129,12 +129,127 @@ describe("confirmação pelo efeito da interação", () => {
     { action: "click", processId: 4242, x: 0, y: 0, risk: "routine", intent: "  " },
     { action: "click", processId: 4242, x: 0, y: 0, risk: "routine", intent: "x".repeat(501) },
     { action: "screenshot", processId: 4242, risk: "routine", intent: "Capturar" },
+    { action: "click", processId: 8383, x: 0, y: 0, stagCriticalApproved: true },
+    { action: "click", processId: 8383, x: 0, y: 0, stagCheckOnly: true },
   ])("recusa classificação inválida ou metadados em operação sem contexto: %j", (input) => {
     expect(desktopArguments.safeParse(input).success).toBe(false);
   });
 });
 
 describe("driver de desktop com processo simulado", () => {
+  it.each<DesktopArguments>([
+    { action: "click", processId: 8383, x: 10, y: 20, risk: "routine", intent: "Navegar" },
+    { action: "type_text", processId: 8383, text: "synthetic", risk: "routine", intent: "Editar" },
+    { action: "send_keys", processId: 8383, keys: "^s", risk: "routine", intent: "Salvar" },
+    {
+      action: "click",
+      processId: 8383,
+      x: 10,
+      y: 20,
+      risk: "critical",
+      intent: "Reconectar VPN sintética",
+    },
+    { action: "click", processId: 8383, x: 10, y: 20 },
+  ])("inspeciona o alvo real e confirma FortiClient mesmo com routine: $action", async (input) => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.resolve({
+          stdout: JSON.stringify({ processId: 8383, requiresConfirmation: true }),
+        }),
+        { child: { stdin } },
+      ),
+    );
+    const reason = await new DesktopTools("unused", "win32").confirmationReason(input);
+    expect(reason).toContain("Interação no FortiClient");
+    expect(reason).toContain("perfil/conexão");
+    expect(runScript).toHaveBeenCalledOnce();
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      ...input,
+      stagCheckOnly: true,
+    });
+  });
+  it("inspeção sem aprovação preserva rotina em outro aplicativo", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.resolve({ stdout: '{"processId":4242,"requiresConfirmation":false}' }),
+        { child: { stdin } },
+      ),
+    );
+    await expect(
+      new DesktopTools("unused", "win32").confirmationReason({
+        action: "click",
+        processId: 4242,
+        x: 10,
+        y: 20,
+        risk: "routine",
+        intent: "Abrir aba",
+      }),
+    ).resolves.toBeNull();
+  });
+  it.each([
+    { processId: 9001, requiresConfirmation: false },
+    { processId: 8383 },
+    { processId: 8383, requiresConfirmation: "false" },
+  ])("inspeção inválida falha fechada antes de interagir: %j", async (inspection) => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: JSON.stringify(inspection) }), { child: { stdin } }),
+    );
+    await expect(
+      new DesktopTools("unused", "win32").confirmationReason({
+        action: "click",
+        processId: 8383,
+        x: 10,
+        y: 20,
+        risk: "routine",
+        intent: "Navegar",
+      }),
+    ).rejects.toThrow();
+    expect(runScript).toHaveBeenCalledOnce();
+  });
+  it("consulta visual não dispara inspeção extra nem concede aprovação", async () => {
+    const tools = new DesktopTools("unused", "win32");
+    for (const input of [
+      { action: "list_windows" },
+      { action: "screenshot", processId: 8383 },
+      { action: "focus_window", processId: 8383 },
+      { action: "scroll", processId: 8383, x: 10, y: 20, delta: 120 },
+    ])
+      expect(await tools.confirmationReason(input)).toBeNull();
+    expect(runScript).not.toHaveBeenCalled();
+  });
+  it("somente o caminho aprovado acrescenta o marcador interno", async () => {
+    const input = {
+      action: "click",
+      processId: 8383,
+      x: 10,
+      y: 20,
+      risk: "routine",
+      intent: "Reconectar VPN sintética",
+    };
+    await new DesktopTools("unused", "win32").execute(input, true);
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      ...input,
+      stagCriticalApproved: true,
+    });
+  });
+  it("alvo alterado para FortiClient entre inspeção e execução não recebe entrada", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(
+        Promise.reject(
+          Object.assign(new Error("approval needed"), { stderr: "STAG_DESKTOP_APPROVAL_REQUIRED" }),
+        ),
+        { child: { stdin } },
+      ),
+    );
+    await expect(
+      new DesktopTools("unused", "win32").execute({
+        action: "click",
+        processId: 8383,
+        x: 10,
+        y: 20,
+      }),
+    ).rejects.toThrow("Nenhuma entrada foi enviada");
+  });
   const inputs: DesktopArguments[] = [
     { action: "list_windows" },
     { action: "focus_window", processId: 4242 },
@@ -235,7 +350,7 @@ describe("driver de desktop com processo simulado", () => {
     );
     const tools = new DesktopTools("unused", "win32");
     await expect(tools.execute({ action: "focus_window", processId: 9001 })).rejects.toThrow(
-      "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
+      "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient",
     );
     expect(runScript).toHaveBeenCalledOnce();
     await expect(tools.execute({ action: "focus_window", processId: 4242 })).resolves.toEqual(

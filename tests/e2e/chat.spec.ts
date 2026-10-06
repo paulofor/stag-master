@@ -175,7 +175,10 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
     "enviados ao ChatGPT",
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
-    "somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
+    "somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient",
+  );
+  await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
+    "inclusive para reconectar a VPN",
   );
   await expect(page.getByRole("dialog", { name: "Trabalhar no Windows" })).toContainText(
     "mesmo com aprovação",
@@ -186,7 +189,7 @@ test("desktop autorizado segue rotina, confirma ponto crítico e pode ser revoga
   await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(page.getByRole("region", { name: "Controle do desktop" })).toContainText(
-    "Desktop autorizado · Postman, IntelliJ, VS Code e DBeaver",
+    "Desktop autorizado · Postman, IntelliJ, VS Code, DBeaver e FortiClient",
   );
   await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(

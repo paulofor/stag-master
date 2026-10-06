@@ -13,7 +13,11 @@ import sourceCorpus from "../fixtures/source-scenarios.json";
 import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
 import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
-import type { DesktopArguments, ToolResult } from "../../src/main/desktop-tools";
+import {
+  desktopConfirmationReason,
+  type DesktopArguments,
+  type ToolResult,
+} from "../../src/main/desktop-tools";
 import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
 
@@ -25,7 +29,10 @@ const openExternal = vi.fn(async (_url: string) => {});
 const selectProject = vi.fn<() => Promise<string | null>>();
 const prepareProjectGit = vi.fn<typeof prepareGit>();
 const desktop = {
-  execute: vi.fn(async (_args: unknown): Promise<ToolResult> => ({
+  confirmationReason: vi.fn(async (args: unknown) =>
+    desktopConfirmationReason(args as DesktopArguments),
+  ),
+  execute: vi.fn(async (_args: unknown, _approved?: boolean): Promise<ToolResult> => ({
     success: true,
     contentItems: [{ type: "inputText" as const, text: "[]" }],
   })),
@@ -86,6 +93,9 @@ afterEach(async () => {
   service.dispose();
   await rpc.shutdown();
   vi.resetAllMocks();
+  desktop.confirmationReason.mockImplementation(async (args) =>
+    desktopConfirmationReason(args as DesktopArguments),
+  );
   desktop.execute.mockResolvedValue({
     success: true,
     contentItems: [{ type: "inputText", text: "[]" }],
@@ -1927,6 +1937,134 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
     expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_SCREEN");
   });
+  describe("FortiClient com inspeção do alvo na fila compartilhada", () => {
+    beforeEach(() => {
+      desktop.confirmationReason.mockImplementation(async (raw) => {
+        const args = raw as DesktopArguments;
+        return "processId" in args &&
+          args.processId === 8383 &&
+          ["click", "type_text", "send_keys"].includes(args.action)
+          ? "Interação no FortiClient: confirme perfil/conexão e efeito da ação."
+          : desktopConfirmationReason(args);
+      });
+    });
+    it("consulta visual só após consentimento, sem card ou herança entre conversas", async () => {
+      await ready();
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(desktop.confirmationReason).not.toHaveBeenCalled();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).toHaveBeenCalledExactlyOnceWith({
+        action: "screenshot",
+        processId: 8383,
+      });
+      expect(service.snapshot().approvals).toEqual([]);
+      await service.request({ type: "newChat" });
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).toHaveBeenCalledOnce();
+    });
+    it.each(["conectar", "texto", "atalho"])(
+      "confirma %s declarado routine uma vez, permite recusa e recupera",
+      async (probe) => {
+        await ready();
+        await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+        await send(`desktop forticlient ${probe} duplicado`);
+        await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+        expect(service.snapshot().approvals[0].detail).toContain("Interação no FortiClient");
+        expect(service.snapshot().approvals[0].detail).toContain("perfil VPN sintético");
+        expect(desktop.execute).not.toHaveBeenCalled();
+        expect(desktop.confirmationReason).toHaveBeenCalledOnce();
+        await approve(true);
+        expect(desktop.execute).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ processId: 8383, risk: "routine" }),
+          true,
+        );
+        await send(`desktop forticlient ${probe}`);
+        await approve(false);
+        expect(desktop.execute).toHaveBeenCalledOnce();
+        await send("desktop forticlient consultar");
+        await complete();
+        expect(desktop.execute).toHaveBeenCalledTimes(2);
+      },
+    );
+    it("falha de inspeção libera o request sem entrada e preserva recuperação", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      desktop.confirmationReason.mockRejectedValueOnce(
+        new Error("Assinatura FortiClient sintética recusada."),
+      );
+      await send("desktop forticlient conectar");
+      await complete();
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(service.snapshot().metrics.failures).toBeGreaterThan(0);
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).toHaveBeenCalledOnce();
+    });
+    it("interrupção durante inspeção não cria aprovação antiga nem executa entrada", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      let inspected!: (reason: string) => void;
+      desktop.confirmationReason.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            inspected = resolve;
+          }),
+      );
+      await send("desktop forticlient conectar");
+      await vi.waitFor(() => expect(inspected).toBeTypeOf("function"));
+      await service.request({ type: "stop" });
+      inspected("Interação no FortiClient");
+      await complete();
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).toHaveBeenCalledOnce();
+    });
+    it("inspeção do FortiClient e navegador compartilham a mesma fila", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await service.request({ type: "browserVisibility", visible: true });
+      await service.request({ type: "browserConsent", allow: true });
+      let inspected!: (reason: string) => void;
+      desktop.confirmationReason.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            inspected = resolve;
+          }),
+      );
+      await send("desktop forticlient conectar misto");
+      await vi.waitFor(() => expect(inspected).toBeTypeOf("function"));
+      expect(browser.execute).not.toHaveBeenCalled();
+      expect(desktop.execute).not.toHaveBeenCalled();
+      inspected("Interação no FortiClient");
+      await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledOnce());
+      expect(service.snapshot().approvals).toHaveLength(1);
+      await approve(true);
+      expect(desktop.execute).toHaveBeenCalledOnce();
+    });
+    it("start e resume preservam o contrato VPN e a autorização da conversa", async () => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      await send("desktop forticlient consultar");
+      await complete();
+      await service.request({ type: "connect" });
+      const calls =
+        await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+      const resume = calls.find((call) => call.method === "thread/resume");
+      expect(resume?.params?.developerInstructions).toContain("No FortiClient");
+      expect(resume?.params?.developerInstructions).toContain("mesmo declarados routine");
+      await send("desktop forticlient consultar");
+      await complete();
+      expect(desktop.execute).toHaveBeenCalledTimes(2);
+    });
+  });
   it("edita SQL no DBeaver só com consentimento da conversa e sem nova aprovação rotineira", async () => {
     await ready();
     await send("desktop dbeaver editar SQL");
@@ -1965,14 +2103,17 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().approvals[0].detail).toContain("Processo: 7272");
     expect(desktop.execute).not.toHaveBeenCalled();
     await approve(true);
-    expect(desktop.execute).toHaveBeenCalledExactlyOnceWith({
-      action: "click",
-      processId: 7272,
-      x: 120,
-      y: 180,
-      risk: "critical",
-      intent,
-    });
+    expect(desktop.execute).toHaveBeenCalledExactlyOnceWith(
+      {
+        action: "click",
+        processId: 7272,
+        x: 120,
+        y: 180,
+        risk: "critical",
+        intent,
+      },
+      true,
+    );
     await send(`desktop dbeaver crítico ${intent}`);
     await approve(false);
     expect(desktop.execute).toHaveBeenCalledOnce();
@@ -2123,7 +2264,7 @@ describe("fluxo local do assistente", () => {
   it.each([
     "Janela de teste indisponível.",
     "O Windows bloqueou o script de controle do STAG por uma política de execução.",
-    "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver. O alvo mudou.",
+    "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient. O alvo mudou.",
   ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
@@ -2159,7 +2300,7 @@ describe("fluxo local do assistente", () => {
     const resume = calls.find((call) => call.method === "thread/resume")!;
     for (const call of [start, resume]) {
       expect(call.params.developerInstructions).toContain(
-        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
+        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient",
       );
       expect(call.params.developerInstructions).toContain("não é ampliada por confirmação crítica");
       expect(call.params.sandbox).toBe("danger-full-access");
