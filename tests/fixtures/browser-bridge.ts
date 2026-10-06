@@ -1,11 +1,13 @@
 import type { Page } from "@playwright/test";
 import { emptySnapshot, type Action, type Model, type Snapshot } from "../../src/shared/types";
+import { desktopApproval } from "../../src/main/desktop-tools";
 
 export async function installBridge(page: Page, overrides: Partial<Snapshot> = {}) {
   await page.addInitScript(
-    (initial: Snapshot) => {
+    ({ initial, fortiOpening, fortiReconnect }) => {
       let state = initial;
       let count = 0;
+      let fortiStage: "opening" | "connect" | null = null;
       const listeners = new Set<(snapshot: Snapshot) => void>();
       const conversations = new Map<string, Snapshot["items"]>();
       const models: Model[] = [
@@ -24,6 +26,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
       const queueIds = new Set<string>();
       const clearQueue = () => {
+        fortiStage = null;
         state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
         state.pendingVideo = null;
         state.queuedMessages = [];
@@ -264,7 +267,10 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                   done();
                 }
               } else if (action.text.includes("desktop") && state.mode === "windows") {
-                if (action.text.includes("crítico"))
+                if (action.text.startsWith("desktop forticlient abrir")) {
+                  fortiStage = "opening";
+                  state.approvals = [{ id: "forti-opening", kind: "desktop", ...fortiOpening }];
+                } else if (action.text.includes("crítico"))
                   state.approvals = [
                     {
                       id: "desktop-approval",
@@ -334,6 +340,29 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             }
             case "answer": {
+              if (fortiStage === "opening" && action.accept) {
+                state.items.push({
+                  id: `assistant-${++count}`,
+                  kind: "assistant",
+                  text: "Console sintético aberto; isso não comprova conexão da VPN.",
+                });
+                fortiStage = "connect";
+                state.approvals = [{ id: "forti-connect", kind: "desktop", ...fortiReconnect }];
+                break;
+              }
+              if (fortiStage) {
+                state.items.push({
+                  id: `assistant-${++count}`,
+                  kind: "assistant",
+                  text: action.accept
+                    ? "VPN sintética: estado visível conferido após reconexão."
+                    : "Desktop: ação recusada.",
+                });
+                fortiStage = null;
+                state.approvals = [];
+                done();
+                break;
+              }
               const desktop = state.approvals[0]?.kind === "desktop";
               const browser = state.approvals[0]?.kind === "browser";
               state.approvals = [];
@@ -356,6 +385,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             }
             case "stop":
+              fortiStage = null;
               state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
               state.queuePaused = true;
               state.approvals = [];
@@ -393,11 +423,26 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       };
     },
     {
-      ...structuredClone(emptySnapshot),
-      connection: "ready",
-      platform: "win32",
-      browser: { ...emptySnapshot.browser, available: true },
-      ...overrides,
-    } satisfies Snapshot,
+      initial: {
+        ...structuredClone(emptySnapshot),
+        connection: "ready",
+        platform: "win32",
+        browser: { ...emptySnapshot.browser, available: true },
+        ...overrides,
+      } satisfies Snapshot,
+      fortiOpening: desktopApproval({
+        action: "open_forticlient",
+        risk: "critical",
+        intent: "Abrir console oficial para conferir o perfil VPN sintético",
+      }),
+      fortiReconnect: desktopApproval({
+        action: "click",
+        processId: 8383,
+        x: 120,
+        y: 180,
+        risk: "critical",
+        intent: "Reconectar o perfil VPN sintético no FortiClient",
+      }),
+    },
   );
 }

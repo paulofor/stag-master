@@ -9,6 +9,20 @@ using System;
 using System.Collections.Generic;
 public static class StagWindow {
     public static List<string> Events = new List<string>();
+    public static string InstallationRoot, InstallationRootX86, ExpectedExecutable;
+    public static bool FailLaunch, InvalidateAfterLock;
+    public static string[] ProgramDirectories() { return new string[] { InstallationRoot, InstallationRootX86 }; }
+    private sealed class Lease : IDisposable { public void Dispose() { Events.Add("unlock"); } }
+    public static IDisposable LockExecutable(string path) {
+        if (path != ExpectedExecutable) throw new Exception("Unexpected executable lock.");
+        Events.Add("lock");
+        return new Lease();
+    }
+    public static void OpenFortiClient(string path) {
+        if (path != ExpectedExecutable) throw new Exception("Unexpected executable launch.");
+        if (FailLaunch) throw new Exception("Synthetic launch failure: private installation path.");
+        Events.Add("open:FortiClient");
+    }
     public static bool BlockFocus, ChangeAfterMove, ChangeAfterCapture, MoveAfterCapture;
     public static bool LoseFocusAfterMove, ChangeProcessAfterFocus, ChangeAfterFirstClick;
     public static int LoseFocusAfterKeys;
@@ -82,6 +96,29 @@ function Add-Type {
 }
 $global:StagProcesses = @{}
 $global:StagSignatures = @{}
+$global:StagInstallation = @{}
+[StagWindow]::InstallationRoot = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'stag-synthetic', 'Program Files')
+[StagWindow]::InstallationRootX86 = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'stag-synthetic', 'Program Files x86')
+function Add-SyntheticInstallation([string]$root) {
+    $path = $root
+    foreach ($segment in @('', 'Fortinet', 'FortiClient', 'FortiClient.exe')) {
+        if ($segment) { $path = [IO.Path]::Combine($path, $segment) }
+        $directory = $segment -ne 'FortiClient.exe'
+        $global:StagInstallation[$path] = [pscustomobject]@{
+            FullName = $path; Name = [IO.Path]::GetFileName($path); PSIsContainer = $directory;
+            Attributes = if ($directory) { [IO.FileAttributes]::Directory } else { [IO.FileAttributes]::Normal };
+            VersionInfo = [pscustomobject]@{ ProductName = 'FortiClient VPN' }
+        }
+    }
+    $global:StagSignatures[$path] = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [StagCertificate]::new('Fortinet, Inc.') }
+    return $path
+}
+function Test-Path { param([string]$LiteralPath); return $global:StagInstallation.ContainsKey($LiteralPath) }
+function Get-Item {
+    param([string]$LiteralPath, [switch]$Force, [string]$ErrorAction)
+    if (-not $global:StagInstallation.ContainsKey($LiteralPath)) { throw 'Unexpected installation access.' }
+    return $global:StagInstallation[$LiteralPath]
+}
 function Add-SyntheticProcess([int]$processId, [string]$name, [string]$product, [string]$publisher) {
     $path = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'stag-synthetic', ($name + '.exe'))
     $global:StagProcesses[$processId] = [pscustomobject]@{
@@ -120,6 +157,9 @@ function Get-Process {
 function Get-AuthenticodeSignature {
     param([string]$LiteralPath)
     if (-not $global:StagSignatures.ContainsKey($LiteralPath)) { throw 'Unexpected certificate access.' }
+    if ([StagWindow]::InvalidateAfterLock -and [StagWindow]::Events.Contains('lock')) {
+        return [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [StagCertificate]::new('Fortinet, Inc.') }
+    }
     return $global:StagSignatures[$LiteralPath]
 }
 function Start-Sleep { param([int]$Milliseconds) }
@@ -145,6 +185,63 @@ function Assert-Denied($arguments, [string[]]$events = @()) {
     if (-not $failed) { throw 'Invalid desktop target or input accepted.' }
     Assert-Events $events
 }
+
+# An absent console can be opened only by this separately approved, fixed operation.
+$open = @{ action = 'open_forticlient'; risk = 'critical'; intent = 'Abrir console para conferir VPN sintetica' }
+$approvedOpen = $open + @{ stagCriticalApproved = $true }
+Assert-Denied $open
+Assert-Denied ($open + @{ stagCriticalApproved = $false })
+Assert-Denied ($open + @{ stagCriticalApproved = 'true' })
+Assert-Denied ($open + @{ stagCheckOnly = $true })
+Assert-Denied $approvedOpen
+$installed = Add-SyntheticInstallation ([StagWindow]::InstallationRoot)
+[StagWindow]::ExpectedExecutable = $installed
+$inspection = Invoke-DesktopContract ($open + @{ stagCheckOnly = $true }) | ConvertFrom-Json
+if (-not $inspection.requiresConfirmation -or $inspection.PSObject.Properties.Name -contains 'path') { throw 'Console inspection leaked an installation or missed confirmation.' }
+Assert-Events @()
+$opened = Invoke-DesktopContract $approvedOpen | ConvertFrom-Json
+if (-not $opened.opened -or $opened.PSObject.Properties.Name -contains 'connected') { throw 'Console opening claimed VPN connectivity.' }
+Assert-Events @('lock', 'open:FortiClient', 'unlock')
+foreach ($item in @($global:StagInstallation.Values)) {
+    $original = $item.Attributes
+    $item.Attributes = $original -bor [IO.FileAttributes]::ReparsePoint
+    Assert-Denied $approvedOpen
+    $item.Attributes = $original
+}
+foreach ($product in @('FortiTray', 'FortiClient Installer', 'FortiClient VPN injected', 'Other VPN')) {
+    $global:StagInstallation[$installed].VersionInfo.ProductName = $product
+    Assert-Denied $approvedOpen
+}
+$global:StagInstallation[$installed].VersionInfo.ProductName = 'FortiClient VPN'
+$installedSignature = $global:StagSignatures[$installed]
+foreach ($status in @('NotSigned', 'HashMismatch', 'UnknownError')) {
+    $installedSignature.Status = $status
+    Assert-Denied $approvedOpen
+}
+$installedSignature.Status = 'Valid'
+foreach ($publisher in @('Microsoft Corporation', 'Fortinet, Inc. untrusted')) {
+    $installedSignature.SignerCertificate = [StagCertificate]::new($publisher)
+    Assert-Denied $approvedOpen
+}
+$installedSignature.SignerCertificate = $null
+Assert-Denied $approvedOpen
+$installedSignature.SignerCertificate = [StagCertificate]::new('Fortinet, Inc.')
+[StagWindow]::InvalidateAfterLock = $true
+Assert-Denied $approvedOpen @('lock', 'unlock')
+[StagWindow]::InvalidateAfterLock = $false
+[StagWindow]::FailLaunch = $true
+Assert-Denied $approvedOpen @('lock', 'unlock')
+[StagWindow]::FailLaunch = $false
+$null = Invoke-DesktopContract $approvedOpen
+Assert-Events @('lock', 'open:FortiClient', 'unlock')
+# x86 is supported only when the first known installation is absent, not when it is untrusted.
+$installedX86 = Add-SyntheticInstallation ([StagWindow]::InstallationRootX86)
+$installedSignature.Status = 'HashMismatch'
+Assert-Denied $approvedOpen
+$global:StagInstallation.Remove($installed)
+[StagWindow]::ExpectedExecutable = $installedX86
+$null = Invoke-DesktopContract $approvedOpen
+Assert-Events @('lock', 'open:FortiClient', 'unlock')
 
 $windows = @(Invoke-DesktopContract @{ action = 'list_windows' } | ConvertFrom-Json)
 if ((($windows.processId | Sort-Object) -join ',') -ne '4242,5252,6262,7272,8282,8383,8484,8585') { throw 'Window allowlist failed.' }

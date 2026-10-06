@@ -1198,6 +1198,8 @@ summary::-webkit-details-marker {
   border: 1px solid #e3e8d4;
   border-radius: 16px;
   max-width: 390px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
   padding: 24px;
   box-shadow: 0 12px 40px #35412d20;
 }
@@ -1322,6 +1324,17 @@ summary::-webkit-details-marker {
   }
 }
 @media (max-height: 680px) {
+  .bottom-area:has(.approval-card) {
+    flex-shrink: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .bottom-area:has(.approval-card) .video-controls {
+    display: none;
+  }
+  .approval-detail {
+    max-height: 80px;
+  }
   .composer textarea {
     min-height: 44px;
     height: 44px;
