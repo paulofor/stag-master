@@ -141,6 +141,32 @@ try {
       }),
     )
     .toEqual({ connection: "ready", requests: process.platform === "win32" ? 2 : 1 });
+  assert.deepEqual((await page.evaluate(async () => window.stag.getSnapshot())).mouseMovement, {
+    enabled: false,
+    moves: 0,
+    skipped: 0,
+    status: "Desligado",
+  });
+  await expect(
+    page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true }),
+  ).toHaveCount(0);
+  const movementRejected = await page.evaluate(async () => {
+    try {
+      await window.stag.request({
+        type: "mouseMovement",
+        threadId: "synthetic-unavailable",
+        enabled: true,
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  assert.equal(movementRejected, true);
+  assert.equal(
+    (await page.evaluate(async () => window.stag.getSnapshot())).mouseMovement.enabled,
+    false,
+  );
   const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());
   const accountMenu = page.getByRole("button", { name: "Conta e conexão", exact: true });
   await accountMenu.click();

@@ -234,9 +234,42 @@ test("Linux não oferece autorização de desktop", { tag: "@linux" }, async ({ 
     .poll(() => page.evaluate(async () => (await window.stag!.getSnapshot()).platform))
     .toBe("linux");
   await expect(page.getByRole("region", { name: "Controle do desktop" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Mover mouse a cada 5 min" })).toHaveCount(0);
   await expect(
     page.getByLabel("Acesso", { exact: true }).locator('option[value="windows"]'),
   ).toHaveJSProperty("disabled", true);
+});
+test("movimento periódico exige conversa Windows e desliga sem perder rascunho", async ({
+  page,
+}, info) => {
+  await ready(page);
+  const enable = page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true });
+  await expect(enable).toHaveCount(0);
+  await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
+  await page.getByRole("button", { name: "Continuar", exact: true }).click();
+  await expect(enable).toBeDisabled();
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("Explique a arquitetura");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
+  await input.fill("Rascunho preservado");
+  await enable.click();
+  const disable = page.getByRole("button", { name: "Desligar movimento do mouse", exact: true });
+  await expect(disable).toHaveAttribute("aria-pressed", "true");
+  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
+  await expect(region.getByRole("status")).toContainText("Ativo · a cada 5 min");
+  await expect(input).toHaveValue("Rascunho preservado");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-mouse-movement.png` });
+  await disable.click();
+  await expect(region.getByRole("status")).toContainText("Desligado");
+  await enable.click();
+  await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
+  await expect(enable).toHaveCount(0);
+  await expect(region).toHaveCount(0);
+  await expect(input).toHaveValue("Rascunho preservado");
 });
 test("erro permite reconectar e Markdown não executa HTML/imagens remotas", async ({ page }) => {
   await ready(page);

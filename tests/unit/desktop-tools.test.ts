@@ -19,15 +19,65 @@ const result: ToolResult = {
   contentItems: [{ type: "inputText", text: '{"ok":true}' }],
 };
 const stdin = { on: vi.fn(), end: vi.fn() };
+const child = {
+  stdin,
+  once: vi.fn((_event: string, listener: () => void) => queueMicrotask(listener)),
+};
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("PSModulePath", "C:\\Program Files\\PowerShell\\7\\Modules");
   vi.stubEnv("PSExecutionPolicyPreference", "Restricted");
   runScript.mockImplementation(() =>
-    Object.assign(Promise.resolve({ stdout: '{"ok":true}' }), { child: { stdin } }),
+    Object.assign(Promise.resolve({ stdout: '{"ok":true}' }), { child }),
   );
 });
 afterEach(() => vi.unstubAllEnvs());
+
+describe("movimento fixo pertencente ao main", () => {
+  it("passa somente o marcador interno e o sinal de cancelamento, sem coordenadas", async () => {
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve({ stdout: '{"moved":true}' }), { child }),
+    );
+    const controller = new AbortController();
+    await expect(
+      new DesktopTools("unused", "win32").pulseCursor(controller.signal),
+    ).resolves.toEqual({ moved: true });
+    expect(runScript.mock.calls[0][2].signal).toBe(controller.signal);
+    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+      action: "nudge_cursor",
+      stagPeriodicMovement: true,
+    });
+    expect(child.once).toHaveBeenCalledWith("close", expect.any(Function));
+  });
+  it("recusa resposta inválida e plataforma sem Windows", async () => {
+    await expect(new DesktopTools("unused", "linux").pulseCursor()).rejects.toThrow("Windows");
+    expect(runScript).not.toHaveBeenCalled();
+    await expect(new DesktopTools("unused", "win32").pulseCursor()).rejects.toThrow();
+  });
+  it("aguarda fechamento do subprocesso mesmo após cancelamento", async () => {
+    let close!: () => void;
+    runScript.mockImplementationOnce(() =>
+      Object.assign(Promise.reject(new Error("aborted")), {
+        child: {
+          stdin,
+          once: (_event: string, listener: () => void) => {
+            close = listener;
+          },
+        },
+      }),
+    );
+    let settled = false;
+    const work = new DesktopTools("unused", "win32").pulseCursor().catch(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    close();
+    await work;
+    expect(settled).toBe(true);
+  });
+});
 
 describe("confirmação pelo efeito da interação", () => {
   it.each<DesktopArguments>([
@@ -156,7 +206,7 @@ describe("driver de desktop com processo simulado", () => {
         Promise.resolve({
           stdout: JSON.stringify({ processId: 8383, requiresConfirmation: true }),
         }),
-        { child: { stdin } },
+        { child },
       ),
     );
     const reason = await new DesktopTools("unused", "win32").confirmationReason(input);
@@ -172,7 +222,7 @@ describe("driver de desktop com processo simulado", () => {
     runScript.mockImplementationOnce(() =>
       Object.assign(
         Promise.resolve({ stdout: '{"processId":4242,"requiresConfirmation":false}' }),
-        { child: { stdin } },
+        { child },
       ),
     );
     await expect(
@@ -192,7 +242,7 @@ describe("driver de desktop com processo simulado", () => {
     { processId: 8383, requiresConfirmation: "false" },
   ])("inspeção inválida falha fechada antes de interagir: %j", async (inspection) => {
     runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: JSON.stringify(inspection) }), { child: { stdin } }),
+      Object.assign(Promise.resolve({ stdout: JSON.stringify(inspection) }), { child }),
     );
     await expect(
       new DesktopTools("unused", "win32").confirmationReason({
@@ -238,7 +288,7 @@ describe("driver de desktop com processo simulado", () => {
         Promise.reject(
           Object.assign(new Error("approval needed"), { stderr: "STAG_DESKTOP_APPROVAL_REQUIRED" }),
         ),
-        { child: { stdin } },
+        { child },
       ),
     );
     await expect(
@@ -293,7 +343,7 @@ describe("driver de desktop com processo simulado", () => {
             imageBase64: "aW1hZ2VtLXNpbnRldGljYQ==",
           }),
         }),
-        { child: { stdin } },
+        { child },
       ),
     );
     const tools = new DesktopTools("unused", "win32");
@@ -324,7 +374,7 @@ describe("driver de desktop com processo simulado", () => {
     },
   ])("não retorna imagem com alvo/dimensões/conteúdo inválidos", async (capture) => {
     runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: JSON.stringify(capture) }), { child: { stdin } }),
+      Object.assign(Promise.resolve({ stdout: JSON.stringify(capture) }), { child }),
     );
     await expect(
       new DesktopTools("unused", "win32").execute({ action: "screenshot", processId: 4242 }),
@@ -345,7 +395,7 @@ describe("driver de desktop com processo simulado", () => {
         Promise.reject(
           Object.assign(new Error("denied"), { stderr: "STAG_DESKTOP_DENIED: synthetic target" }),
         ),
-        { child: { stdin } },
+        { child },
       ),
     );
     const tools = new DesktopTools("unused", "win32");
@@ -368,9 +418,7 @@ describe("driver de desktop com processo simulado", () => {
         stderr,
       },
     );
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.reject(failure), { child: { stdin } }),
-    );
+    runScript.mockImplementationOnce(() => Object.assign(Promise.reject(failure), { child }));
     const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", "win32");
     await expect(tools.execute({ action: "list_windows" })).rejects.toThrow("política de execução");
     expect(runScript).toHaveBeenCalledOnce();
@@ -381,9 +429,7 @@ describe("driver de desktop com processo simulado", () => {
     const failure = Object.assign(new Error("Janela sintética indisponível."), {
       stderr: "FullyQualifiedErrorId : GetContentReaderUnauthorizedAccessError",
     });
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.reject(failure), { child: { stdin } }),
-    );
+    runScript.mockImplementationOnce(() => Object.assign(Promise.reject(failure), { child }));
     const tools = new DesktopTools("unused", "win32");
     await expect(tools.execute({ action: "list_windows" })).rejects.toBe(failure);
     expect(runScript).toHaveBeenCalledOnce();

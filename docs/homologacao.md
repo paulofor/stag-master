@@ -1,4 +1,26 @@
-# Matriz de homologação da versão 0.4.23
+# Matriz de homologação da versão 0.4.24
+
+## Movimento periódico do mouse — versão 0.4.24
+
+Matriz definida antes da implementação e dos testes. O cliente pediu um botão para um pequeno movimento do mouse a cada cinco minutos. A opção pertence ao main e à conversa Windows autorizada, fica desligada por padrão e não persiste. O driver desloca até dois pixels e retorna quando o alvo continua válido, sem clicar, digitar ou mudar o foco. Mantém a lista de aplicativos permitidos; FortiClient, sobreposição, botões pressionados e perda de foco impedem o gesto. Minimizar preserva o temporizador; desligar, parar, trocar de conversa/projeto, desconectar ou encerrar elimina movimentos pendentes. Não há inferência paga ou promessa de impedir bloqueios/expiração corporativos.
+
+Lacuna concreta do harness: a fila compartilhada não tinha uma ação periódica, nem verificações de relógio para impedir acúmulo, repetição após revogação e movimentos durante arraste. Ampliar serviço, IPC/interface e dispatcher nativo sintéticos existentes, sem tocar no desktop ou credenciais do cliente.
+
+O cenário de encerramento reproduziu uma falha relacionada na fila existente: navegação manual pendente podia executar depois de dispose, pois não revalidava a geração da conversa. O caminho manual agora confere geração/thread/encerramento antes de executar; Parar invalida a fila também quando não há turno LLM ativo. A regressão falhou antes da correção e passa com o cancelamento, sem executar o navegador após o encerramento.
+
+| Área              | Cenário e aceite                                                                                                                                     | Evidência prevista                                      |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Caminho feliz     | Botão explícito, intervalo de cinco minutos, movimento limitado e retorno, continuidade minimizado                                                   | Relógio controlado no serviço e driver nativo sintético |
+| Validações        | Windows e consentimento do mesmo thread; IPC estrito sem coordenadas/intervalo/marker do renderer; outros alvos e FortiClient recusados              | Serviço, validação e dispatcher de produção             |
+| Integrações       | Uma única fila com desktop/browser; nenhum clique, tecla, captura ou troca de foco; aprovação pendente impede movimento                              | Gates no serviço e eventos nativos sintéticos           |
+| Recuperação       | Desligar/parar/revogar/trocar/desconectar/fechar descarta operação pendente; falha desliga sem replay; reload preserva main, reinício exige ativação | Serviço, recuperação e IPC Electron                     |
+| Observabilidade   | Estado e contadores de movimentos/intervalos omitidos; erros fixos sem caminhos, títulos, coordenadas ou credenciais; métricas LLM preservadas       | Snapshot, serviço e UI                                  |
+| Dados e interface | Projetos/CODEX_HOME/processos sintéticos; compacto, amplo e Pixel 7 sem overflow; rascunho preservado                                                | Chromium/Electron e check local                         |
+| Entrega           | Diff e aceite local revisados antes do PR; Windows nativo e instalador pelo workflow                                                                 | Jobs PR/main e artefato 0.4.24                          |
+
+Linux não comprova execução de APIs gráficas Windows. A compilação C# e o dispatcher sintético não enviam entrada ao desktop real; o job Windows continua obrigatório. A análise de vídeos longos já foi integrada pelo PR #30 e o workflow da main `37516302461` passou para o SHA `52a43d2b5699c8d7f2c5a50eb8e9abd61d7fd9ce` (GitHub consultado nesta tarefa).
+
+Evidência local: a execução de `npm run check` aprovou typecheck, 421 contratos, build, decoder/ASR reais e Codex isolado com provedor loopback, sem inferência paga. A etapa E2E identificou controles 11 pixels abaixo do viewport de 360×600; o botão passou a aparecer na conversa Windows e a mensagem foi compactada em janelas baixas. Após o ajuste, typecheck/build e todos os 78 cenários Chromium passaram, incluindo vídeo com movimento ativo e pausa na janela mínima, rascunho preservado e layouts Pixel 7/amplo. Screenshots foram inspecionados. `xvfb-run -a npm run test:desktop` passou novamente com o bundle final, IPC sem autorização recusado, decoder de produção, vídeo minimizado/reiniciado, browser e sessões/fontes sintéticas. PowerShell local aprovou 580 verificações do dispatcher de produção com processos/janelas falsos e compilou o C# real sem APIs gráficas. `format:check`, sintaxe JavaScript e diff aprovados. O kernel Linux bloqueia namespaces bwrap no smoke existente; não se afirma execução nativa Windows ou obediência semântica absoluta do modelo. Os testes nativos sob Restricted e o instalador serão conferidos nos jobs Windows do PR/main.
 
 ## Vídeos longos em segundo plano — versão 0.4.23
 

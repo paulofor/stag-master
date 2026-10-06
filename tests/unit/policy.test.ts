@@ -26,6 +26,8 @@ describe("contrato de engenharia e escopo de negócio", () => {
           expect(instructions).toContain(engineeringInstructions);
           expect(instructions).toContain(browserSessionInstructions);
           expect(instructions).toContain(browserCertificateInstructions);
+          expect(instructions).toContain("Mover mouse a cada 5 min");
+          expect(instructions).toContain("não recrie movimentos periódicos por comandos");
           for (const fragment of engineeringCorpus.requiredInstructions)
             expect(instructions).toContain(fragment);
           expect(instructions).toContain(cyberSafetyInstructions);

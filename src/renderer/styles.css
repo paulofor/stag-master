@@ -472,6 +472,24 @@ h1 {
 .desktop-access .desktop-authorized {
   color: #587448;
 }
+.mouse-movement {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0 3px 9px;
+  font-size: 10px;
+  color: #89917f;
+}
+.mouse-movement .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+}
+.mouse-movement [aria-pressed="true"] {
+  color: #587448;
+}
 .paste-hint {
   font-size: 9px;
   color: #7d876f;
@@ -1301,6 +1319,15 @@ summary::-webkit-details-marker {
   }
   .welcome-description {
     margin: 12px 0 16px;
+  }
+}
+@media (max-height: 680px) {
+  .composer textarea {
+    min-height: 44px;
+    height: 44px;
+  }
+  .mouse-movement-counts {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

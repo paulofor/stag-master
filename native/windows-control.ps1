@@ -18,6 +18,8 @@ public static class StagWindow {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
@@ -33,6 +35,16 @@ public static class StagWindow {
         return processId;
     }
     public static IntPtr WindowAt(int x, int y) { return WindowFromPoint(new Point { X = x, Y = y }); }
+    public static int[] Cursor() {
+        Point point;
+        if (!GetCursorPos(out point)) throw new Exception("STAG_DESKTOP_DENIED: Cursor unavailable.");
+        return new int[] { point.X, point.Y };
+    }
+    public static bool ButtonsPressed() {
+        foreach (int key in new int[] { 1, 2, 4, 5, 6 })
+            if ((GetAsyncKeyState(key) & 0x8000) != 0) return true;
+        return false;
+    }
     public static int[] Bounds(IntPtr window) {
         Rect rect;
         if (!GetWindowRect(window, out rect)) throw new Exception("STAG_DESKTOP_DENIED: Window unavailable.");
@@ -139,6 +151,57 @@ function ConvertTo-StagLiteralKeys([string]$text) {
     $literal = [regex]::Replace($text, '[+^%~(){}\[\]]', { param($match) '{' + $match.Value + '}' })
     $literal = [regex]::Replace($literal, '\r\n|\r|\n', '{ENTER}')
     return $literal.Replace("`t", '{TAB}')
+}
+
+# Main-only fixed gesture. Never focus another window, enumerate the desktop or send buttons/keys.
+if ($request.action -eq 'nudge_cursor') {
+    if ($request.stagPeriodicMovement -isnot [bool] -or $request.stagPeriodicMovement -ne $true) {
+        throw 'STAG_DESKTOP_DENIED: Movimento periodico nao autorizado pelo main.'
+    }
+    $moved = $false
+    try {
+        $window = [StagWindow]::GetForegroundWindow()
+        $target = Get-StagAllowedProcess ([int][StagWindow]::WindowProcessId($window))
+        if ($target.ProcessName -ieq 'FortiClient' -or [StagWindow]::ButtonsPressed()) {
+            '{"moved":false}'
+            return
+        }
+        $origin = [StagWindow]::Cursor()
+        if ((Get-StagCoordinateWindow $target $origin[0] $origin[1]) -ne $window) {
+            throw 'STAG_DESKTOP_DENIED: Cursor fora da janela em primeiro plano.'
+        }
+        $bounds = [StagWindow]::Bounds($window)
+        $dx = if ($origin[0] + 2 -lt $bounds[0] + $bounds[2]) { 2 } else { -2 }
+        $x = $origin[0] + $dx
+        $y = $origin[1]
+        if ((Get-StagCoordinateWindow $target $x $y) -ne $window) {
+            throw 'STAG_DESKTOP_DENIED: Destino do cursor mudou.'
+        }
+        $current = [StagWindow]::Cursor()
+        if (($current -join ',') -ne ($origin -join ',') -or [StagWindow]::ButtonsPressed()) {
+            '{"moved":false}'
+            return
+        }
+        Assert-StagForeground $target
+        if ([StagWindow]::GetForegroundWindow() -ne $window -or
+            (Get-StagCoordinateWindow $target $x $y) -ne $window) {
+            throw 'STAG_DESKTOP_DENIED: Alvo mudou antes do movimento.'
+        }
+        Move-StagCursor $x $y
+        $moved = $true
+        # Do not undo a user's concurrent movement or drag, or restore over a different program.
+        $current = [StagWindow]::Cursor()
+        if ($current[0] -eq $x -and $current[1] -eq $y -and -not [StagWindow]::ButtonsPressed() -and
+            [StagWindow]::GetForegroundWindow() -eq $window -and
+            (Get-StagCoordinateWindow $target $origin[0] $origin[1]) -eq $window) {
+            Assert-StagForeground $target
+            Move-StagCursor $origin[0] $origin[1]
+        }
+    } catch {
+        if ($_.Exception.Message -notmatch 'STAG_DESKTOP_DENIED') { throw }
+    }
+    @{ moved = $moved } | ConvertTo-Json -Compress
+    return
 }
 
 if ($request.action -ne 'list_windows') {
