@@ -704,7 +704,7 @@ try {
       false,
     );
   }
-  await validateBrowser(application, dir, site);
+  await validateBrowser(application, dir, site, page);
   await validateSavedSession(application, page, site, "prepare");
   assert.deepEqual(errors, []);
   await application.close();

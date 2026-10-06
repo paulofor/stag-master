@@ -8,6 +8,7 @@ import {
   type BrowserArguments,
 } from "./browser-tools";
 import { browserDocument } from "./browser-document";
+import { browserLoadError } from "./browser-errors";
 import type { BrowserControl, BrowserInfo } from "../shared/types";
 import type { ToolResult } from "./desktop-tools";
 
@@ -23,9 +24,11 @@ type BrowserBounds = { x: number; y: number; width: number; height: number };
 function fitsWindow(bounds: BrowserBounds, [width, height]: number[]): boolean {
   return bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= height + 1;
 }
+class BrowserTimeoutError extends Error {}
 export class BrowserPanel extends EventEmitter {
   private view!: WebContentsView;
   private info = blankInfo();
+  private loadFailure: string | null = null;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
   private visible = true;
   private pageId: string | null = null;
@@ -82,6 +85,7 @@ export class BrowserPanel extends EventEmitter {
     }
     this.profileId = profileId;
     this.info = blankInfo();
+    this.loadFailure = null;
     const browserSession = session.fromPartition(
       profileId ? `persist:stag-project-${profileId}` : `stag-browser-${randomUUID()}`,
       { cache: false },
@@ -153,8 +157,14 @@ export class BrowserPanel extends EventEmitter {
     };
     contents.on("will-navigate", guard);
     contents.on("will-redirect", guard);
-    contents.on("did-start-navigation", (_event, _url, _inPlace, mainFrame) => {
-      if (mainFrame && contents === this.view.webContents) this.pageId = null;
+    contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
+      if (mainFrame && contents === this.view.webContents) {
+        this.pageId = null;
+        if (!inPlace) {
+          this.loadFailure = null;
+          this.info.error = null;
+        }
+      }
     });
     const update = () => {
       if (contents !== this.view.webContents || contents.isDestroyed()) return;
@@ -175,7 +185,9 @@ export class BrowserPanel extends EventEmitter {
     contents.on("page-title-updated", update);
     contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
       if (contents === this.view.webContents && mainFrame && code !== -3) {
-        this.info.error = `Não foi possível carregar a página (código ${code}). Confira o endereço ou recarregue.`;
+        this.pageId = null;
+        this.loadFailure = browserLoadError(code);
+        this.info.error = this.loadFailure;
         update();
       }
     });
@@ -221,6 +233,7 @@ export class BrowserPanel extends EventEmitter {
     if (!this.view.webContents.isDestroyed()) this.view.webContents.stop();
   }
   private async document(request: Parameters<typeof browserDocument>[0]): Promise<unknown> {
+    this.checkReadable();
     const result = (await this.bounded(
       this.view.webContents.executeJavaScriptInIsolatedWorld(1001, [
         {
@@ -228,12 +241,17 @@ export class BrowserPanel extends EventEmitter {
         },
       ]),
     )) as { ok: boolean; value?: unknown; error?: string };
+    this.checkReadable();
     if (!result.ok)
       throw new Error(
         result.error?.slice(0, 500) ||
           "Não foi possível ler a página. Recarregue e faça um novo snapshot.",
       );
     return result.value;
+  }
+  private checkReadable(): void {
+    if (this.loadFailure) throw new Error(this.loadFailure);
+    // loadURL resolves on did-finish-load; Chromium's loading flag can still be true then.
   }
   private async bounded<T>(operation: Promise<T>): Promise<T> {
     const contents = this.view.webContents;
@@ -246,7 +264,7 @@ export class BrowserPanel extends EventEmitter {
           timer = setTimeout(() => {
             if (generation === this.generation && !contents.isDestroyed()) this.cancel();
             reject(
-              new Error(
+              new BrowserTimeoutError(
                 "O navegador demorou para responder. Recarregue a página ou revogue e autorize novamente.",
               ),
             );
@@ -284,12 +302,28 @@ export class BrowserPanel extends EventEmitter {
       throw new Error("A página mudou. Faça um novo snapshot antes de interagir.");
   }
   async control(input: BrowserControl): Promise<void> {
+    const url = input.action === "navigate" ? browserUrl(input.url) : null;
     this.pageId = null;
     this.info.error = null;
     this.publish();
     const contents = this.view.webContents;
     if (input.action === "navigate") {
-      await this.bounded(contents.loadURL(browserUrl(input.url)));
+      const generation = this.generation;
+      try {
+        await this.bounded(contents.loadURL(url!));
+      } catch (error) {
+        if (error instanceof BrowserTimeoutError) throw error;
+        if (contents !== this.view.webContents || generation !== this.generation)
+          throw new Error("Operação do navegador cancelada.");
+        const code = error && typeof error === "object" && "errno" in error ? error.errno : null;
+        const message = this.loadFailure || browserLoadError(code);
+        if (code !== -3) {
+          this.loadFailure = message;
+          this.info.error = message;
+          this.publish();
+        }
+        throw new Error(message);
+      }
     } else if (input.action === "reload") contents.reload();
     else if (input.action === "back" && contents.navigationHistory.canGoBack())
       contents.navigationHistory.goBack();
@@ -313,8 +347,10 @@ export class BrowserPanel extends EventEmitter {
       this.pageId = randomUUID();
       result = await this.document({ action: "snapshot", pageId: this.pageId });
     } else if (input.action === "screenshot") {
+      this.checkReadable();
       const image = await this.bounded(this.view.webContents.capturePage());
       if (generation !== this.generation) throw new Error("Captura cancelada.");
+      this.checkReadable();
       const size = image.getSize();
       return {
         success: true,

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/policy";
-import { browserTool, browserSessionInstructions } from "../../src/main/browser-tools";
+import {
+  browserTool,
+  browserSessionInstructions,
+  browserCertificateInstructions,
+} from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
 import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/main/cyber-safety";
 import {
@@ -21,6 +25,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
           const instructions = assistantInstructions(mode, platform, authorized, available);
           expect(instructions).toContain(engineeringInstructions);
           expect(instructions).toContain(browserSessionInstructions);
+          expect(instructions).toContain(browserCertificateInstructions);
           for (const fragment of engineeringCorpus.requiredInstructions)
             expect(instructions).toContain(fragment);
           expect(instructions).toContain(cyberSafetyInstructions);
@@ -28,6 +33,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
     expect(desktopTool.description).toContain(engineeringToolDescription);
     expect(browserTool.description).toContain(engineeringToolDescription);
     expect(browserTool.description).toContain(browserSessionInstructions);
+    expect(browserTool.description).toContain(browserCertificateInstructions);
   });
 });
 
