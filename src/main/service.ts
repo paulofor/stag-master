@@ -21,8 +21,8 @@ import { SettingsStore, type Settings } from "./settings";
 import {
   desktopArguments,
   desktopApproval,
-  desktopConfirmationReason,
   desktopTool,
+  type DesktopTools,
   type ToolResult,
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
@@ -65,7 +65,7 @@ interface WireThread {
 }
 interface PendingApproval {
   message: RpcMessage;
-  execute?: () => Promise<ToolResult>;
+  execute?: (approved?: boolean) => Promise<ToolResult>;
   tool?: "desktop" | "browser";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
@@ -77,7 +77,7 @@ interface Options {
   selectProject: () => Promise<string | null>;
   prepareProjectGit?: typeof prepareProjectGit;
   openExternal: (url: string) => Promise<void>;
-  desktop: { execute: (args: unknown) => Promise<ToolResult> };
+  desktop: Pick<DesktopTools, "execute" | "confirmationReason">;
   browser?: {
     execute: (args: BrowserArguments) => Promise<ToolResult>;
     confirmationReason: (args: BrowserArguments) => Promise<string | null>;
@@ -1075,7 +1075,7 @@ export class AssistantService extends EventEmitter {
               text:
                 isBrowser && browserAccessDenied
                   ? "stag_browser não autorizado nesta conversa. Peça ao cliente para clicar em Autorizar navegador no painel do STAG e aguarde. Se o painel estiver fechado, indique Mostrar navegador (ícone de globo); históricos sem stag_browser precisam de uma nova conversa. Não abra nem controle Chrome/Edge ou outro navegador por windows_desktop, shell ou automação externa como alternativa."
-                  : "Ferramenta não autorizada nesta conversa. O desktop requer Autorizar desktop e permite somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver; não contorne o bloqueio por comandos ou outra automação.",
+                  : "Ferramenta não autorizada nesta conversa. O desktop requer Autorizar desktop e permite somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient; não contorne o bloqueio por comandos ou outra automação.",
             },
           ],
         });
@@ -1092,7 +1092,7 @@ export class AssistantService extends EventEmitter {
               type: "inputText",
               text: isBrowser
                 ? "Argumentos de navegador inválidos. Corrija a operação e seu contexto."
-                : "Argumentos de desktop inválidos. Liste as janelas e informe processId em toda outra ação, inclusive screenshot, click e scroll. Somente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver são permitidos; não há captura da tela inteira.",
+                : "Argumentos de desktop inválidos. Liste as janelas e informe processId em toda outra ação, inclusive screenshot, click e scroll. Somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient são permitidos; não há captura da tela inteira.",
             },
           ],
         });
@@ -1119,10 +1119,13 @@ export class AssistantService extends EventEmitter {
             message,
             safety,
             tool: "desktop",
-            execute: () => this.options.desktop.execute(args),
-            confirmation: async () =>
-              desktopConfirmationReason(args as Parameters<typeof desktopConfirmationReason>[0]),
-            approval: () => desktopApproval(args as Parameters<typeof desktopApproval>[0]),
+            execute: (approved) =>
+              approved
+                ? this.options.desktop.execute(args, true)
+                : this.options.desktop.execute(args),
+            confirmation: () => this.options.desktop.confirmationReason(args),
+            approval: (reason) =>
+              desktopApproval(args as Parameters<typeof desktopApproval>[0], reason),
           };
       await this.executeTool(waiting, null);
     } else if (
@@ -1237,7 +1240,7 @@ export class AssistantService extends EventEmitter {
                 this.publish();
                 return;
               }
-              result = await waiting.execute!();
+              result = await waiting.execute!(accept === true);
             }
           }
         } catch (error) {

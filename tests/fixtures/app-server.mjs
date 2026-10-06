@@ -747,7 +747,39 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           );
           break;
         }
-        if (input.startsWith("desktop dbeaver")) {
+        if (input.startsWith("desktop forticlient")) {
+          const action = input.includes("consultar")
+            ? "screenshot"
+            : input.includes("texto")
+              ? "type_text"
+              : input.includes("atalho")
+                ? "send_keys"
+                : "click";
+          const args = {
+            action,
+            processId: 8383,
+            ...(action === "screenshot"
+              ? {}
+              : {
+                  risk: "routine",
+                  intent: "Reconectar o perfil VPN sintético no FortiClient",
+                  ...(action === "click"
+                    ? { x: 120, y: 180 }
+                    : action === "type_text"
+                      ? { text: "SYNTHETIC_ONLY" }
+                      : { keys: "^s" }),
+                }),
+          };
+          if (input.includes("misto")) {
+            let remaining = 2;
+            const next = () => {
+              if (--remaining === 0)
+                response(thread, turn, "Desktop e navegador: sequência concluída.");
+            };
+            desktopCall(thread, turn, args, next);
+            desktopCall(thread, turn, { action: "snapshot" }, next, {}, false, "stag_browser");
+          } else desktopCall(thread, turn, args, null, {}, input.includes("duplicado"));
+        } else if (input.startsWith("desktop dbeaver")) {
           desktopCall(
             thread,
             turn,

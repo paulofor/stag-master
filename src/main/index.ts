@@ -109,11 +109,12 @@ async function start(): Promise<void> {
       await shell.openExternal(url);
     },
     desktop: {
-      execute: (raw) => {
+      confirmationReason: (raw) => desktop.confirmationReason(raw),
+      execute: (raw, approved) => {
         const input = desktopArguments.parse(raw);
         return ["screenshot", "click", "scroll"].includes(input.action)
-          ? withoutAssistantWindow(window, () => desktop.execute(input))
-          : desktop.execute(input);
+          ? withoutAssistantWindow(window, () => desktop.execute(input, approved))
+          : desktop.execute(input, approved);
       },
     },
     browser,
@@ -195,9 +196,9 @@ async function start(): Promise<void> {
         type: "warning",
         title: "Acesso ao Windows",
         message:
-          "Permitir controle de Postman, IntelliJ IDEA, Visual Studio Code e DBeaver nesta conversa?",
+          "Permitir controle de Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient nesta conversa?",
         detail:
-          "O desktop ficará limitado a esses quatro aplicativos: capturas somente da janela escolhida, foco, mouse e teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação. Navegação web usa o navegador integrado, com autorização própria. A rotina não pede nova aprovação; exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações incertas exigem confirmação específica. Capturas e títulos dessas janelas são enviados ao ChatGPT. Autorizar inicia nova conversa; revogar ou abrir outra encerra o acesso.",
+          "O desktop ficará limitado a esses cinco aplicativos: capturas somente da janela escolhida, foco, mouse e teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação. No FortiClient, consulta visual usa este consentimento; cliques, digitação e atalhos sempre pedem confirmação, incluindo reconectar a VPN. O acompanhamento ocorre durante a tarefa. Navegação web usa o navegador integrado, com autorização própria. A rotina não pede nova aprovação; exclusão, envio externo, publicação, pagamentos, credenciais, mudanças no sistema e interações incertas exigem confirmação específica. Capturas e títulos dessas janelas são enviados ao ChatGPT. Autorizar inicia nova conversa; revogar ou abrir outra encerra o acesso.",
         buttons: ["Cancelar", "Permitir acesso"],
         defaultId: 0,
         cancelId: 0,

@@ -68,7 +68,7 @@ describe("contrato do desktop limitado", () => {
     for (const mode of ["read", "project", "windows"] as const) {
       const instructions = assistantInstructions(mode, "win32", false, true);
       expect(instructions).toContain(
-        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
+        "restrito exclusivamente a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient",
       );
       expect(instructions).toContain("não é ampliada por confirmação crítica");
       expect(instructions).toContain("terminal de IDE, scripts, bibliotecas ou outra automação");
@@ -76,12 +76,20 @@ describe("contrato do desktop limitado", () => {
       expect(instructions).toContain("incluindo screenshot, click e scroll");
       expect(instructions).toContain("editar SQL sem executá-lo são rotina");
       expect(instructions).toContain("Não presuma que uma conexão é local ou de teste");
+      expect(instructions).toContain("No FortiClient");
+      expect(instructions).toContain("mesmo declarados routine");
+      expect(instructions).toContain("perfil/conexão visível");
+      expect(instructions).toContain("senha/MFA, SSO externo");
+      expect(instructions).toContain("não prometa monitoramento permanente");
     }
     expect(desktopTool.description).toContain(
-      "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code e DBeaver",
+      "Controla exclusivamente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient",
     );
     expect(desktopTool.description).toContain("mesmo após aprovação");
     expect(desktopTool.description).toContain("confirmar transações");
+    expect(desktopTool.description).toContain(
+      "Clique, digitação e atalhos sempre exigem confirmação",
+    );
     expect(desktopTool.inputSchema.anyOf).toContainEqual({ required: ["processId"] });
   });
 });
