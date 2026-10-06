@@ -40,13 +40,13 @@ test("janela compacta alterna navegador e conversa, rotina segue e crítico pode
   await page.getByRole("button", { name: "Voltar à conversa" }).click();
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("navegador ler documentação");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(
     page.getByText("Navegador: documentação consultada.", { exact: true }),
   ).toBeVisible();
   await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
   await input.fill("navegador crítico enviar dados");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Confirmar ação no navegador?", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Recusar", exact: true }).click();
   await expect(page.getByText("Navegador: ação recusada.", { exact: true })).toBeVisible();

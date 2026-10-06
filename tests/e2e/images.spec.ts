@@ -32,7 +32,7 @@ test.beforeEach(async ({ page }) => {
 test("imagens pendentes não são descartadas nem enviadas pela fila de texto", async ({ page }) => {
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("lento");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await input.fill("Analise depois");
   await paste(page);
   await expect(page.locator(".composer img")).toHaveCount(1);
@@ -58,6 +58,11 @@ test("cola, remove e envia texto com imagens sem perder o texto", async ({ page 
   await page.getByRole("button", { name: "Remover imagem 1" }).click();
   await expect(page.locator(".composer img")).toHaveCount(1);
   await expect(input).toHaveValue("Analise esta tela do sistema");
+  await input.press("Enter");
+  await input.pressSequentially("Confira o formulário");
+  await expect(input).toHaveValue("Analise esta tela do sistema\nConfira o formulário");
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  await expect(page.locator(".user-message")).toHaveCount(0);
   await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.locator(".user-message img")).toHaveCount(1);
   await expect(page.locator(".user-message")).toContainText("Analise esta tela do sistema");
@@ -69,10 +74,16 @@ test("cola, remove e envia texto com imagens sem perder o texto", async ({ page 
   );
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-request-image.png` });
 });
-test("só imagem habilita Enter e o histórico preserva a imagem", async ({ page }) => {
+test("Enter preserva imagem sem texto; o botão envia e o histórico restaura", async ({ page }) => {
   await paste(page);
   await expect(page.getByRole("button", { name: "Enviar mensagem" })).toBeEnabled();
-  await page.getByLabel("Mensagem para o assistente").press("Enter");
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.press("Enter");
+  await expect(input).toHaveValue("\n");
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  await expect(page.locator(".user-message")).toHaveCount(0);
+  expect(await page.evaluate(async () => (await window.stag!.getSnapshot()).threadId)).toBeNull();
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.locator(".user-message img")).toHaveCount(1);
   await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
@@ -83,7 +94,7 @@ test("só imagem habilita Enter e o histórico preserva a imagem", async ({ page
   await expect(page.locator(".composer img")).toHaveCount(0);
   await expect(page.locator(".user-message img")).toHaveCount(1);
 });
-test("falha preserva rascunho/anexo e novo envio funciona", async ({ page }) => {
+test("falha preserva rascunho multilinha/anexo e novo envio funciona", async ({ page }) => {
   await page.evaluate(() => {
     const original = window.stag!.request;
     let failed = false;
@@ -97,15 +108,26 @@ test("falha preserva rascunho/anexo e novo envio funciona", async ({ page }) => 
   });
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("Analise o diagrama");
+  await input.press("Enter");
+  await input.pressSequentially("Verifique as relações");
+  const text = "Analise o diagrama\nVerifique as relações";
   await paste(page);
   await expect(page.locator(".composer img")).toHaveCount(1);
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByRole("alert")).toContainText("Falha sintética");
-  await expect(input).toHaveValue("Analise o diagrama");
+  await expect(input).toHaveValue(text);
   await expect(page.locator(".composer img")).toHaveCount(1);
-  await input.press("Enter");
+  await expect(input).toBeFocused();
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.locator(".user-message img")).toHaveCount(1);
   await expect(page.locator(".user-message")).toHaveCount(1);
+  await expect(input).toBeFocused();
+  expect(
+    await page.evaluate(
+      async () =>
+        (await window.stag!.getSnapshot()).items.find((item) => item.kind === "user")?.text,
+    ),
+  ).toBe(text);
 });
 test("formatos e limites inválidos preservam o rascunho e os anexos válidos", async ({ page }) => {
   const input = page.getByLabel("Mensagem para o assistente");
@@ -158,7 +180,7 @@ test("cancelar seleção mantém anexo; selecionar projeto e sair da conta o des
 }) => {
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("Analise o projeto");
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
   await paste(page);
   await expect(page.locator(".composer img")).toHaveCount(1);

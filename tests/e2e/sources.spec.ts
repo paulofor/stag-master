@@ -51,7 +51,7 @@ test("cadastro, edição, remoção e cancelamento preservam a conversa e o rasc
   await expect(page.getByRole("button", { name: "Fontes do projeto", exact: true })).toContainText(
     "1",
   );
-  await input.press("Enter");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
   await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();

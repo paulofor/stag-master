@@ -90,6 +90,7 @@ export function App() {
   const [images, setImages] = useState<RequestImage[]>([]);
   const [pasting, setPasting] = useState(false);
   const [sendingDraft, setSendingDraft] = useState(false);
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
   const imageEpoch = useRef(0);
   const pasteInProgress = useRef(false);
   const sendInProgress = useRef(false);
@@ -112,6 +113,9 @@ export function App() {
   const input = useRef<HTMLTextAreaElement>(null);
   const revision = useRef(0);
   const bridge = window.stag;
+  useEffect(() => {
+    if (composerFocusRequest > 0) input.current?.focus();
+  }, [composerFocusRequest]);
   useEffect(clearImages, [clearImages, state.project?.path, state.account?.email]);
   useEffect(() => setSourcesDialog(false), [state.project?.path]);
   useEffect(() => {
@@ -199,7 +203,7 @@ export function App() {
     }
     sendInProgress.current = false;
     setSendingDraft(false);
-    input.current?.focus();
+    setComposerFocusRequest((request) => request + 1);
   }
   async function pasteImages(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = Array.from(event.clipboardData.files);
@@ -657,12 +661,6 @@ export function App() {
               disabled={sendingDraft}
               onPaste={(event) => void pasteImages(event)}
               onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
             />
             <div className="paste-hint" role="status" aria-label="Imagens da solicitação">
               {pasting
@@ -792,7 +790,7 @@ export function App() {
               </span>
             ) : (
               <span className="footer-hint">
-                Enter para enviar<span> · Shift+Enter para nova linha</span>
+                Enter para nova linha<span> · Use o botão para enviar</span>
               </span>
             )}
             <span className="local-label">
