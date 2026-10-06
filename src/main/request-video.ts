@@ -196,7 +196,7 @@ export async function prepareVideo(
       );
     const seconds = parsed.data.format.duration;
     const frames: PreparedVideo["frames"] = [];
-    const count = Math.min(maxVideoFrames, Math.max(1, Math.ceil(seconds / 20)));
+    const count = Math.min(maxVideoFrames, Math.max(seconds < 2 ? 1 : 3, Math.ceil(seconds / 10)));
     for (let index = 0; index < count; index++) {
       progress(`Extraindo imagem ${index + 1} de ${count}…`);
       const time = count === 1 ? seconds / 2 : (index * Math.max(0, seconds - 0.5)) / (count - 1);

@@ -64,6 +64,9 @@ try {
     (phase) => phases.push(phase),
   );
   assert.equal(video.summary.audio, "transcribed");
+  assert.equal(video.frames.length, 3, "Vídeos curtos devem incluir início, meio e fim.");
+  assert.equal(video.frames[0].seconds, 0);
+  assert.ok(video.frames.at(-1).seconds >= 5.5);
   assert.ok(
     video.transcript.some((entry) => /order.*approval|approval.*shipping/i.test(entry.text)),
     "ASR local deve reconhecer a regra sintética de pedidos.",
@@ -152,8 +155,8 @@ try {
     () => {},
   );
   assert.equal(silentResult.summary.audio, "silent");
-  assert.equal(silentResult.frames.length, 3);
-  assert.ok(silentResult.frames[2].seconds > 40);
+  assert.equal(silentResult.frames.length, 5);
+  assert.ok(silentResult.frames.at(-1).seconds > 40);
   const invalid = join(dir, "invalido.mp4");
   await writeFile(invalid, "#EXTM3U\nhttps://fixture.invalid/never-request\n");
   await assert.rejects(
@@ -168,7 +171,7 @@ try {
     new AbortController().signal,
     () => {},
   );
-  assert.equal(recovered.frames.length, 3);
+  assert.equal(recovered.frames.length, 5);
   for (const [name, source, seconds] of [
     ["long", "color=s=64x64:r=1", "601"],
     ["wide", "color=s=5000x64:r=1", "1"],
