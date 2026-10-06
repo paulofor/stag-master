@@ -67,6 +67,14 @@ export const actionSchema = z.discriminatedUnion("type", [
       (action) => !!action.text || !!action.images?.length || !!action.videoId,
       "Escreva uma mensagem ou cole uma imagem.",
     ),
+  z.object({ type: z.literal("analyzeVideo") }).strict(),
+  z
+    .object({
+      type: z.literal("videoAnalysis"),
+      id: z.uuid(),
+      control: z.enum(["pause", "resume", "cancel", "retry"]),
+    })
+    .strict(),
   z.object({ type: z.literal("selectVideo") }).strict(),
   z.object({ type: z.literal("removeVideo") }).strict(),
   z

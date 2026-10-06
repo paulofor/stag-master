@@ -14,6 +14,7 @@ const settingsSchema = z.object({
         path: z.string(),
         mode: z.enum(["read", "project", "windows"]),
         browserTool: z.boolean().optional(),
+        backgroundVideo: z.boolean().optional(),
       }),
     )
     .default({}),

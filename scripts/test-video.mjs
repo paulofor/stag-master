@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { mkdtemp, mkdir, rm, readdir, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readdir, writeFile, readFile, open, stat } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
@@ -32,7 +32,9 @@ try {
     platform: "node",
     format: "esm",
   });
-  const { prepareVideo } = await import(pathToFileURL(join(dir, "request-video.mjs")).href);
+  const { prepareVideo, inspectVideo, prepareVideoSegment, validateVideoSource } = await import(
+    pathToFileURL(join(dir, "request-video.mjs")).href
+  );
   const file = join(dir, "projeto-sintetico.mp4");
   await run(ffmpeg, [
     "-v",
@@ -198,6 +200,154 @@ try {
     );
     assert.deepEqual(await readdir(join(dir, "tmp")), []);
   }
+  // Real multi-GB input, sparse on disk: valid MP4 with a large `free` atom.
+  // Detect the old Buffer.alloc(file.size)/whole-file copy without creating customer media.
+  const long = join(dir, "long.mp4");
+  const originalSize = (await stat(long)).size;
+  const handle = await open(long, "r+");
+  const freeSize = 3 * 1024 * 1024 * 1024;
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(freeSize, 0);
+  header.write("free", 4);
+  await handle.write(header, 0, header.length, originalSize);
+  await handle.truncate(originalSize + freeSize);
+  await handle.close();
+  const memoryBefore = process.resourceUsage().maxRSS;
+  const source = await inspectVideo(long, resources, new AbortController().signal);
+  assert.equal(source.seconds, 601);
+  assert.ok(source.size > 3 * 1024 * 1024 * 1024);
+  const sampled = [];
+  for (let index = 0; index < 3; index++) {
+    const part = await prepareVideoSegment(
+      source,
+      index,
+      "22222222-2222-4222-8222-222222222222",
+      resources,
+      join(dir, "tmp"),
+      new AbortController().signal,
+      () => {},
+    );
+    assert.equal(part.summary.segment.start, index * 300);
+    assert.equal(part.summary.segment.end, Math.min(601, (index + 1) * 300));
+    assert.ok(
+      part.frames.every(
+        (frame) => frame.seconds >= index * 300 && frame.seconds < part.summary.segment.end,
+      ),
+    );
+    assert.ok(part.frames.length <= 12);
+    sampled.push(part.frames.length);
+    assert.deepEqual(await readdir(join(dir, "tmp")), []);
+  }
+  const rssGrowthKiB = process.resourceUsage().maxRSS - memoryBefore;
+  assert.ok(
+    rssGrowthKiB < 192 * 1024,
+    `Bounded media RSS growth exceeded 192 MiB: ${rssGrowthKiB} KiB`,
+  );
+  console.log(
+    `Vídeo longo sintético: original esparso >3 GB, 3 trechos/601s, ${sampled.join("/")} quadros, crescimento de pico RSS ${rssGrowthKiB} KiB, sem cópia integral.`,
+  );
+  const changed = await open(long, "r+");
+  await changed.write(Buffer.from([1]), 0, 1, originalSize + freeSize - 1);
+  await changed.close();
+  await assert.rejects(
+    validateVideoSource(source, new AbortController().signal),
+    /O arquivo mudou/,
+  );
+  await assert.rejects(
+    prepareVideoSegment(
+      source,
+      3,
+      "22222222-2222-4222-8222-222222222222",
+      resources,
+      join(dir, "tmp"),
+      new AbortController().signal,
+      () => {},
+    ),
+    /Vídeo inválido/,
+  );
+  // Speech in a later segment must retain absolute times after bounded audio extraction.
+  const spoken = join(dir, "fala-temporal.mp4");
+  await run(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=s=160x90:r=1",
+    "-i",
+    resolve("tests/fixtures/project-speech.wav"),
+    "-filter:a",
+    "adelay=300000:all=1",
+    "-t",
+    "306",
+    "-c:v",
+    "libx264",
+    "-c:a",
+    "aac",
+    "-threads",
+    "2",
+    spoken,
+  ]);
+  const speechSource = await inspectVideo(spoken, resources, new AbortController().signal);
+  const speechPart = await prepareVideoSegment(
+    speechSource,
+    1,
+    "22222222-2222-4222-8222-222222222222",
+    resources,
+    join(dir, "tmp"),
+    new AbortController().signal,
+    () => {},
+  );
+  assert.ok(
+    speechPart.transcript.some((entry) => /order.*approval|approval.*shipping/i.test(entry.text)),
+  );
+  assert.ok(speechPart.transcript.every((entry) => entry.start >= 300 && entry.end <= 308));
+  const audioTail = join(dir, "fala-apos-imagens.mp4");
+  await run(ffmpeg, [
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-t",
+    "300",
+    "-i",
+    "color=s=160x90:r=1",
+    "-i",
+    resolve("tests/fixtures/project-speech.wav"),
+    "-filter:a",
+    "adelay=300000:all=1",
+    "-t",
+    "306",
+    "-c:v",
+    "libx264",
+    "-c:a",
+    "aac",
+    "-threads",
+    "2",
+    audioTail,
+  ]);
+  const tailSource = await inspectVideo(audioTail, resources, new AbortController().signal);
+  const tailPart = await prepareVideoSegment(
+    tailSource,
+    1,
+    "22222222-2222-4222-8222-222222222222",
+    resources,
+    join(dir, "tmp"),
+    new AbortController().signal,
+    () => {},
+  );
+  assert.equal(
+    tailPart.frames.length,
+    0,
+    "No image may be fabricated/reused when the video track has ended.",
+  );
+  assert.ok(
+    tailPart.transcript.some((entry) => /order.*approval|approval.*shipping/i.test(entry.text)),
+  );
+  assert.ok(
+    tailPart.transcript.every((entry) => entry.start >= 300 && entry.end <= tailSource.seconds),
+  );
+  assert.deepEqual(await readdir(join(dir, "tmp")), []);
   console.log(
     "Vídeo sintético: decoder/ASR reais, envio pelo serviço/RPC, memória determinística verificada, quadros temporais, arquivo inválido, limpeza e recuperação OK.",
   );

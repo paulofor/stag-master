@@ -12,7 +12,12 @@ import memoryCorpus from "../fixtures/memory-scenarios.json";
 import sourceCorpus from "../fixtures/source-scenarios.json";
 import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
-import { type PreparedVideo, type VideoProcessor } from "../../src/main/request-video";
+import {
+  type PreparedVideo,
+  type VideoProcessor,
+  type BackgroundVideoProcessor,
+} from "../../src/main/request-video";
+import { VideoAnalysisStore } from "../../src/main/video-analysis";
 import { videoInstructions } from "../../src/shared/request-video";
 import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
 import {
@@ -53,6 +58,11 @@ const syntheticVideo = (): PreparedVideo => ({
   ],
 });
 const video: VideoProcessor = { select: vi.fn(), prepare: vi.fn() };
+const backgroundVideo: BackgroundVideoProcessor = {
+  inspect: vi.fn(),
+  prepare: vi.fn(),
+  validate: vi.fn(),
+};
 const desktop = {
   confirmationReason: vi.fn(async (args: unknown) =>
     desktopConfirmationReason(args as DesktopArguments),
@@ -82,6 +92,42 @@ beforeEach(async () => {
   selectProject.mockResolvedValue(dir);
   vi.mocked(video.select).mockResolvedValue(resolve(dir, "video.mp4"));
   vi.mocked(video.prepare).mockResolvedValue(syntheticVideo());
+  vi.mocked(backgroundVideo.inspect).mockResolvedValue({
+    path: resolve(dir, "video.mp4"),
+    name: "projeto-sintetico.mp4",
+    size: 3e9,
+    mtimeMs: 1,
+    dev: 1,
+    ino: 1,
+    fingerprint: "b".repeat(64),
+    seconds: 601,
+    audio: true,
+  });
+  vi.mocked(backgroundVideo.validate).mockResolvedValue();
+  vi.mocked(backgroundVideo.prepare).mockImplementation(async (source, index, id) => {
+    const video = syntheticVideo();
+    video.summary = {
+      ...video.summary,
+      id,
+      seconds: source.seconds,
+      segment: {
+        index,
+        total: 3,
+        start: index * 300,
+        end: Math.min(source.seconds, (index + 1) * 300),
+      },
+    };
+    video.frames = video.frames.map((frame) => ({
+      ...frame,
+      seconds: Math.min(source.seconds - 0.1, frame.seconds + index * 300),
+    }));
+    video.transcript = video.transcript.map((entry) => ({
+      ...entry,
+      start: index * 300,
+      end: Math.min(source.seconds, index * 300 + 5),
+    }));
+    return video;
+  });
   prepareProjectGit.mockImplementation((path, options) =>
     prepareGit(path, {
       ...options,
@@ -114,6 +160,10 @@ beforeEach(async () => {
     desktop,
     browser,
     video,
+    videoAnalysis: {
+      store: new VideoAnalysisStore(resolve(dir, "video-analysis.json")),
+      processor: backgroundVideo,
+    },
     platform: "win32",
   });
   await service.init();
@@ -307,6 +357,286 @@ describe("vídeo para as anotações do projeto", () => {
     await send("Analise este projeto");
     await complete();
     await expect(readFile(resolve(neighbor, ".stag/negocio.md"))).rejects.toThrow();
+  });
+});
+describe("vídeo em segundo plano na conversa", () => {
+  async function analyzed() {
+    await vi.waitFor(() => expect(service.snapshot().videoAnalysis?.status).toBe("completed"));
+    await service.mediaSettled();
+  }
+  async function calls() {
+    return rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+  }
+  async function restart() {
+    service.dispose();
+    await service.mediaSettled();
+    await rpc.shutdown();
+    service = new AssistantService({
+      createRpc: () =>
+        (rpc = new RpcClient({
+          command: process.execPath,
+          args: [resolve("tests/fixtures/app-server.mjs")],
+          cwd: dir,
+          env: {
+            ...codexEnvironment(resolve(dir, "home")),
+            STAG_FIXTURE_STATE: resolve(dir, "server-state.json"),
+          },
+        })),
+      store,
+      selectProject,
+      prepareProjectGit,
+      openExternal,
+      desktop,
+      browser,
+      video,
+      videoAnalysis: {
+        store: new VideoAnalysisStore(resolve(dir, "video-analysis.json")),
+        processor: backgroundVideo,
+      },
+      platform: "win32",
+    });
+    await service.init();
+    await service.request({ type: "connect" });
+  }
+  it("envio normal, fontes vigentes, memória temporal e Leitura preservados por trecho", async () => {
+    await ready();
+    const source = { name: "Fonte sintética", url: "http://127.0.0.1:8765/" };
+    await service.request({ type: "projectSources", projectPath: dir, sources: [source] });
+    await service.request({ type: "analyzeVideo" });
+    await analyzed();
+    const turns = (await calls()).filter((call) => call.method === "turn/start");
+    expect(turns).toHaveLength(3);
+    for (const [index, { params }] of turns.entries()) {
+      expect(params.runtimeWorkspaceRoots).toEqual([dir]);
+      expect(params.sandboxPolicy.type).toBe("workspaceWrite");
+      const context = JSON.parse(params.additionalContext.stag_video.value);
+      expect(context.segment.index).toBe(index);
+      expect(context.segment.start).toBe(index * 300);
+      expect(params.additionalContext.stag_video.kind).toBe("untrusted");
+      expect(JSON.stringify(params.additionalContext)).toContain(source.url);
+    }
+    const memory = await readFile(resolve(dir, ".stag/negocio.md"), "utf8");
+    expect(memory).toContain("600s");
+    expect(memory).not.toContain("Every order needs");
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "analyzeVideo" });
+    await analyzed();
+    expect(await readFile(resolve(dir, ".stag/negocio.md"), "utf8")).toBe(memory);
+    expect(service.snapshot().items.at(-1)?.text).toContain("não foram salvas");
+  });
+  it("pausa durante análise preserva texto na fila até conclusão e retomada explícita", async () => {
+    await ready();
+    await rpc.call("_fixture/videoBehavior", { mode: "hold" });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+    const id = service.snapshot().videoAnalysis!.id;
+    await service.request({
+      type: "enqueue",
+      threadId: service.snapshot().threadId!,
+      id: randomUUID(),
+      text: "Explique a arquitetura",
+    });
+    await service.request({ type: "videoAnalysis", id, control: "pause" });
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+    const turn = (
+      await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+        threadId: service.snapshot().threadId,
+        includeTurns: true,
+      })
+    ).thread.turns.at(-1)!;
+    await rpc.call("_fixture/finishTurn", {
+      threadId: service.snapshot().threadId,
+      turnId: turn.id,
+    });
+    await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis).toMatchObject({ status: "paused", completed: 1 });
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    await rpc.call("_fixture/videoBehavior", { mode: "normal" });
+    await service.request({ type: "videoAnalysis", id, control: "resume" });
+    await analyzed();
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    await service.request({
+      type: "pauseQueue",
+      threadId: service.snapshot().threadId!,
+      paused: false,
+    });
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
+    await complete();
+  });
+  it("aprovação segura participa da fila normal; cancelar interrompe e não inicia outra parte", async () => {
+    await ready();
+    await rpc.call("_fixture/videoBehavior", { mode: "approval" });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().videoAnalysis?.completed).toBe(0);
+    const id = service.snapshot().videoAnalysis!.id;
+    await service.request({ type: "videoAnalysis", id, control: "cancel" });
+    await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis).toMatchObject({ status: "cancelled", completed: 0 });
+    expect(service.snapshot().approvals).toHaveLength(0);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+  });
+  it("recusar aprovação pausa somente o vídeo e libera o request sem enviar a próxima parte", async () => {
+    await ready();
+    await rpc.call("_fixture/videoBehavior", { mode: "approval" });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    await service.request({
+      type: "answer",
+      id: service.snapshot().approvals[0].id,
+      accept: false,
+    });
+    await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis).toMatchObject({ status: "paused", completed: 1 });
+    expect(service.snapshot().busy).toBe(false);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
+  });
+  it("conclusão remota aguarda a fila compartilhada de ferramentas antes do checkpoint/próximo trecho", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await rpc.call("_fixture/videoBehavior", { mode: "browser" });
+    let release!: () => void;
+    browser.execute.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { success: true, contentItems: [{ type: "inputText", text: "Resultado sintético" }] };
+    });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    const threadId = service.snapshot().threadId;
+    const { thread } = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    await rpc.call("_fixture/finishTurn", { threadId, turnId: thread.turns.at(-1)!.id });
+    await vi.waitFor(() => expect(service.snapshot().busy).toBe(false));
+    expect(service.snapshot().videoAnalysis?.completed).toBe(0);
+    expect(backgroundVideo.prepare).toHaveBeenCalledTimes(1);
+    await rpc.call("_fixture/videoBehavior", { mode: "normal" });
+    release();
+    await analyzed();
+    expect(backgroundVideo.prepare).toHaveBeenCalledTimes(3);
+  });
+  it("fechar/reiniciar concilia trecho terminado sem repetir e mantém a conversa original", async () => {
+    await ready();
+    let abort!: () => void;
+    vi.mocked(backgroundVideo.prepare).mockImplementationOnce(
+      async (_source, _index, _id, signal) => {
+        await new Promise<void>((resolve) => {
+          abort = resolve;
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        signal.throwIfAborted();
+        return syntheticVideo();
+      },
+    );
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(abort).toBeTypeOf("function"));
+    const original = service.snapshot().videoAnalysis!;
+    await restart();
+    expect(service.snapshot().videoAnalysis).toMatchObject({
+      id: original.id,
+      status: "paused",
+      completed: 0,
+    });
+    expect(service.snapshot().browser.authorized).toBe(false);
+    expect(service.snapshot().threadId).toBeNull();
+    await service.request({ type: "videoAnalysis", id: original.id, control: "resume" });
+    await analyzed();
+    expect(service.snapshot().threadId).toBe(original.threadId);
+  });
+  it("resposta perdida após conclusão é recuperada pelo marcador, sem envio duplicado", async () => {
+    await ready();
+    const original = RpcClient.prototype.call;
+    let lose = true;
+    const spy = vi.spyOn(RpcClient.prototype, "call").mockImplementation(async function <T>(
+      this: RpcClient,
+      method: string,
+      params: Record<string, unknown> = {},
+    ): Promise<T> {
+      const result = await original.call(this, method, params);
+      if (method === "turn/start" && lose) {
+        lose = false;
+        await vi.waitFor(() => expect(service.snapshot().busy).toBe(false));
+        throw new Error("O servidor demorou a responder.");
+      }
+      return result as T;
+    });
+    await service.request({ type: "analyzeVideo" });
+    await service.mediaSettled();
+    const id = service.snapshot().videoAnalysis!.id;
+    spy.mockRestore();
+    await service.request({ type: "connect" });
+    await service.request({ type: "videoAnalysis", id, control: "resume" });
+    await analyzed();
+    const turns = (
+      await rpc.call<{ thread: { turns: unknown[] } }>("thread/read", {
+        threadId: service.snapshot().threadId,
+        includeTurns: true,
+      })
+    ).thread.turns;
+    expect(turns).toHaveLength(3);
+    expect(vi.mocked(backgroundVideo.prepare).mock.calls.map((args) => args[1])).toEqual([0, 1, 2]);
+  });
+  it("retoma histórico longo em páginas sem acumular imagens ou duplicar mensagens", async () => {
+    await ready();
+    const source = await backgroundVideo.inspect("synthetic", new AbortController().signal);
+    vi.mocked(backgroundVideo.inspect).mockResolvedValueOnce({ ...source, seconds: 6001 });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().videoAnalysis?.completed).toBe(21), {
+      timeout: 5000,
+    });
+    await service.mediaSettled();
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(21);
+    expect(service.snapshot().items.some((item) => item.images?.length)).toBe(false);
+    const threadId = service.snapshot().threadId!;
+    await restart();
+    await service.request({ type: "resume", threadId });
+    const historyCalls = await calls();
+    expect(historyCalls.find((call) => call.method === "thread/resume")?.params.excludeTurns).toBe(
+      true,
+    );
+    expect(historyCalls.filter((call) => call.method === "thread/turns/list")).toHaveLength(21);
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(21);
+    expect(service.snapshot().items.some((item) => item.images?.length)).toBe(false);
+    expect(service.snapshot().videoAnalysis?.completed).toBe(21);
+  });
+  it("cancelar checkpoint retomado interrompe somente o turno da análise original", async () => {
+    await ready();
+    await rpc.call("_fixture/videoBehavior", { mode: "hold" });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+    const id = service.snapshot().videoAnalysis!.id;
+    await restart();
+    await service.request({ type: "videoAnalysis", id, control: "cancel" });
+    await complete();
+    expect(service.snapshot().videoAnalysis?.status).toBe("cancelled");
+    expect((await calls()).filter((call) => call.method === "turn/interrupt")).toHaveLength(1);
+    expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(0);
+  });
+  it("cancelamento de seleção e projeto inválido preservam avanço; outra raiz não herda", async () => {
+    await ready();
+    await rpc.call("_fixture/videoBehavior", { mode: "hold" });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+    await service.request({ type: "stop" });
+    await service.mediaSettled();
+    const previous = service.snapshot().videoAnalysis!;
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().videoAnalysis!.id).toBe(previous.id);
+    selectProject.mockResolvedValueOnce(resolve(dir, "missing"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    expect(service.snapshot().videoAnalysis!.id).toBe(previous.id);
+    const other = resolve(dir, "other");
+    await mkdir(other);
+    selectProject.mockResolvedValueOnce(other);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().videoAnalysis).toBeNull();
+    await expect(
+      service.request({ type: "videoAnalysis", id: previous.id, control: "resume" }),
+    ).rejects.toThrow("indisponível");
   });
 });
 describe("sessões de sites por projeto", () => {

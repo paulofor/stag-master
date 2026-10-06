@@ -53,6 +53,44 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         request: async (action: Action) => {
           state.error = null;
           switch (action.type) {
+            case "analyzeVideo":
+              state.threadId ||= `thread-${++count}`;
+              state.videoAnalysis = {
+                id: crypto.randomUUID(),
+                name: "reuniao-sintetica-longa.mp4",
+                threadId: state.threadId,
+                mode: state.mode,
+                seconds: 5473,
+                completed: 0,
+                total: 19,
+                status: "running",
+                working: true,
+                phase: "Extraindo imagens do primeiro trecho…",
+                error: null,
+              };
+              break;
+            case "videoAnalysis":
+              if (!state.videoAnalysis || state.videoAnalysis.id !== action.id)
+                throw new Error("Análise indisponível");
+              if (action.control === "pause") {
+                state.videoAnalysis.status = "paused";
+                state.videoAnalysis.working = false;
+                state.videoAnalysis.completed = 1;
+                state.videoAnalysis.phase =
+                  "Progresso salvo. Retome com o arquivo original disponível.";
+              } else if (action.control === "cancel") {
+                state.videoAnalysis.status = "cancelled";
+                state.videoAnalysis.working = false;
+                state.videoAnalysis.phase =
+                  "Análise cancelada. As anotações já verificadas são preservadas.";
+              } else {
+                state.videoAnalysis.status = "running";
+                state.videoAnalysis.working = true;
+                state.videoAnalysis.phase = "Extraindo imagens do próximo trecho…";
+                state.threadId = state.videoAnalysis.threadId;
+                state.mode = state.videoAnalysis.mode;
+              }
+              break;
             case "selectVideo":
               state.pendingVideo = {
                 status: "ready",

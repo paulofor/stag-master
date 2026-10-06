@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { lstat, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, mkdtemp, open, readFile, realpath, rm } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import {
   requestImageSchema,
@@ -10,6 +10,9 @@ import {
 } from "../shared/request-images";
 import {
   maxVideoBytes,
+  maxBackgroundVideoBytes,
+  maxBackgroundVideoSeconds,
+  videoSegmentSeconds,
   maxVideoSeconds,
   maxVideoFrames,
   maxVideoTranscriptLength,
@@ -86,14 +89,39 @@ export function runMedia(
   });
 }
 
+export const videoSourceSchema = z.object({
+  path: z.string().min(1).max(32768),
+  name: z.string().min(1).max(180),
+  size: z.number().positive().max(maxBackgroundVideoBytes),
+  mtimeMs: z.number().nonnegative(),
+  dev: z.number(),
+  ino: z.number(),
+  fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  seconds: z.number().positive().max(maxBackgroundVideoSeconds),
+  audio: z.boolean(),
+});
+export type VideoSource = z.infer<typeof videoSourceSchema>;
+export interface BackgroundVideoProcessor {
+  inspect(path: string, signal: AbortSignal): Promise<VideoSource>;
+  prepare(
+    source: VideoSource,
+    index: number,
+    id: string,
+    signal: AbortSignal,
+    progress: (phase: string) => void,
+  ): Promise<PreparedVideo>;
+  validate(source: VideoSource, signal: AbortSignal): Promise<void>;
+}
+
 const probeSchema = z.object({
-  format: z.object({ duration: z.coerce.number().positive().max(maxVideoSeconds) }),
+  format: z.object({ duration: z.coerce.number().positive().max(maxBackgroundVideoSeconds) }),
   streams: z
     .array(
       z.object({
         codec_type: z.string(),
         width: z.number().optional(),
         height: z.number().optional(),
+        avg_frame_rate: z.string().max(100).optional(),
       }),
     )
     .max(16),
@@ -108,6 +136,33 @@ const transcriptionSchema = z.object({
     )
     .max(2000),
 });
+export function normalizeVideoTranscript(
+  value: unknown,
+  start: number,
+  duration: number,
+): PreparedVideo["transcript"] {
+  const result = transcriptionSchema.parse(value);
+  // Whisper predicts timestamp tokens within 30-second windows, including padded audio.
+  // Keep valid speech within the actual chunk, without accepting unbounded/future offsets.
+  if (
+    result.transcription.some(
+      ({ offsets }) =>
+        offsets.from / 1000 > duration + 1 ||
+        offsets.to < offsets.from ||
+        offsets.to / 1000 > duration + 30,
+    ) ||
+    result.transcription.reduce((sum, entry) => sum + entry.text.trim().length, 0) >
+      maxVideoTranscriptLength
+  )
+    throw new Error("Transcrição inválida ou muito extensa. Envie um trecho menor.");
+  return result.transcription
+    .map(({ offsets, text }) => ({
+      start: start + Math.min(duration, offsets.from / 1000),
+      end: start + Math.min(duration, offsets.to / 1000),
+      text: text.trim(),
+    }))
+    .filter((entry) => entry.text && entry.end > entry.start);
+}
 const localInput = [
   "-protocol_whitelist",
   "file,pipe",
@@ -117,19 +172,156 @@ const localInput = [
   "2",
 ];
 
+function videoName(path: string): string {
+  return (
+    basename(path)
+      .replace(/[\p{Cc}\p{Cf}]/gu, "")
+      .slice(0, 180) || "Vídeo"
+  );
+}
+async function sourceIdentity(path: string, signal: AbortSignal) {
+  if (!isAbsolute(path) || !videoExtensions.includes(extname(path).slice(1).toLowerCase()))
+    throw new Error("Selecione um vídeo local MP4, MOV, MKV ou WebM pelo diálogo.");
+  signal.throwIfAborted();
+  const info = await lstat(path).catch(() => null);
+  if (!info?.isFile() || info.size <= 0 || info.size > maxBackgroundVideoBytes)
+    throw new Error("Selecione um arquivo de vídeo local com até 20 GB.");
+  const canonical = await realpath(path).catch(() => null);
+  if (!canonical) throw new Error("O arquivo de vídeo não está disponível. Selecione-o novamente.");
+  const file = await open(path, "r").catch(() => null);
+  if (!file) throw new Error("O arquivo de vídeo não está disponível. Selecione-o novamente.");
+  try {
+    const before = await file.stat();
+    if (
+      before.size !== info.size ||
+      before.dev !== info.dev ||
+      before.ino !== info.ino ||
+      before.mtimeMs !== info.mtimeMs
+    )
+      throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
+    // Fixed samples protect resume identity without allocating or hashing a multi-GB original.
+    const hash = createHash("sha256");
+    const bytes = Buffer.alloc(Math.min(info.size, 65536));
+    for (const offset of [0, Math.max(0, info.size - bytes.length)]) {
+      signal.throwIfAborted();
+      const result = await file.read(bytes, 0, bytes.length, offset);
+      if (result.bytesRead !== bytes.length) throw new Error("O arquivo de vídeo está incompleto.");
+      hash.update(bytes);
+    }
+    const after = await file.stat();
+    if (after.size !== info.size || after.mtimeMs !== info.mtimeMs)
+      throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
+    return {
+      path: canonical,
+      name: videoName(path),
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      dev: info.dev,
+      ino: info.ino,
+      fingerprint: hash.digest("hex"),
+    };
+  } finally {
+    await file.close();
+  }
+}
+export async function validateVideoSource(source: VideoSource, signal: AbortSignal): Promise<void> {
+  const current = await sourceIdentity(source.path, signal);
+  if (
+    ["path", "size", "mtimeMs", "dev", "ino", "fingerprint"].some(
+      (key) => current[key as keyof typeof current] !== source[key as keyof VideoSource],
+    )
+  )
+    throw new Error(
+      "O arquivo mudou. Selecione o vídeo novamente; o avanço anterior não será reutilizado.",
+    );
+}
+export async function inspectVideo(
+  path: string,
+  resources: string,
+  signal: AbortSignal,
+): Promise<VideoSource> {
+  const identity = await sourceIdentity(path, signal);
+  try {
+    const raw = await runMedia(
+      join(resources, process.platform === "win32" ? "ffprobe.exe" : "ffprobe"),
+      [
+        "-v",
+        "error",
+        ...localInput,
+        "-show_entries",
+        "format=duration:stream=codec_type,width,height,avg_frame_rate",
+        "-of",
+        "json",
+        identity.path,
+      ],
+      signal,
+    );
+    const parsed = probeSchema.safeParse(JSON.parse(raw));
+    const video =
+      parsed.success && parsed.data.streams.find((stream) => stream.codec_type === "video");
+    if (
+      !parsed.success ||
+      !video ||
+      !video.width ||
+      !video.height ||
+      video.width > 4096 ||
+      video.height > 4096 ||
+      video.width * video.height > 8_847_360
+    )
+      throw new Error(
+        "Vídeo inválido: use até 12 horas e resolução máxima de 4096 pixels por lado (8,8 megapixels).",
+      );
+    const source = {
+      ...identity,
+      seconds: parsed.data.format.duration,
+      audio: parsed.data.streams.some((stream) => stream.codec_type === "audio"),
+    };
+    await validateVideoSource(source, signal);
+    return source;
+  } catch (error) {
+    if (signal.aborted) throw new Error("Preparação de vídeo cancelada.");
+    if (error instanceof Error && /^(Vídeo inválido|O arquivo)/.test(error.message)) throw error;
+    throw new Error("Não foi possível preparar o vídeo. Verifique o arquivo e tente novamente.");
+  }
+}
+export function prepareVideoSegment(
+  source: VideoSource,
+  index: number,
+  id: string,
+  resources: string,
+  temporaryRoot: string,
+  signal: AbortSignal,
+  progress: (phase: string) => void,
+): Promise<PreparedVideo> {
+  return prepareVideo(source.path, resources, temporaryRoot, signal, progress, {
+    source,
+    index,
+    id,
+  });
+}
+
 export async function prepareVideo(
   path: string,
   resources: string,
   temporaryRoot: string,
   signal: AbortSignal,
   progress: (phase: string) => void,
+  segment?: { source: VideoSource; index: number; id: string },
 ): Promise<PreparedVideo> {
   const extension = extname(path).slice(1).toLowerCase();
   if (!videoExtensions.includes(extension))
     throw new Error("Selecione um vídeo MP4, MOV, MKV ou WebM.");
   const info = await lstat(path).catch(() => null);
-  if (!info?.isFile() || info.size <= 0 || info.size > maxVideoBytes)
-    throw new Error("Selecione um arquivo de vídeo local com até 100 MB.");
+  if (
+    !info?.isFile() ||
+    info.size <= 0 ||
+    info.size > (segment ? maxBackgroundVideoBytes : maxVideoBytes)
+  )
+    throw new Error(
+      segment
+        ? "Selecione um arquivo de vídeo local com até 20 GB."
+        : "Selecione um arquivo de vídeo local com até 100 MB.",
+    );
   signal.throwIfAborted();
   let dir: string;
   try {
@@ -146,35 +338,59 @@ export async function prepareVideo(
     runMedia(executable(name), args, signal, timeout);
   try {
     progress("Verificando o vídeo…");
-    const source = await open(path, "r");
-    try {
-      const current = await source.stat();
+    if (segment) {
+      videoSourceSchema.parse(segment.source);
       if (
-        !current.isFile() ||
-        current.size !== info.size ||
-        current.ino !== info.ino ||
-        current.dev !== info.dev
+        !Number.isInteger(segment.index) ||
+        segment.index < 0 ||
+        segment.index * videoSegmentSeconds >= segment.source.seconds
       )
-        throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
-      const bytes = Buffer.alloc(current.size);
-      let offset = 0;
-      while (offset < bytes.length) {
-        signal.throwIfAborted();
-        const { bytesRead } = await source.read(bytes, offset, bytes.length - offset, offset);
-        if (!bytesRead) throw new Error("O arquivo de vídeo está incompleto.");
-        offset += bytesRead;
+        throw new Error("Vídeo inválido: trecho fora da duração do arquivo.");
+      await validateVideoSource(segment.source, signal);
+    } else {
+      // The short-attachment copy is also bounded: never allocate the original file size.
+      const source = await open(path, "r");
+      try {
+        const target = await open(join(dir, "input"), "wx", 0o600);
+        try {
+          const current = await source.stat();
+          if (
+            current.size !== info.size ||
+            current.ino !== info.ino ||
+            current.dev !== info.dev ||
+            current.mtimeMs !== info.mtimeMs
+          )
+            throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
+          const bytes = Buffer.alloc(Math.min(current.size, 1024 * 1024));
+          let offset = 0;
+          while (offset < current.size) {
+            signal.throwIfAborted();
+            const { bytesRead } = await source.read(
+              bytes,
+              0,
+              Math.min(bytes.length, current.size - offset),
+              offset,
+            );
+            if (!bytesRead) throw new Error("O arquivo de vídeo está incompleto.");
+            let written = 0;
+            while (written < bytesRead)
+              written += (await target.write(bytes, written, bytesRead - written)).bytesWritten;
+            offset += bytesRead;
+          }
+        } finally {
+          await target.close();
+        }
+      } finally {
+        await source.close();
       }
-      await writeFile(join(dir, "input"), bytes, { mode: 0o600 });
-    } finally {
-      await source.close();
     }
-    const input = join(dir, "input");
+    const input = segment ? path : join(dir, "input");
     const raw = await run("ffprobe", [
       "-v",
       "error",
       ...localInput,
       "-show_entries",
-      "format=duration:stream=codec_type,width,height",
+      "format=duration:stream=codec_type,width,height,avg_frame_rate",
       "-of",
       "json",
       input,
@@ -184,6 +400,7 @@ export async function prepareVideo(
       parsed.success && parsed.data.streams.find((stream) => stream.codec_type === "video");
     if (
       !parsed.success ||
+      (!segment && parsed.data.format.duration > maxVideoSeconds) ||
       !video ||
       !video.width ||
       !video.height ||
@@ -195,11 +412,28 @@ export async function prepareVideo(
         "Vídeo inválido: use até 10 minutos e resolução máxima de 4096 pixels por lado (8,8 megapixels).",
       );
     const seconds = parsed.data.format.duration;
+    if (segment && Math.abs(seconds - segment.source.seconds) > 0.01)
+      throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
+    const start = segment ? segment.index * videoSegmentSeconds : 0;
+    const duration = segment ? Math.min(videoSegmentSeconds, seconds - start) : seconds;
+    const end = start + duration;
+    const [rateNumerator, rateDenominator] = (video.avg_frame_rate || "0/0").split("/").map(Number);
+    const frameMargin =
+      rateNumerator > 0 && rateDenominator > 0 ? Math.max(0.5, rateDenominator / rateNumerator) : 1;
     const frames: PreparedVideo["frames"] = [];
-    const count = Math.min(maxVideoFrames, Math.max(seconds < 2 ? 1 : 3, Math.ceil(seconds / 10)));
+    const count = Math.min(
+      maxVideoFrames,
+      Math.max(duration < 2 ? 1 : 3, Math.ceil(duration / 10)),
+    );
     for (let index = 0; index < count; index++) {
       progress(`Extraindo imagem ${index + 1} de ${count}…`);
-      const time = count === 1 ? seconds / 2 : (index * Math.max(0, seconds - 0.5)) / (count - 1);
+      const time =
+        start +
+        (count === 1
+          ? segment
+            ? 0
+            : duration / 2
+          : (index * Math.max(0, duration - frameMargin)) / (count - 1));
       const output = join(dir, "frame.jpg");
       // A seek with no decoded frame must not reuse the image from the preceding timestamp.
       await rm(output, { force: true });
@@ -227,6 +461,15 @@ export async function prepareVideo(
         "2",
         output,
       ]);
+      const frameInfo = await lstat(output).catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      // Audio can outlast the video track. Missing frames are explicit, never reused.
+      if (!frameInfo && segment) continue;
+      if (!frameInfo) throw new Error("Não foi possível preparar as imagens do vídeo.");
+      if (frameInfo.size > maxRequestImageBytes)
+        throw new Error("As imagens extraídas excedem 4 MB. Envie um trecho menor.");
       const bytes = await readFile(output);
       const image = requestImageSchema.parse({
         dataUrl: `data:image/jpeg;base64,${bytes.toString("base64")}`,
@@ -248,12 +491,15 @@ export async function prepareVideo(
         "-nostdin",
         "-y",
         ...localInput,
+        "-vn",
+        "-ss",
+        start.toFixed(3),
         "-i",
         input,
         "-map",
         "0:a:0",
         "-t",
-        String(maxVideoSeconds),
+        String(duration),
         "-vn",
         "-sn",
         "-ar",
@@ -287,31 +533,28 @@ export async function prepareVideo(
       const file = join(dir, "transcript.json");
       if ((await lstat(file)).size > 1024 * 1024)
         throw new Error("Transcrição muito extensa. Envie um trecho menor.");
-      const result = transcriptionSchema.parse(JSON.parse(await readFile(file, "utf8")));
-      transcript = result.transcription
-        .map(({ offsets, text }) => ({
-          start: offsets.from / 1000,
-          end: offsets.to / 1000,
-          text: text.trim(),
-        }))
-        .filter((entry) => entry.text);
-      if (
-        transcript.some(
-          (entry) =>
-            entry.start > seconds + 1 || entry.end < entry.start || entry.end > seconds + 2,
-        ) ||
-        transcript.reduce((sum, entry) => sum + entry.text.length, 0) > maxVideoTranscriptLength
-      )
-        throw new Error("Transcrição inválida ou muito extensa. Envie um trecho menor.");
+      transcript = normalizeVideoTranscript(
+        JSON.parse(await readFile(file, "utf8")),
+        start,
+        duration,
+      );
     }
     signal.throwIfAborted();
+    if (segment) await validateVideoSource(segment.source, signal);
     return {
       summary: {
-        id: randomUUID(),
-        name:
-          basename(path)
-            .replace(/[\p{Cc}\p{Cf}]/gu, "")
-            .slice(0, 180) || "Vídeo",
+        id: segment?.id || randomUUID(),
+        name: videoName(path),
+        ...(segment
+          ? {
+              segment: {
+                index: segment.index,
+                total: Math.ceil(seconds / videoSegmentSeconds),
+                start,
+                end,
+              },
+            }
+          : {}),
         seconds,
         frames: frames.length,
         audio: transcript.length ? "transcribed" : "silent",
@@ -340,7 +583,8 @@ export async function prepareVideo(
 
 export function videoMessage(video: PreparedVideo): string {
   const summary = video.summary;
-  return `Vídeo do projeto: ${JSON.stringify(summary.name)} · ${videoTime(summary.seconds)} · ${summary.frames} imagens amostradas · ${summary.audio === "transcribed" ? "fala transcrita automaticamente" : "sem fala reconhecida"}.\nExtraia as informações importantes para as anotações do projeto. Quadros em ordem: ${video.frames.map((frame) => videoTime(frame.seconds)).join(", ")}. A amostragem e a transcrição podem omitir detalhes ou conter erros.`;
+  const part = summary.segment;
+  return `${part ? `Análise STAG ${summary.id} · trecho ${part.index + 1}/${part.total} (${videoTime(part.start)}–${videoTime(part.end)}).\n` : ""}Vídeo do projeto: ${JSON.stringify(summary.name)} · ${videoTime(summary.seconds)} · ${summary.frames} imagens amostradas · ${summary.audio === "transcribed" ? "fala transcrita automaticamente" : "sem fala reconhecida"}.\nExtraia as informações importantes para as anotações do projeto. Quadros em ordem: ${video.frames.map((frame) => videoTime(frame.seconds)).join(", ")}. ${part && !summary.frames ? "Não há quadros decodificáveis neste trecho; não invente conteúdo visual. " : ""}A amostragem e a transcrição podem omitir detalhes ou conter erros.`;
 }
 export function videoContext(video: PreparedVideo) {
   return {

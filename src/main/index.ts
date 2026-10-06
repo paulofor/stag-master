@@ -20,13 +20,21 @@ import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
 import { BrowserPanel } from "./browser-panel";
-import { prepareVideo } from "./request-video";
+import {
+  inspectVideo,
+  prepareVideo,
+  prepareVideoSegment,
+  validateVideoSource,
+} from "./request-video";
+import { VideoAnalysisStore } from "./video-analysis";
 import { videoExtensions } from "../shared/request-video";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "stag", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 app.setName("STAG");
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
 let window: BrowserWindow | null = null;
 let service: AssistantService | null = null;
 let browser: BrowserPanel | null = null;
@@ -125,7 +133,7 @@ async function start(): Promise<void> {
         const result = await dialog.showOpenDialog(window!, {
           title: "Anexar vídeo do projeto",
           properties: ["openFile"],
-          filters: [{ name: "Vídeos (até 100 MB e 10 minutos)", extensions: videoExtensions }],
+          filters: [{ name: "Vídeos MP4, MOV, MKV e WebM", extensions: videoExtensions }],
         });
         return result.canceled ? null : result.filePaths[0] || null;
       },
@@ -141,6 +149,29 @@ async function start(): Promise<void> {
           if (nativeImage.createFromDataURL(frame.image.dataUrl).isEmpty())
             throw new Error("Não foi possível decodificar as imagens do vídeo.");
         return prepared;
+      },
+    },
+    videoAnalysis: {
+      store: new VideoAnalysisStore(join(dataRoot, "video-analysis.json")),
+      processor: {
+        inspect: (path, signal) =>
+          inspectVideo(path, join(resourceRoot, app.isPackaged ? "media" : ".local/media"), signal),
+        validate: validateVideoSource,
+        prepare: async (source, index, id, signal, progress) => {
+          const prepared = await prepareVideoSegment(
+            source,
+            index,
+            id,
+            join(resourceRoot, app.isPackaged ? "media" : ".local/media"),
+            join(app.getPath("temp"), "stag-media"),
+            signal,
+            progress,
+          );
+          for (const frame of prepared.frames)
+            if (nativeImage.createFromDataURL(frame.image.dataUrl).isEmpty())
+              throw new Error("Não foi possível decodificar as imagens do vídeo.");
+          return prepared;
+        },
       },
     },
   });
@@ -191,9 +222,30 @@ async function start(): Promise<void> {
         "browserConsent",
         "browserVisibility",
         "browserSession",
+        "analyzeVideo",
+        "videoAnalysis",
       ].includes(action.type)
     )
       authorizationRevision++;
+    if (action.type === "videoAnalysis" && action.control === "retry") {
+      const summary = service!.snapshot().videoAnalysis;
+      if (!summary || summary.id !== action.id || summary.status !== "uncertain")
+        throw new Error("Confira a análise salva antes de reprocessar.");
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "warning",
+        title: "Reprocessar trecho de vídeo",
+        message: "Você conferiu o histórico e quer reprocessar o trecho sem envio confirmado?",
+        detail:
+          "O trecho pode já ter chegado ao assistente e produzido anotações. O STAG verificará o histórico novamente e só reenviará se não encontrar uma análise concluída ou em andamento. As notas existentes devem ser preservadas e conferidas para evitar duplicação.",
+        buttons: ["Cancelar", "Reprocessar trecho"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error("A conversa mudou durante a confirmação. Confira a análise novamente.");
+    }
     if (action.type === "browserSession") {
       const state = service!.snapshot();
       if (!state.project || state.project.path !== action.projectPath)
@@ -265,11 +317,15 @@ async function start(): Promise<void> {
 }
 app
   .whenReady()
-  .then(start)
+  .then(() => (singleInstance ? start() : undefined))
   .catch((error: Error) => {
     dialog.showErrorBox("Não foi possível iniciar o STAG", error.message);
     app.quit();
   });
+app.on("second-instance", () => {
+  if (window?.isMinimized()) window.restore();
+  window?.focus();
+});
 app.on("window-all-closed", () => app.quit());
 let quitting = false;
 app.on("before-quit", (event) => {

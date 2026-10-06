@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import { mkdir, mkdtemp, open, rm, writeFile, readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { actionSchema } from "../../src/shared/validation";
-import { prepareVideo, runMedia } from "../../src/main/request-video";
+import { normalizeVideoTranscript, prepareVideo, runMedia } from "../../src/main/request-video";
 import { assistantInstructions } from "../../src/main/policy";
 import { maxVideoBytes, videoInstructions } from "../../src/shared/request-video";
 
@@ -114,4 +114,32 @@ it("cancelamento aguarda o subprocesso e não entrega saída parcial", async () 
   await vi.waitFor(async () => expect(await readdir(dir)).toContain("ready"));
   controller.abort();
   await expect(work).rejects.toThrow("cancelada");
+});
+it("tempos estimados pelo Whisper ficam dentro do trecho real, inclusive no último áudio curto", () => {
+  expect(
+    normalizeVideoTranscript(
+      { transcription: [{ offsets: { from: 0, to: 7920 }, text: "regra sintética" }] },
+      300,
+      5.475,
+    ),
+  ).toEqual([{ start: 300, end: 305.475, text: "regra sintética" }]);
+  expect(
+    normalizeVideoTranscript(
+      { transcription: [{ offsets: { from: 5500, to: 5600 }, text: "fora do áudio" }] },
+      300,
+      5.475,
+    ),
+  ).toEqual([]);
+  for (const offsets of [
+    { from: 8000, to: 9000 },
+    { from: 1000, to: 0 },
+    { from: 0, to: 36000 },
+  ])
+    expect(() =>
+      normalizeVideoTranscript(
+        { transcription: [{ offsets, text: "tempo sintético inválido" }] },
+        300,
+        5.475,
+      ),
+    ).toThrow("Transcrição inválida");
 });
