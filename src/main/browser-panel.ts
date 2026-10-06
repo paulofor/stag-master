@@ -241,6 +241,7 @@ export class BrowserPanel extends EventEmitter {
         },
       ]),
     )) as { ok: boolean; value?: unknown; error?: string };
+    this.checkReadable();
     if (!result.ok)
       throw new Error(
         result.error?.slice(0, 500) ||
@@ -250,8 +251,7 @@ export class BrowserPanel extends EventEmitter {
   }
   private checkReadable(): void {
     if (this.loadFailure) throw new Error(this.loadFailure);
-    if (this.view.webContents.isLoadingMainFrame())
-      throw new Error("A página ainda está carregando. Aguarde antes de consultar ou interagir.");
+    // loadURL resolves on did-finish-load; Chromium's loading flag can still be true then.
   }
   private async bounded<T>(operation: Promise<T>): Promise<T> {
     const contents = this.view.webContents;
@@ -350,6 +350,7 @@ export class BrowserPanel extends EventEmitter {
       this.checkReadable();
       const image = await this.bounded(this.view.webContents.capturePage());
       if (generation !== this.generation) throw new Error("Captura cancelada.");
+      this.checkReadable();
       const size = image.getSize();
       return {
         success: true,

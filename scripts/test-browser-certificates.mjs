@@ -15,6 +15,43 @@ export async function validateBrowserCertificates({
     execute({ action: "navigate", url, risk: "routine", intent: "Conferir TLS sintético" });
   try {
     console.log("Browser real: certificado sem confiança, diagnóstico, privacidade e recuperação.");
+    await navigate(site.url);
+    // loadURL resolves on did-finish-load, before isLoadingMainFrame necessarily becomes false.
+    // Reproduce the CI ordering without making process startup depend on a short timeout.
+    const readyDocument = await application.evaluate(async () => {
+      const browser = global.browserHarness.browser;
+      const contents = browser.view.webContents;
+      const original = contents.isLoadingMainFrame;
+      contents.isLoadingMainFrame = () => true;
+      // Electron's executeJavaScript also waits for did-stop-loading. Release that event
+      // on the next event-loop turn so only the immediate pre-check sees the late flag.
+      const stopped = new Promise((resolve) => {
+        setImmediate(() => {
+          contents.isLoadingMainFrame = original;
+          contents.emit("did-stop-loading");
+          resolve();
+        });
+      });
+      try {
+        return await browser.execute({ action: "snapshot" });
+      } finally {
+        await stopped;
+      }
+    });
+    assert.match(readyDocument.contentItems[0].text, /Documentação sintética/);
+    for (const action of ["snapshot", "screenshot"]) {
+      await navigate(site.url);
+      const lateFailure = await application.evaluate(async (_electron, action) => {
+        const browser = global.browserHarness.browser;
+        const reading = browser.execute({ action }).then(
+          () => null,
+          (error) => error.message,
+        );
+        browser.view.webContents.emit("did-fail-load", {}, -202, "SYNTHETIC_LATE_ERROR", "", true);
+        return reading;
+      }, action);
+      assert.match(lateFailure, /ERR_CERT_AUTHORITY_INVALID/);
+    }
     const url = `${tls.url}?synthetic=SYNTHETIC_PRIVATE_QUERY`;
     await assert.rejects(navigate(url), (error) => {
       assert.match(error.message, /ERR_CERT_AUTHORITY_INVALID.*-202.*TI.*Windows/);
