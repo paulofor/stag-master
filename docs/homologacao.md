@@ -1,4 +1,22 @@
-# Matriz de homologação da versão 0.4.17
+# Matriz de homologação da versão 0.4.18
+
+## Diagnóstico de certificados HTTPS — versão 0.4.18
+
+Matriz definida antes dos testes. A imagem do cliente informa `ERR_CERT_AUTHORITY_INVALID (-202)`. O navegador usa a validação TLS padrão do Electron, mas exibe orientação genérica; a rejeição de `loadURL` pode incluir a URL completa, e o harness não exercita HTTPS inválido. Não temos acesso à cadeia de certificados nem ao Windows/VPN do cliente: autoridade corporativa ausente, cadeia incompleta e inspeção HTTPS são hipóteses. Esta entrega melhora diagnóstico e recuperação, sem instalar autoridades, aceitar certificados inválidos ou afirmar correção do acesso corporativo.
+
+| Área                     | Cenário e aceite                                                                                                                                                          | Evidência prevista                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Caminho feliz            | Navegação válida e snapshot continuam funcionando após falha TLS                                                                                                          | Electron de produção com sites loopback                                 |
+| Certificados             | Autoridade desconhecida, validade, nome e revogação têm orientação específica; TLS continua bloqueado, sem exceção por consentimento                                      | Mensagens por códigos Chromium + servidor HTTPS sintético sem confiança |
+| Falhas e recuperação     | Erro igual no painel e na ferramenta; snapshot não apresenta página com carga falha como consulta bem-sucedida; recarregar, navegar e trocar contexto recuperam o estado  | Driver real, IPC e eventos sintéticos de sessão antiga/subframe         |
+| Privacidade e isolamento | Diagnóstico não inclui URL, parâmetros ou mensagem bruta do Electron; perfil anterior e eventos antigos não alteram o atual                                               | Marcadores sintéticos e reset do navegador                              |
+| Agente e observabilidade | Ferramenta orienta intervenção manual/TI, sem insistir ou trocar para shell/desktop; falhas continuam nos contadores existentes; nenhum certificado/token real é coletado | Contrato e serviço/IPC existentes                                       |
+| Interface e plataformas  | Texto legível em janela ampla, compacta e Pixel 7; aviso permite acessar endereço e recarregar                                                                            | Chromium E2E e Electron                                                 |
+| Segregação               | Chave/certificado públicos de teste apenas em fixture loopback; userData/CODEX_HOME temporários; nenhum trust store do sistema alterado                                   | Harness local e Windows CI                                              |
+
+Linux não comprova confiança no repositório de certificados do Windows nem acesso ao serviço corporativo. A validação nativa e o instalador ficam nos jobs Windows do PR/main; não há deploy web nesta alteração.
+
+Evidência local: `npm run check` aprovou typecheck, 327 contratos, build, handshake real do Codex com provedor sintético e 64 cenários Chromium. `xvfb-run -a npm run test:desktop` aprovou HTTPS inválido no Electron de produção, ausência de requests HTTP ao destino sem confiança, mensagem sanitizada no driver e via IPC/painel, incremento do contador de falhas, recusa de snapshot/captura, recarga, navegação iniciada pela página, isolamento de perfis, eventos antigos e recuperação. O harness de interface foi corrigido para configurar disponibilidade do navegador numa fixture própria; as telas compacta, ampla e Pixel 7 passaram e o screenshot mobile foi inspecionado. `format:check`, sintaxe dos scripts JavaScript e diff aprovados; nenhum script shell foi alterado. Node 22.12.0 preparado somente na sandbox. O smoke informou a limitação existente de namespaces bwrap; não a tratou como prova de acesso negado. Nenhuma confiança corporativa foi instalada ou validada.
 
 ## Sessões de sites e Continuar conectado — versão 0.4.17
 

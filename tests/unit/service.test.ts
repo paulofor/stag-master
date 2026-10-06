@@ -21,6 +21,7 @@ import {
 import {
   browserConfirmationReason,
   browserSessionInstructions,
+  browserCertificateInstructions,
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -1523,6 +1524,7 @@ describe("fluxo local do assistente", () => {
     for (const call of [start, resume]) {
       expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
       expect(call.params.developerInstructions).toContain(browserSessionInstructions);
+      expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -1566,6 +1568,7 @@ describe("fluxo local do assistente", () => {
     for (const call of calls.filter((c) => ["thread/start", "thread/resume"].includes(c.method))) {
       expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
       expect(call.params.developerInstructions).toContain(browserSessionInstructions);
+      expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.sandbox).toBe("workspace-write");
       if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
     }
