@@ -14,7 +14,7 @@ import imageFixture from "../tests/fixtures/request-image.json" with { type: "js
 import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 
-await mkdir(".local", { recursive: true });
+await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
 const project = join(dir, "projeto-fixture");
 const data = join(dir, "data");
