@@ -9,6 +9,25 @@ async function ready(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 }
+test("sessão por projeto é opcional e esquecer revoga o controle", async ({ page }, info) => {
+  await ready(page);
+  await page.getByRole("button", { name: "Mostrar navegador" }).click();
+  const remember = page.getByRole("checkbox", { name: "Lembrar sessões neste projeto" });
+  await expect(remember).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Esquecer logins" })).toBeDisabled();
+  await remember.check();
+  await expect(remember).toBeChecked();
+  await expect(page.getByText("Sessões salvas neste computador.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Autorizar navegador", exact: true }).click();
+  await page.getByRole("button", { name: "Fechar navegador" }).click();
+  await page.getByRole("button", { name: "Mostrar navegador" }).click();
+  await expect(remember).toBeChecked();
+  await expect(page.getByText("Controle do modelo desativado")).toBeVisible();
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-browser-session.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Esquecer logins" }).click();
+  await expect(remember).not.toBeChecked();
+});
 test("navegador ao lado, endereço e fechamento preservam conversa", async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await ready(page);

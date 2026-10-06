@@ -31,6 +31,8 @@ export class BrowserPanel extends EventEmitter {
   private pageId: string | null = null;
   private generation = 0;
   private disposed = false;
+  private profileId: string | null = null;
+  private configuredSessions = new WeakSet<Electron.Session>();
   constructor(private window: BrowserWindow) {
     super();
     this.reset();
@@ -41,7 +43,28 @@ export class BrowserPanel extends EventEmitter {
   private publish(): void {
     if (!this.disposed) this.emit("state", this.snapshot());
   }
-  reset(): void {
+  setProfile(id: string | null): void {
+    if (id !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+      throw new Error("Perfil do navegador inválido.");
+    if (id !== this.profileId) this.reset(id);
+  }
+  async clearProfile(): Promise<void> {
+    const previous = this.view.webContents.session;
+    const id = this.profileId;
+    // Close the page before deleting data; no old page can recreate cookies during cleanup.
+    this.reset(null);
+    try {
+      await previous.closeAllConnections();
+      await previous.clearData();
+      await previous.clearAuthCache();
+    } catch {
+      this.reset(id);
+      throw new Error(
+        "Não foi possível apagar todos os dados do navegador. Tente Esquecer logins novamente.",
+      );
+    }
+  }
+  reset(profileId = this.profileId): void {
     this.generation++;
     this.pageId = null;
     if (this.view) {
@@ -49,23 +72,34 @@ export class BrowserPanel extends EventEmitter {
       this.window.contentView.removeChildView(this.view);
       old.stop();
       const oldSession = old.session;
+      oldSession.webRequest.onBeforeRequest((_details, callback) => callback({ cancel: true }));
+      oldSession.flushStorageData();
       old.close();
-      void oldSession.clearStorageData().catch(() => {});
-      void oldSession.clearCache().catch(() => {});
+      if (!oldSession.isPersistent()) {
+        void oldSession.clearStorageData().catch(() => {});
+        void oldSession.clearCache().catch(() => {});
+      }
     }
+    this.profileId = profileId;
     this.info = blankInfo();
-    const browserSession = session.fromPartition(`stag-browser-${randomUUID()}`, { cache: false });
+    const browserSession = session.fromPartition(
+      profileId ? `persist:stag-project-${profileId}` : `stag-browser-${randomUUID()}`,
+      { cache: false },
+    );
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) =>
       callback(false),
     );
     browserSession.setPermissionCheckHandler(() => false);
     browserSession.setDevicePermissionHandler(() => false);
-    browserSession.on("will-download", (event) => {
-      event.preventDefault();
-      if (browserSession !== this.view.webContents.session) return;
-      this.info.error = "Download bloqueado. Use o navegador externo para baixar arquivos.";
-      this.publish();
-    });
+    if (!this.configuredSessions.has(browserSession)) {
+      this.configuredSessions.add(browserSession);
+      browserSession.on("will-download", (event) => {
+        event.preventDefault();
+        if (this.disposed || browserSession !== this.view.webContents.session) return;
+        this.info.error = "Download bloqueado. Use o navegador externo para baixar arquivos.";
+        this.publish();
+      });
+    }
     // Subframes and redirects cannot reach local protocols/files or launch external applications.
     browserSession.webRequest.onBeforeRequest((details, callback) => {
       let permitted =
@@ -319,6 +353,10 @@ export class BrowserPanel extends EventEmitter {
     this.disposed = true;
     this.generation++;
     if (!this.view.webContents.isDestroyed()) {
+      this.view.webContents.session.webRequest.onBeforeRequest((_details, callback) =>
+        callback({ cancel: true }),
+      );
+      this.view.webContents.session.flushStorageData();
       if (!this.window.isDestroyed()) this.window.contentView.removeChildView(this.view);
       this.view.webContents.close();
     }

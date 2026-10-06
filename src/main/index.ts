@@ -165,9 +165,36 @@ async function start(): Promise<void> {
         "resume",
         "browserConsent",
         "browserVisibility",
+        "browserSession",
       ].includes(action.type)
     )
       authorizationRevision++;
+    if (action.type === "browserSession") {
+      const state = service!.snapshot();
+      if (!state.project || state.project.path !== action.projectPath)
+        throw new Error("O projeto mudou. Abra o navegador no projeto desejado.");
+      if (state.busy) throw new Error("Pare a execução antes de alterar a sessão do navegador.");
+      if (state.browser.remember === action.remember) return state;
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "question",
+        title: "Sessões do navegador",
+        message: action.remember
+          ? "Lembrar sessões de sites neste projeto?"
+          : "Esquecer os logins deste projeto?",
+        detail: action.remember
+          ? "Cookies e dados dos sites ficarão neste computador, no perfil do STAG deste projeto, inclusive ao fechar o aplicativo ou abrir outra conversa. Ative antes de fazer login: a página atual será fechada e será preciso entrar novamente. Não há importação de senhas ou de outros navegadores. O modelo continua precisando de autorização por conversa. O site pode expirar o login ou exigir MFA."
+          : "Os cookies e dados locais dos sites deste projeto serão apagados e a opção de lembrar será desativada. A página será fechada, o acesso do modelo será revogado e os próximos logins serão temporários. Isso não encerra sessões em outros computadores nem altera outros projetos.",
+        buttons: ["Cancelar", action.remember ? "Lembrar sessões" : "Esquecer logins"],
+        defaultId: 0,
+        cancelId: 0,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error(
+          "A conversa mudou durante a confirmação. Confira o projeto e tente novamente.",
+        );
+    }
     if (action.type === "browserConsent" && action.allow) {
       const owner = authorizationRevision;
       const result = await dialog.showMessageBox(window!, {
@@ -175,7 +202,7 @@ async function start(): Promise<void> {
         title: "Controle do navegador",
         message: "Permitir que o modelo controle o navegador nesta conversa?",
         detail:
-          "O modelo poderá navegar, ler páginas, clicar e preencher campos no navegador ao lado. Texto e capturas das páginas serão enviados ao ChatGPT. Ações rotineiras não pedirão confirmação; envio de dados, exclusão, publicação, pagamentos, credenciais e ações incertas terão confirmação específica. Revogar acesso, fechar o navegador ou abrir outra conversa encerra a autorização e descarta a sessão. O navegador usa uma sessão separada dos seus outros navegadores.",
+          "O modelo poderá navegar, ler páginas, clicar e preencher campos no navegador ao lado, inclusive sites já conectados. Texto e capturas das páginas serão enviados ao ChatGPT. Ações rotineiras não pedirão confirmação; envio de dados, exclusão, publicação, pagamentos, credenciais e ações incertas terão confirmação específica. Revogar acesso, fechar o navegador ou abrir outra conversa sempre encerra a autorização. Dados de sites só são mantidos se Lembrar sessões neste projeto estiver ativado; use Esquecer logins para apagá-los. O navegador usa uma sessão separada dos seus outros navegadores.",
         buttons: ["Cancelar", "Autorizar navegador"],
         defaultId: 0,
         cancelId: 0,

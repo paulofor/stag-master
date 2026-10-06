@@ -885,6 +885,7 @@ export function App() {
       {state.browser.available && state.browser.visible && (
         <BrowserPane
           state={state.browser}
+          projectPath={state.project?.path}
           busy={state.busy}
           pending={pending}
           obscured={sourcesDialog || aboutDialog}
