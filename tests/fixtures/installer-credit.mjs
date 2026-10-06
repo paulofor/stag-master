@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { AppInfo } from "app-builder-lib";
 import { readPackageJson } from "app-builder-lib/out/util/packageMetadata.js";
 import { NsisTarget } from "app-builder-lib/out/targets/nsis/NsisTarget.js";
+import { NsisScriptGenerator } from "app-builder-lib/out/targets/nsis/nsisScriptGenerator.js";
 
 const metadata = await readPackageJson(resolve("package.json"));
 const info = { metadata, config: metadata.build };
@@ -24,7 +25,10 @@ try {
   };
   // Use the production builder's author normalization, defines, escaping and compiler.
   target.configureDefinesForAllTypeOfInstaller(defines);
-  const include = resolve(info.config.nsis.include).replaceAll("\\", "/");
+  const includes = new NsisScriptGenerator();
+  includes.include("MUI2.nsh");
+  // Preserve native path separators, as the production builder does on Windows.
+  includes.include(resolve(info.config.nsis.include));
   const file = join(dir, "welcome-fixture.exe");
   await target.executeMakensis(
     defines,
@@ -32,8 +36,7 @@ try {
     `Unicode true
 SetCompress off
 Name "\${PRODUCT_NAME}"
-!include "MUI2.nsh"
-!include "${include}"
+${includes.build()}
 !insertmacro customWelcomePage
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "PortugueseBR"
