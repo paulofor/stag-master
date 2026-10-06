@@ -1838,6 +1838,21 @@ describe("engenharia e limite de assuntos", () => {
     ["isolamento", "Localhost sozinho não comprova isolamento"],
     ["ativação explícita", "perfil/flag explícito e desligado por padrão"],
     ["falha fechada", "falhe de forma fechada sem liberar acesso"],
+    [
+      "usuário provisório",
+      "A falta de roles/permissões do usuário provisório não equivale à falta de autorização do desenvolvedor",
+    ],
+    ["fluxo completo", "Não reduza unilateralmente o pedido a somente leitura"],
+    ["regras de negócio", "Preserve dados, cálculos, validações e regras de negócio completos"],
+    [
+      "conjunto de dados autorizado",
+      "todas as empresas e registros da base de desenvolvimento quando esse conjunto estiver explicitamente autorizado",
+    ],
+    ["correção de restrição anterior", "corrija a adaptação anterior dentro do escopo"],
+    [
+      "confirmação na execução",
+      "Implementar suporte a escrita no código não é executar a operação crítica",
+    ],
   ])("o harness detecta perda parcial do contrato e recupera: %s", async (_name, fragment) => {
     await ready();
     const scenario = engineeringCorpus.scenarios.find((s) => s.id === "local-auth")!;
@@ -1875,39 +1890,42 @@ describe("engenharia e limite de assuntos", () => {
     expect(browser.execute).not.toHaveBeenCalled();
   });
 
-  it("preserva esclarecimento de desenvolvimento ao retomar sem transferir contexto a outra conversa", async () => {
-    await ready();
-    const scenario = engineeringCorpus.scenarios.find((s) => s.id === "development-clarified")!;
-    const missingContext = "Fixture: contexto da solicitação não preservado.";
-    const initial = service.snapshot().metrics;
-    // A terse follow-up alone must not inherit a target or authorization from another thread.
-    await send(scenario.input);
-    await complete();
-    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
-    await send(scenario.context!);
-    await complete();
-    const threadId = service.snapshot().threadId;
-    await service.request({ type: "connect" });
-    await send(scenario.input);
-    await complete();
-    expect(service.snapshot().threadId).toBe(threadId);
-    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
-    // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
-    expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
-    const snapshot = service.snapshot();
-    expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
-    expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
-    expect(service.snapshot().metrics.failures).toBe(initial.failures);
-    await service.request({ type: "newChat" });
-    await send(scenario.input);
-    await complete();
-    expect(service.snapshot().threadId).not.toBe(threadId);
-    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
-    expect(service.snapshot().approvals).toEqual([]);
-    expect(service.snapshot().mode).toBe("project");
-    expect(desktop.execute).not.toHaveBeenCalled();
-    expect(browser.execute).not.toHaveBeenCalled();
-  });
+  it.each(["development-clarified", "development-restore-full-workflow"])(
+    "preserva contexto de %s ao retomar sem transferir a outra conversa",
+    async (id) => {
+      await ready();
+      const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;
+      const missingContext = "Fixture: contexto da solicitação não preservado.";
+      const initial = service.snapshot().metrics;
+      // A terse follow-up alone must not inherit a target or authorization from another thread.
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+      await send(scenario.context!);
+      await complete();
+      const threadId = service.snapshot().threadId;
+      await service.request({ type: "connect" });
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().threadId).toBe(threadId);
+      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+      // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
+      expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
+      const snapshot = service.snapshot();
+      expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
+      expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
+      expect(service.snapshot().metrics.failures).toBe(initial.failures);
+      await service.request({ type: "newChat" });
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().threadId).not.toBe(threadId);
+      expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(service.snapshot().mode).toBe("project");
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+    },
+  );
 });
 describe("proteção contra solicitações maliciosas", () => {
   it.each(["read", "project", "windows"] as const)(
