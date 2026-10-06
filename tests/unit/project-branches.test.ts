@@ -61,6 +61,7 @@ beforeEach(async () => {
   dir = await mkdtemp(resolve(".local/branches-test-"));
   fixture = await gitFixture(dir);
   await fixture.init(fixture.project);
+  await git("config", "core.autocrlf", "false");
   await writeFile(join(fixture.project, "app.txt"), "original\n");
   await writeFile(join(fixture.project, ".gitignore"), "apps/\nignored.txt\n");
   await commit();
@@ -162,22 +163,28 @@ describe("branches com Git real e dados isolados", () => {
     expect(await readFile(join(fixture.project, "app.txt"), "utf8")).toBe("original\n");
   });
 
-  it("troca realmente os arquivos e preserva arquivos ignorados que seriam sobrescritos", async () => {
-    await git("switch", "-c", "feature");
-    await writeFile(join(fixture.project, "app.txt"), "feature\n");
-    await commit();
-    await git("switch", "main");
-    await change({ kind: "switch", branch: "feature" });
-    expect(await readFile(join(fixture.project, "app.txt"), "utf8")).toBe("feature\n");
-    await writeFile(join(fixture.project, "ignored.txt"), "tracked\n");
-    await git("add", "-f", "ignored.txt");
-    await commit();
-    await git("switch", "main");
-    await writeFile(join(fixture.project, "ignored.txt"), "keep\n");
-    await expect(change({ kind: "switch", branch: "feature" })).rejects.toThrow("não confirmou");
-    expect(await readFile(join(fixture.project, "ignored.txt"), "utf8")).toBe("keep\n");
-    expect(await git("branch", "--show-current")).toBe("main");
-  });
+  it.each([false, true])(
+    "troca arquivos com core.autocrlf=%s e preserva ignorados que seriam sobrescritos",
+    async (autocrlf) => {
+      await git("config", "core.autocrlf", String(autocrlf));
+      await git("switch", "-c", "feature");
+      await writeFile(join(fixture.project, "app.txt"), "feature\n");
+      await commit();
+      await git("switch", "main");
+      await change({ kind: "switch", branch: "feature" });
+      expect(await readFile(join(fixture.project, "app.txt"), "utf8")).toBe(
+        autocrlf ? "feature\r\n" : "feature\n",
+      );
+      await writeFile(join(fixture.project, "ignored.txt"), "tracked\n");
+      await git("add", "-f", "ignored.txt");
+      await commit();
+      await git("switch", "main");
+      await writeFile(join(fixture.project, "ignored.txt"), "keep\n");
+      await expect(change({ kind: "switch", branch: "feature" })).rejects.toThrow("não confirmou");
+      expect(await readFile(join(fixture.project, "ignored.txt"), "utf8")).toBe("keep\n");
+      expect(await git("branch", "--show-current")).toBe("main");
+    },
+  );
 
   it("preserva mudanças pendentes e recusa excluir branch atual ou não integrada", async () => {
     await git("switch", "-c", "feature");
