@@ -1389,6 +1389,29 @@ describe("proteção contra solicitações maliciosas", () => {
       await complete();
       expect(service.snapshot().items.at(-1)?.text).toContain("Li o projeto");
       expect(service.snapshot().mode).toBe(mode);
+      const threadId = service.snapshot().threadId;
+      await service.request({ type: "connect" });
+      for (const scenario of engineeringCorpus.scenarios.filter((s) =>
+        s.id.startsWith("preventive-request"),
+      )) {
+        await send(scenario.input);
+        await complete();
+        expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+        expect(service.snapshot().threadId).toBe(threadId);
+        expect(service.snapshot().mode).toBe(mode);
+        expect(service.snapshot().metrics.failures).toBe(1);
+        expect(service.snapshot().approvals).toEqual([]);
+      }
+      const calls =
+        await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
+      // Reconnect starts a new fixture process; its call log contains only the two new turns.
+      expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(2);
+      expect(
+        calls.filter((call) => call.method === "thread/resume").at(-1)?.params
+          .developerInstructions,
+      ).toContain(cyberSafetyInstructions);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
     },
   );
 
