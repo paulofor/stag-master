@@ -6,6 +6,8 @@ Esta é a versão 0.4.15: crédito a Paulo Forestieri na instalação e no Sobre
 
 Para consultar a versão e o crédito **Desenvolvido por: Paulo Forestieri**, abra o menu **Conta e conexão** (três pontos no cabeçalho) e selecione **Sobre o STAG**. A consulta está disponível antes do login e preserva a conversa e o rascunho. O mesmo crédito aparece nas boas-vindas do instalador Windows.
 
+O piloto do **servidor de traces** fica em [`server/`](server/README.md), com Langfuse, Compose, preparação HTTPS e testes sintéticos. O aplicativo ainda não envia telemetria para esse servidor; a integração com consentimento e filtragem local será uma etapa própria.
+
 ## Fila de solicitações
 
 Enquanto o assistente trabalha, escreva no campo de mensagem e clique em **Enfileirar**, ao lado de Parar. O texto será enviado quando a tarefa atual terminar. Você pode adicionar até 20 textos, ver a ordem, expandir cada texto e removê-lo antes do envio. A fila envia um por vez na mesma conversa. **Pausar fila** suspende os próximos envios; **Continuar fila** os retoma. Aprovações e perguntas da tarefa atual continuam aguardando sua resposta normalmente.

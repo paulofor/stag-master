@@ -20,6 +20,8 @@
     "test:desktop": "node scripts/test-desktop.mjs",
     "test:codex": "node scripts/smoke-codex.mjs",
     "test:windows": "node scripts/test-windows.mjs",
+    "test:server:config": "node --test server/test/config.test.mjs",
+    "test:server": "npm run test:server:config && node server/test/run.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run test:codex && npm run test:e2e",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "format": "prettier --write .",

@@ -1,0 +1,6 @@
+{$STAG_TRACE_DOMAIN} {
+	request_body {
+		max_size 1MB
+	}
+	reverse_proxy langfuse-web:3000
+}

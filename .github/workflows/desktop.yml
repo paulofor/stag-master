@@ -9,6 +9,16 @@ permissions:
   contents: read
 
 jobs:
+  server:
+    name: Trace server contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm run test:server
   validate:
     name: Local contracts and UI
     runs-on: ubuntu-latest

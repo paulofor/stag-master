@@ -1,0 +1,35 @@
+# Somente o harness usa este overlay, sempre com ambiente/volumes descartaveis.
+services:
+  proxy:
+    ports: !reset []
+    environment:
+      STAG_TRACE_DOMAIN: http://proxy:8080
+  langfuse-web:
+    ports: !reset []
+  bootstrap-b:
+    extends:
+      file: compose.yaml
+      service: langfuse-web
+    ports: !reset []
+    environment:
+      LANGFUSE_INIT_PROJECT_ID: stag-test-b
+      LANGFUSE_INIT_PROJECT_NAME: STAG teste B
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${TEST_PUBLIC_KEY_B:?Somente teste}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${TEST_SECRET_KEY_B:?Somente teste}
+    depends_on:
+      langfuse-web:
+        condition: service_healthy
+  probe:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: test/Dockerfile
+    environment:
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Somente teste}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Somente teste}
+      TEST_PUBLIC_KEY_B: ${TEST_PUBLIC_KEY_B:?Somente teste}
+      TEST_SECRET_KEY_B: ${TEST_SECRET_KEY_B:?Somente teste}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

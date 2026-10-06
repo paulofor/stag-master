@@ -1,0 +1,4 @@
+*
+!Caddyfile
+!test/
+!test/probe.mjs
