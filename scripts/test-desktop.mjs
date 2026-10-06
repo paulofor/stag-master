@@ -8,6 +8,7 @@ import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" wit
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
 import sourceCorpus from "../tests/fixtures/source-scenarios.json" with { type: "json" };
 import imageFixture from "../tests/fixtures/request-image.json" with { type: "json" };
+import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 
 await mkdir(".local", { recursive: true });
@@ -85,6 +86,25 @@ try {
   await expect
     .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).connection))
     .toBe("ready");
+  const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());
+  const accountMenu = page.getByRole("button", { name: "Conta e conexão", exact: true });
+  await accountMenu.click();
+  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+  const about = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await expect(about).toContainText("Desenvolvido por: Paulo Forestieri");
+  await expect(about).toContainText(`Versão ${appMetadata.version}`);
+  const closeAbout = about.getByRole("button", { name: "Fechar", exact: true });
+  await expect(closeAbout).toBeFocused();
+  await closeAbout.press("Tab");
+  await expect(closeAbout).toBeFocused();
+  await closeAbout.press("Escape");
+  await expect(about).toHaveCount(0);
+  await expect(accountMenu).toBeFocused();
+  assert.deepEqual(await page.evaluate(async () => window.stag.getSnapshot()), beforeAbout);
+  await accountMenu.click();
+  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+  await closeAbout.click();
+  await expect(about).toHaveCount(0);
   await application.evaluate(({ dialog, shell }, path) => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
     global.externalUrls = [];
@@ -457,6 +477,40 @@ try {
     });
     assert.equal(contentsResult.value, "feito pelo modelo");
     assert.equal(contentsResult.visible, true);
+    const beforeBrowserAbout = await page.evaluate(async () => window.stag.getSnapshot());
+    await page.getByLabel("Mensagem para o assistente").fill("Rascunho sintético\npara depois");
+    await accountMenu.click();
+    await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+    await expect(about).toBeVisible();
+    await expect
+      .poll(() =>
+        application.evaluate(({ BrowserWindow }) => {
+          const parent = BrowserWindow.getAllWindows()[0];
+          return parent.contentView.children
+            .find((view) => view.webContents && view.webContents !== parent.webContents)
+            ?.getVisible();
+        }),
+      )
+      .toBe(false);
+    await closeAbout.press("Control+n");
+    await closeAbout.click();
+    await expect
+      .poll(() =>
+        application.evaluate(({ BrowserWindow }) => {
+          const parent = BrowserWindow.getAllWindows()[0];
+          return parent.contentView.children
+            .find((view) => view.webContents && view.webContents !== parent.webContents)
+            ?.getVisible();
+        }),
+      )
+      .toBe(true);
+    assert.deepEqual(
+      await page.evaluate(async () => window.stag.getSnapshot()),
+      beforeBrowserAbout,
+    );
+    await expect(page.getByLabel("Mensagem para o assistente")).toHaveValue(
+      "Rascunho sintético\npara depois",
+    );
     await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();
     await expect(sourcesDialog).toBeVisible();
     await expect

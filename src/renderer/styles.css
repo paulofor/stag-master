@@ -1197,6 +1197,15 @@ summary::-webkit-details-marker {
 .modal-icon {
   color: #7c955e;
 }
+.about-dialog {
+  width: min(390px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+.about-dialog::backdrop {
+  background: #35412d35;
+  backdrop-filter: blur(2px);
+}
 .sr-only {
   position: absolute;
   width: 1px;

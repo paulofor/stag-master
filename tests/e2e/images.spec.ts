@@ -48,6 +48,22 @@ test("imagens pendentes não são descartadas nem enviadas pela fila de texto", 
     "Analise depois",
   );
 });
+test("consultar Sobre preserva o rascunho e a imagem pendente sem enviar", async ({ page }) => {
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("Analise esta tela\nquando eu enviar");
+  await paste(page);
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  const before = await page.evaluate(async () => window.stag!.getSnapshot());
+  await page.getByRole("button", { name: "Conta e conexão", exact: true }).click();
+  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await expect(dialog).toContainText("Desenvolvido por: Paulo Forestieri");
+  await dialog.getByRole("button", { name: "Fechar", exact: true }).click();
+  await expect(input).toHaveValue("Analise esta tela\nquando eu enviar");
+  await expect(page.locator(".composer img")).toHaveCount(1);
+  await expect(page.locator(".user-message")).toHaveCount(0);
+  expect(await page.evaluate(async () => window.stag!.getSnapshot())).toEqual(before);
+});
 test("cola, remove e envia texto com imagens sem perder o texto", async ({ page }, info) => {
   if (info.project.name === "desktop") await page.setViewportSize({ width: 1280, height: 900 });
   const input = page.getByLabel("Mensagem para o assistente");

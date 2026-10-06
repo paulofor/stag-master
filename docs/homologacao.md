@@ -1,6 +1,22 @@
-# Matriz de homologação da versão 0.4.14
+# Matriz de homologação da versão 0.4.15
 
 Definida antes da implementação dos testes. O aplicativo é desktop Windows; Chromium em dimensões compactas e emulação Pixel 7 validam layout, toque e acessibilidade, sem implicar suporte a app Android. A sandbox Linux não possui sessão gráfica Windows, OAuth interativo do cliente nem ferramentas nativas Windows. Essas limitações são registradas separadamente dos testes locais.
+
+## Crédito na instalação e no Sobre — versão 0.4.15
+
+Matriz definida antes dos testes. O instalador declarava STAG como autor e não tinha uma página de boas-vindas com o desenvolvedor; a interface não oferecia Sobre. O nome Paulo Forestieri passa a ser a fonte comum dos metadados do pacote, do instalador e do Sobre, sem nova ponte IPC. O harness não cobria a consulta de informações do aplicativo: acrescentamos regressões para navegação por teclado, preservação do rascunho/conversa e recuperação ao fechar/reabrir, inclusive com o navegador integrado visível.
+
+| Área                       | Cenário e aceite                                                                                                                                     | Evidência prevista                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Caminho feliz              | Boas-vindas do instalador e Sobre exibem Desenvolvido por: Paulo Forestieri; Sobre mostra a versão do pacote                                         | Compilador NSIS local + electron-builder Windows + UI Chromium/Electron |
+| Acesso e recuperação       | Sobre disponível antes do login e sem projeto; fechamento por botão/Escape, reabertura, foco contido e retorno ao menu                               | Chromium compacto/Pixel 7 + Electron de produção                        |
+| Integração e isolamento    | Sobre preserva rascunho, anexos, thread, modo, aprovações e consentimentos; Ctrl+N não troca conversa enquanto o diálogo está aberto                 | Fixtures sintéticas + main/preload/renderer de produção                 |
+| Navegador e dimensões      | WebContentsView não cobre o diálogo; restauração dos limites ao fechar; ausência de overflow em 640×900, Pixel 7 e 1280×900                          | Chromium + WebContentsView Electron real                                |
+| Observabilidade e métricas | Consulta ao Sobre não cria turno nem altera contadores; versão/nome são locais, sem coleta remota ou payloads de autenticação                        | Snapshots e métricas existentes                                         |
+| Empacotamento e entrega    | Identidade do aplicativo preservada; pacote 0.4.15 gera instalador sem upload automático; regressões Windows e artefato aprovados no HEAD do PR/main | Política real de publicação + jobs Windows PR/main                      |
+| Segregação de testes       | Projeto/CODEX_HOME temporários, App Server determinístico, imagens e site loopback sintéticos, sem credenciais, janelas ou dados do cliente          | check + test:desktop + format:check                                     |
+
+Evidência local: `npm run check` aprovado com typecheck, 290 contratos, build, handshake/schema reais do Codex isolado e 60 cenários Chromium compacto/amplo/Pixel 7. O teste de empacotamento usa a normalização de autor, as definições e o compilador NSIS do electron-builder fixado; compila o include de produção e confere crédito/versão nos bytes do executável sintético, sem iniciá-lo. A política de publicação real continua aprovada para main/tags/PRs, sem upload. `xvfb-run -a npm run test:desktop` aprovou Sobre pelo renderer/preload/IPC de produção, foco, fechamento/reabertura, preservação do rascunho/thread/métricas e ocultação/restauração do WebContentsView, além das regressões existentes. Screenshots compacto/amplo/Pixel 7 inspecionados; sintaxe JavaScript, `format:check` e diff revisados. Node 22.23.3, sem conta ou inferência paga; nenhum script shell alterado. Linux bloqueia namespaces bwrap e não comprova execução nativa Windows nem a tela gráfica do instalador: regressões Windows, empacotamento completo e artefato 0.4.15 devem passar nos jobs do PR/main.
 
 ## Quebras de linha na solicitação — versão 0.4.14
 
