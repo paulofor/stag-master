@@ -154,6 +154,43 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+
+it("handshake pronto ainda pode ter configuração Windows pendente antes de account/read", async () => {
+  const before = service.snapshot().metrics.requests;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let setupPending = false;
+  const original = RpcClient.prototype.call;
+  const spy = vi.spyOn(RpcClient.prototype, "call").mockImplementation(async function <T>(
+    this: RpcClient,
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (method === "windowsSandbox/setupStart") {
+      setupPending = true;
+      await gate;
+    }
+    return original.call(this, method, params) as Promise<T>;
+  });
+  // Hold only the post-handshake setup; never shorten process startup deadlines.
+  const connecting = service.request({ type: "connect" });
+  try {
+    await vi.waitFor(() => expect(setupPending).toBe(true));
+    expect(service.snapshot().connection).toBe("ready");
+    expect(service.snapshot().metrics.requests).toBe(before + 1);
+    release();
+    await connecting;
+    expect(service.snapshot().account).toBeNull();
+    expect(service.snapshot().metrics.requests).toBe(before + 2);
+    expect(service.snapshot().error).toBeNull();
+  } finally {
+    release();
+    await connecting.finally(() => spy.mockRestore());
+  }
+});
+
 describe("vídeo para as anotações do projeto", () => {
   const attach = async () => {
     await service.request({ type: "selectVideo" });

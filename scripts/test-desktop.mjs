@@ -127,9 +127,16 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("button", { name: "Entrar com ChatGPT" })).toBeVisible();
+  // ready marks the handshake; Windows still issues account/read after sandbox setup.
+  // With this fresh, unauthenticated home: account/read, plus setupStart on Windows.
   await expect
-    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).connection))
-    .toBe("ready");
+    .poll(() =>
+      page.evaluate(async () => {
+        const state = await window.stag.getSnapshot();
+        return { connection: state.connection, requests: state.metrics.requests };
+      }),
+    )
+    .toEqual({ connection: "ready", requests: process.platform === "win32" ? 2 : 1 });
   const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());
   const accountMenu = page.getByRole("button", { name: "Conta e conexão", exact: true });
   await accountMenu.click();
