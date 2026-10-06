@@ -835,8 +835,39 @@ describe("vídeo em segundo plano na conversa", () => {
   it("cancelar checkpoint retomado interrompe somente o turno da análise original", async () => {
     await ready();
     await rpc.call("_fixture/videoBehavior", { mode: "hold" });
-    await service.request({ type: "analyzeVideo" });
-    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+    // busy is optimistic, before turn/start reaches the child. Reproduce that boundary
+    // deliberately, then restart only after the fixture has persisted the surviving turn.
+    const original = rpc.call.bind(rpc);
+    let release!: () => void;
+    const dispatch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi
+      .spyOn(rpc, "call")
+      .mockImplementation(
+        async <T>(method: string, params?: Record<string, unknown>): Promise<T> => {
+          if (method === "turn/start") await dispatch;
+          return original<T>(method, params);
+        },
+      );
+    try {
+      await service.request({ type: "analyzeVideo" });
+      await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+      expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(0);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+    await vi.waitFor(async () =>
+      expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1),
+    );
+    const persisted = JSON.parse(await readFile(resolve(dir, "server-state.json"), "utf8"));
+    expect(persisted.loggedIn).toBe(true);
+    expect(
+      persisted.threads
+        .find((thread: { id: string }) => thread.id === service.snapshot().threadId)
+        .turns.at(-1).status,
+    ).toBe("inProgress");
     const id = service.snapshot().videoAnalysis!.id;
     await restart();
     await service.request({ type: "videoAnalysis", id, control: "cancel" });
