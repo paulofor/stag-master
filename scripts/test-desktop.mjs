@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, cp, readFile, writeFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { _electron, expect } from "@playwright/test";
 import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
+import { validateSavedSession } from "./test-browser-sessions.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
@@ -17,6 +18,22 @@ const project = join(dir, "projeto-fixture");
 const data = join(dir, "data");
 let application;
 let site;
+async function stagWindow(application) {
+  // Playwright also reports WebContentsView pages as windows. During profile restore,
+  // the initial temporary page is replaced; firstWindow() can return that closing page.
+  let page;
+  await expect
+    .poll(
+      () => {
+        page = application.windows().find((candidate) => candidate.url().startsWith("stag://app/"));
+        return !!page;
+      },
+      { timeout: 30000 },
+    )
+    .toBe(true);
+  await page.waitForLoadState("domcontentloaded");
+  return page;
+}
 try {
   site = await startBrowserSite();
   await buildBrowserHarness(dir);
@@ -79,7 +96,7 @@ try {
   application.process().on("exit", (code, signal) => {
     console.log(`Electron harness: processo encerrado (código=${code}, sinal=${signal}).`);
   });
-  const page = await application.firstWindow();
+  const page = await stagWindow(application);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("button", { name: "Entrar com ChatGPT" })).toBeVisible();
@@ -316,6 +333,9 @@ try {
       .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
       .toBe(false);
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
+    // Wait for the IPC acknowledgement before paste: run() intentionally clears the old draft.
+    await expect(page.getByRole("button", { name: "Nova conversa", exact: true })).toBeEnabled();
+    await expect(page.locator(".user-message")).toHaveCount(0);
     await application.evaluate(async ({ clipboard, ClipboardItem, nativeImage }, dataUrl) => {
       await clipboard.write([
         new ClipboardItem({
@@ -685,6 +705,7 @@ try {
     );
   }
   await validateBrowser(application, dir, site);
+  await validateSavedSession(application, page, site, "prepare");
   assert.deepEqual(errors, []);
   await application.close();
   application = await _electron.launch({
@@ -692,7 +713,7 @@ try {
     env,
     timeout: 30000,
   });
-  const restartedPage = await application.firstWindow();
+  const restartedPage = await stagWindow(application);
   await expect
     .poll(() => restartedPage.evaluate(async () => (await window.stag.getSnapshot()).connection))
     .toBe("ready");
@@ -702,6 +723,18 @@ try {
   const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
   assert.deepEqual(restarted.projectSources, [source]);
   assert.equal(restarted.browser.authorized, false);
+  await validateSavedSession(application, restartedPage, site, "verify");
+  await application.close();
+  application = await _electron.launch({
+    args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
+    env,
+    timeout: 30000,
+  });
+  const forgottenPage = await stagWindow(application);
+  await expect
+    .poll(() => forgottenPage.evaluate(async () => (await window.stag.getSnapshot()).connection))
+    .toBe("ready");
+  await validateSavedSession(application, forgottenPage, site, "forgotten");
   console.log(
     "Fontes do projeto: cadastro IPC, persistência e reinício real OK; consentimento não herdado.",
   );

@@ -36,6 +36,17 @@ export function browserDocument(request: {
     )
       .trim()
       .slice(0, 250);
+  const checkedState = (el: HTMLElement): boolean | "mixed" | undefined =>
+    el instanceof HTMLInputElement && ["checkbox", "radio"].includes(el.type)
+      ? el.indeterminate
+        ? "mixed"
+        : el.checked
+      : el.matches('[role="checkbox"],[role="radio"],[role="switch"]') &&
+          el.hasAttribute("aria-checked")
+        ? el.getAttribute("aria-checked") === "mixed"
+          ? "mixed"
+          : el.getAttribute("aria-checked") === "true"
+        : undefined;
   const signature = (el: HTMLElement) =>
     JSON.stringify([
       el.tagName,
@@ -51,6 +62,7 @@ export function browserDocument(request: {
       el.getAttribute("aria-haspopup"),
       el.getAttribute("aria-readonly"),
       el.getAttribute("aria-disabled"),
+      checkedState(el),
       el instanceof HTMLSelectElement
         ? [el.multiple, Array.from(el.options).map((o) => [o.label, o.value, unavailable(o)])]
         : null,
@@ -90,7 +102,7 @@ export function browserDocument(request: {
     const targets = new Map<string, Target>();
     const nodes = Array.from(
       document.querySelectorAll<HTMLElement>(
-        "a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[contenteditable=true],[role=combobox],[role=listbox],[role=option],[aria-haspopup=listbox]",
+        "a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[contenteditable=true],[role=combobox],[role=listbox],[role=option],[aria-haspopup=listbox],[role=checkbox],[role=radio],[role=switch]",
       ),
     )
       .filter(visible)
@@ -110,6 +122,7 @@ export function browserDocument(request: {
           ? el.getAttribute("aria-expanded") === "true"
           : undefined,
         disabled: unavailable(el),
+        checked: checkedState(el),
         controlsRefs: (el.getAttribute("aria-controls") || el.getAttribute("aria-owns") || "")
           .split(/\s+/)
           .map((id) => refs.get(document.getElementById(id)!))
@@ -211,11 +224,17 @@ export function browserDocument(request: {
     /\b(enviar|send|submit|publicar|publish|deploy|excluir|delete|remove|remover|apagar|pagar|pay|comprar|buy|purchase|login|log in|sign in|entrar|salvar|save|confirmar|confirm)\b/i.test(
       [...related.map(label), option?.label || ""].join(" "),
     );
+  const rememberLogin =
+    /continuar conectado|manter conectado|permanecer conectado|lembrar|remember|stay (?:signed|logged) in|keep me (?:signed|logged) in/i.test(
+      label(el),
+    );
   const reason = sensitiveField
     ? "O campo envolve senha, código de acesso ou pagamento."
-    : submit || criticalLabel
-      ? "O controle ou a opção pode enviar dados ou efetuar uma ação crítica."
-      : null;
+    : rememberLogin
+      ? "O controle pode manter o login neste computador. Confirme essa preferência de acesso."
+      : submit || criticalLabel
+        ? "O controle ou a opção pode enviar dados ou efetuar uma ação crítica."
+        : null;
   if (request.action === "probe") return { reason, label: label(el) };
   el.scrollIntoView({ block: "center", inline: "nearest" });
   if (request.action === "click") {

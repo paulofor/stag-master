@@ -16,6 +16,40 @@ export async function startBrowserSite() {
   ).outputFiles[0].text;
   const effects = { submissions: 0, downloads: 0 };
   const server = createServer((request, response) => {
+    if (request.url === "/session-login") {
+      response.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      const connected = /(?:^|; )synthetic_login=fixture(?:;|$)/.test(request.headers.cookie || "");
+      response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Login sintético</title><body>
+        <h1>${connected ? "Conectado sintético" : "Login necessário"}</h1>
+        <form method="POST" action="/session-login/submit"><label>Usuário sintético <input name="username" autocomplete="username"></label>
+        <label>Senha sintética <input name="password" type="password" autocomplete="current-password"></label>
+        <label><input id="remember" type="checkbox" name="remember" value="SYNTHETIC_PRIVATE_CHECKBOX">Continuar conectado</label><button type="submit">Login sintético</button></form>
+        <label><input type="radio" checked>Perfil sintético</label>
+        <div role="checkbox" aria-checked="mixed" tabindex="0" style="padding:8px">Preferência mista</div>
+        <div role="switch" aria-checked="false" tabindex="0" style="padding:8px" onclick="this.setAttribute('aria-checked',this.getAttribute('aria-checked')!=='true')">Tema sintético</div>
+        <script>window.securityProbe = {node:typeof process,require:typeof require,bridge:typeof window.stag};</script>
+        </body></html>`);
+      return;
+    }
+    if (request.url === "/session-login/submit" && request.method === "POST") {
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        const remember = new URLSearchParams(body).has("remember");
+        response.writeHead(303, {
+          Location: "/session-login",
+          "Set-Cookie": `synthetic_login=fixture; HttpOnly; SameSite=Strict; Path=/${remember ? "; Max-Age=3600" : ""}`,
+          "Cache-Control": "no-store",
+        });
+        response.end();
+      });
+      return;
+    }
     if (request.url === "/combos.js") {
       response.writeHead(200, { "Content-Type": "text/javascript; charset=utf-8" });
       response.end(comboScript);

@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { z } from "zod";
@@ -83,6 +84,8 @@ interface Options {
     confirmationReason: (args: BrowserArguments) => Promise<string | null>;
     control: (args: BrowserControl) => Promise<void>;
     reset: () => void;
+    setProfile: (id: string | null) => void;
+    clearProfile: () => Promise<void>;
     cancel: () => void;
     setVisible: (visible: boolean) => void;
   };
@@ -115,7 +118,7 @@ function errorText(error: unknown): string {
 
 export class AssistantService extends EventEmitter {
   private state: Snapshot;
-  private settings: Settings = { threads: {}, projectSources: {} };
+  private settings: Settings = { threads: {}, projectSources: {}, browserProfiles: {} };
   private rpc: RpcClient | null = null;
   private pending = new Map<string, PendingApproval>();
   private toolRequests = new Set<string>();
@@ -196,7 +199,14 @@ export class AssistantService extends EventEmitter {
         /* A moved project can be selected again. */
       }
     }
+    this.restoreBrowserProfile();
     this.publish();
+  }
+  private restoreBrowserProfile(): void {
+    const path = this.state.project?.path;
+    const id = path ? this.settings.browserProfiles[path] || null : null;
+    this.options.browser?.setProfile(id);
+    this.state.browser.remember = !!id;
   }
   async request(raw: Action): Promise<Snapshot> {
     const action = actionSchema.parse(raw) as Action;
@@ -211,6 +221,7 @@ export class AssistantService extends EventEmitter {
         "logout",
         "selectProject",
         "projectSources",
+        "browserSession",
         "preferences",
         "newChat",
         "resume",
@@ -322,6 +333,38 @@ export class AssistantService extends EventEmitter {
         case "browserConsent":
           await this.browserConsent(action.allow);
           break;
+        case "browserSession": {
+          const path = this.state.project?.path;
+          const browser = this.options.browser;
+          if (!browser || !path || path !== action.projectPath)
+            throw new Error("O projeto mudou. Abra o navegador no projeto desejado.");
+          if (action.remember === this.state.browser.remember) break;
+          // End authority immediately, then wait for the shared queue before replacing storage.
+          this.toolEpoch++;
+          this.state.browser.authorized = false;
+          this.browserConsentThread = null;
+          this.contextInstructionsDirty = true;
+          this.state.queuePaused = true;
+          browser.cancel();
+          this.publish();
+          await this.toolQueue;
+          const profiles = { ...this.settings.browserProfiles };
+          if (action.remember) profiles[path] = randomUUID();
+          else {
+            await browser.clearProfile();
+            delete profiles[path];
+          }
+          const settings = { ...this.settings, browserProfiles: profiles };
+          try {
+            await this.options.store.save(settings);
+          } catch (error) {
+            this.restoreBrowserProfile();
+            throw error;
+          }
+          this.settings = settings;
+          this.restoreBrowserProfile();
+          break;
+        }
         case "browserVisibility":
           this.state.browser.visible = action.visible;
           this.options.browser?.setVisible(action.visible);
@@ -551,6 +594,7 @@ export class AssistantService extends EventEmitter {
     this.state.mode = "project";
     this.state.project = { path, name: basename(path) || path };
     this.state.projectSources = this.settings.projectSources[path] || [];
+    this.restoreBrowserProfile();
     this.settings.project = path;
     await this.options.store.save(this.settings);
     this.state.project.git = await (this.options.prepareProjectGit || prepareProjectGit)(path, {

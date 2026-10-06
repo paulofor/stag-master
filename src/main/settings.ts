@@ -6,6 +6,7 @@ import { projectSourcesSchema } from "../shared/project-sources";
 const settingsSchema = z.object({
   project: z.string().optional(),
   projectSources: z.record(z.string(), projectSourcesSchema).default({}),
+  browserProfiles: z.record(z.string(), z.string().uuid()).default({}),
   threads: z
     .record(
       z.string(),
@@ -18,6 +19,7 @@ const settingsSchema = z.object({
     .default({}),
 });
 const storedSettingsSchema = settingsSchema.extend({
+  browserProfiles: z.record(z.string(), z.string().uuid()).default({}).catch({}),
   projectSources: z.record(z.string(), projectSourcesSchema.catch([])).default({}).catch({}),
 });
 export type Settings = z.infer<typeof settingsSchema>;
@@ -28,7 +30,7 @@ export class SettingsStore {
     try {
       return storedSettingsSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
     } catch {
-      return { threads: {}, projectSources: {} };
+      return { threads: {}, projectSources: {}, browserProfiles: {} };
     }
   }
   save(settings: z.input<typeof settingsSchema>): Promise<void> {

@@ -93,6 +93,7 @@ export interface BrowserState {
   available: boolean;
   visible: boolean;
   authorized: boolean;
+  remember: boolean;
   url: string;
   title: string;
   loading: boolean;
@@ -100,7 +101,7 @@ export interface BrowserState {
   canGoForward: boolean;
   error: string | null;
 }
-export type BrowserInfo = Omit<BrowserState, "available" | "visible" | "authorized">;
+export type BrowserInfo = Omit<BrowserState, "available" | "visible" | "authorized" | "remember">;
 export const emptySnapshot: Snapshot = {
   connection: "disconnected",
   error: null,
@@ -127,6 +128,7 @@ export const emptySnapshot: Snapshot = {
     available: false,
     visible: true,
     authorized: false,
+    remember: false,
     url: "",
     title: "",
     loading: false,
@@ -160,6 +162,7 @@ export type Action =
   | { type: "openLink"; url: string }
   | { type: "browserVisibility"; visible: boolean }
   | { type: "browserConsent"; allow: boolean }
+  | { type: "browserSession"; projectPath: string; remember: boolean }
   | { type: "browserControl"; control: BrowserControl }
   | { type: "browserBounds"; bounds: { x: number; y: number; width: number; height: number } };
 export type BrowserControl =

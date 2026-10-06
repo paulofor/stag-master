@@ -18,7 +18,11 @@ import {
   type DesktopArguments,
   type ToolResult,
 } from "../../src/main/desktop-tools";
-import { browserConfirmationReason, type BrowserArguments } from "../../src/main/browser-tools";
+import {
+  browserConfirmationReason,
+  browserSessionInstructions,
+  type BrowserArguments,
+} from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
 
 let dir: string;
@@ -45,6 +49,8 @@ const browser = {
   confirmationReason: vi.fn(async (args: BrowserArguments) => browserConfirmationReason(args)),
   control: vi.fn(async () => {}),
   reset: vi.fn(),
+  setProfile: vi.fn(),
+  clearProfile: vi.fn(async () => {}),
   cancel: vi.fn(),
   setVisible: vi.fn(),
 };
@@ -123,6 +129,124 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("sessões de sites por projeto", () => {
+  const remember = (enabled = true, projectPath = dir) =>
+    service.request({ type: "browserSession", projectPath, remember: enabled });
+
+  it("persiste preferência por raiz e mantém o consentimento somente na conversa", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "browserConsent", allow: true });
+    await remember();
+    const id = (await store.load()).browserProfiles[dir];
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(browser.setProfile).toHaveBeenLastCalledWith(id);
+    expect(service.snapshot().browser).toMatchObject({ remember: true, authorized: false });
+    expect(service.snapshot().mode).toBe("read");
+    await service.request({ type: "browserConsent", allow: true });
+    await service.request({ type: "newChat" });
+    expect(service.snapshot().browser).toMatchObject({ remember: true, authorized: false });
+    const other = resolve(dir, "outro-projeto");
+    await mkdir(other);
+    selectProject.mockResolvedValue(other);
+    await service.request({ type: "selectProject" });
+    expect(browser.setProfile).toHaveBeenLastCalledWith(null);
+    expect(service.snapshot().browser.remember).toBe(false);
+    await remember(true, other);
+    expect((await store.load()).browserProfiles[other]).not.toBe(id);
+    selectProject.mockResolvedValue(dir);
+    await service.request({ type: "selectProject" });
+    expect(browser.setProfile).toHaveBeenLastCalledWith(id);
+    expect(service.snapshot().browser).toMatchObject({ remember: true, authorized: false });
+    const restarted = new AssistantService({
+      createRpc: () => rpc,
+      store,
+      selectProject,
+      openExternal,
+      desktop,
+      browser,
+    });
+    await restarted.init();
+    expect(restarted.snapshot().browser).toMatchObject({ remember: true, authorized: false });
+    expect(browser.setProfile).toHaveBeenLastCalledWith(id);
+    restarted.dispose();
+  });
+
+  it("recusa projeto divergente, sessão em execução e argumentos extras", async () => {
+    await ready();
+    await expect(remember(true, resolve(dir, "outro"))).rejects.toThrow(/projeto mudou/);
+    await expect(
+      service.request({
+        type: "browserSession",
+        projectPath: dir,
+        remember: true,
+        profileId: randomUUID(),
+      } as never),
+    ).rejects.toThrow();
+    await send("aprovar comando");
+    await expect(remember()).rejects.toThrow(/Pare a execução/);
+    await approve(false);
+    expect((await store.load()).browserProfiles).toEqual({});
+    await remember();
+    expect(service.snapshot().browser.remember).toBe(true);
+  });
+
+  it("cancelamento e seleção inválida preservam a sessão", async () => {
+    await ready();
+    await remember();
+    const id = (await store.load()).browserProfiles[dir];
+    browser.setProfile.mockClear();
+    selectProject.mockResolvedValue(null);
+    await service.request({ type: "selectProject" });
+    selectProject.mockResolvedValue(resolve(dir, "inexistente"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    expect(browser.setProfile).not.toHaveBeenCalled();
+    expect((await store.load()).browserProfiles[dir]).toBe(id);
+    expect(service.snapshot().browser.remember).toBe(true);
+  });
+
+  it("falhas de gravação e limpeza são explícitas e recuperáveis, sem declarar exclusão", async () => {
+    await ready();
+    const save = vi.spyOn(store, "save");
+    save.mockRejectedValueOnce(new Error("gravação sintética indisponível"));
+    await expect(remember()).rejects.toThrow(/gravação sintética/);
+    expect(service.snapshot().browser.remember).toBe(false);
+    expect((await store.load()).browserProfiles).toEqual({});
+    await remember();
+    const id = (await store.load()).browserProfiles[dir];
+    browser.clearProfile.mockRejectedValueOnce(new Error("limpeza sintética indisponível"));
+    await expect(remember(false)).rejects.toThrow(/limpeza sintética/);
+    expect(service.snapshot().browser).toMatchObject({ remember: true, authorized: false });
+    expect((await store.load()).browserProfiles[dir]).toBe(id);
+    save.mockRejectedValueOnce(new Error("gravação após limpeza falhou"));
+    await expect(remember(false)).rejects.toThrow(/após limpeza/);
+    expect(browser.setProfile).toHaveBeenLastCalledWith(id);
+    expect(service.snapshot().browser.remember).toBe(true);
+    await remember(false);
+    expect((await store.load()).browserProfiles[dir]).toBeUndefined();
+    expect(browser.setProfile).toHaveBeenLastCalledWith(null);
+    expect(service.snapshot().browser.remember).toBe(false);
+    await remember();
+    expect((await store.load()).browserProfiles[dir]).not.toBe(id);
+    expect(service.snapshot().metrics.failures).toBeGreaterThanOrEqual(3);
+  });
+
+  it("configuração antiga/corrompida não ativa persistência e preserva o projeto", async () => {
+    await ready();
+    const saved = await store.load();
+    await writeFile(
+      resolve(dir, "settings.json"),
+      JSON.stringify({ ...saved, browserProfiles: { [dir]: "../../perfil-invalido" } }),
+    );
+    expect(await store.load()).toMatchObject({ project: dir, browserProfiles: {} });
+    await writeFile(
+      resolve(dir, "settings.json"),
+      JSON.stringify({ ...saved, browserProfiles: undefined }),
+    );
+    expect((await store.load()).browserProfiles).toEqual({});
+  });
+});
+
 describe("fila de textos por conversa", () => {
   const enqueue = (text: string, id = randomUUID()) =>
     service.request({ type: "enqueue", threadId: service.snapshot().threadId!, id, text });
@@ -1398,6 +1522,7 @@ describe("fluxo local do assistente", () => {
     const resume = calls.find((call) => call.method === "thread/resume")!;
     for (const call of [start, resume]) {
       expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
+      expect(call.params.developerInstructions).toContain(browserSessionInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -1440,6 +1565,7 @@ describe("fluxo local do assistente", () => {
       await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
     for (const call of calls.filter((c) => ["thread/start", "thread/resume"].includes(c.method))) {
       expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
+      expect(call.params.developerInstructions).toContain(browserSessionInstructions);
       expect(call.params.sandbox).toBe("workspace-write");
       if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
     }

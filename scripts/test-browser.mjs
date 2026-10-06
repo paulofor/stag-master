@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { validateBrowserCombos } from "./test-browser-combos.mjs";
+import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
@@ -223,6 +224,7 @@ export async function validateBrowser(application, dir, site) {
     await dom(
       "document.cookie='synthetic_session=fixture';localStorage.setItem('synthetic','fixture')",
     );
+    await validateBrowserSessions({ application, site, execute, reason, snapshot, dom, target });
     console.log("Browser real: descartar sessão sintética e recuperar navegação interrompida.");
     // Reproduce native window resizing after renderer bounds were accepted, before reset.
     const previousSize = await application.evaluate(() => {

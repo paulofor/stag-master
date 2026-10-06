@@ -79,6 +79,13 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("browserConsent"), allow: z.boolean() }).strict(),
   z
     .object({
+      type: z.literal("browserSession"),
+      projectPath: z.string().min(1).max(32768),
+      remember: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("browserControl"),
       control: z.discriminatedUnion("action", [
         z.object({ action: z.literal("navigate"), url: z.string().min(1).max(8000) }).strict(),

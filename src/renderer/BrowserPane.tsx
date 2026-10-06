@@ -4,6 +4,7 @@ import type { Action, BrowserState } from "../shared/types";
 
 export function BrowserPane({
   state,
+  projectPath,
   busy,
   pending,
   obscured = false,
@@ -11,6 +12,7 @@ export function BrowserPane({
   backToChat,
 }: {
   state: BrowserState;
+  projectPath?: string;
   busy: boolean;
   pending: boolean;
   obscured?: boolean;
@@ -140,6 +142,37 @@ export function BrowserPane({
           {state.authorized ? "Revogar navegador" : "Autorizar navegador"}
         </button>
       </div>
+      <div className="browser-session-settings">
+        <label>
+          <input
+            type="checkbox"
+            checked={state.remember}
+            disabled={manualDisabled || !projectPath}
+            onChange={(event) =>
+              void run({
+                type: "browserSession",
+                projectPath: projectPath!,
+                remember: event.target.checked,
+              })
+            }
+          />
+          Lembrar sessões neste projeto
+        </label>
+        <button
+          className="text-button"
+          disabled={manualDisabled || !projectPath || !state.remember}
+          onClick={() =>
+            void run({ type: "browserSession", projectPath: projectPath!, remember: false })
+          }
+        >
+          Esquecer logins
+        </button>
+        <small>
+          {state.remember
+            ? "Sessões salvas neste computador. O site pode exigir novo login."
+            : "Sessão temporária. Ative antes do login para lembrar neste computador."}
+        </small>
+      </div>
       {state.error && (
         <div className="browser-error" role="alert">
           {state.error}
@@ -163,7 +196,10 @@ export function BrowserPane({
       </div>
       <footer className="browser-footer">
         <span title={state.url}>
-          {state.loading ? "Carregando…" : state.title || "Sessão separada por conversa"}
+          {state.loading
+            ? "Carregando…"
+            : state.title ||
+              (state.remember ? "Sessões deste projeto" : "Sessão temporária por conversa")}
         </span>
         <span>STAG</span>
       </footer>
