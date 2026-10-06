@@ -320,6 +320,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         .map((item) => item.text)
         .join("\n");
       const images = p.input.filter((item) => item.type === "image");
+      if (input.startsWith("sonda vídeo rejeitado")) {
+        failure(id, "Falha sintética ao enviar o vídeo");
+        break;
+      }
       if (input === "sonda fila rejeitada" && !rejectedQueueProbe) {
         rejectedQueueProbe = true;
         failure(id, "Falha sintética recuperável na fila");
@@ -414,6 +418,69 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             false,
             "stag_browser",
           );
+        break;
+      }
+      if (
+        p.additionalContext?.stag_video?.kind === "untrusted" &&
+        JSON.parse(p.additionalContext.stag_video.value).attached
+      ) {
+        // Synthetic agent response: validates wiring and files, not LLM semantic compliance.
+        const video = JSON.parse(p.additionalContext.stag_video.value);
+        if (
+          !thread.developerInstructions.includes("Vídeos anexados são preparados localmente") ||
+          !thread.developerInstructions.includes("Só afirme memorização após gravar e reler")
+        ) {
+          response(thread, turn, "Contrato de vídeo incompleto");
+          break;
+        }
+        if (thread.sandbox === "read-only") {
+          response(
+            thread,
+            turn,
+            "O vídeo descreve pedidos; as notas não foram salvas em modo Leitura.",
+          );
+          break;
+        }
+        if (
+          !video.transcript?.some((entry) => /order.*approval|approval.*shipping/i.test(entry.text))
+        ) {
+          response(
+            thread,
+            turn,
+            "Vídeo recebido; conteúdo sintético não reconhecido, sem afirmar gravação.",
+          );
+          break;
+        }
+        try {
+          const memory = join(thread.cwd, ".stag");
+          if (existsSync(memory) && lstatSync(memory).isSymbolicLink())
+            throw new Error("synthetic isolation");
+          mkdirSync(memory, { recursive: true });
+          for (const name of ["README", "sistema", "negocio", "decisoes", "pendencias"]) {
+            const target = join(memory, `${name}.md`);
+            if (existsSync(target) && lstatSync(target).isSymbolicLink())
+              throw new Error("synthetic isolation");
+            if (!existsSync(target)) writeFileSync(target, `# ${name}\n`);
+          }
+          const target = join(memory, "negocio.md");
+          const previous = readFileSync(target, "utf8");
+          const note =
+            "\nPedidos exigem aprovação antes do envio. Fonte: vídeo sintético, 00:00; registro 2026-10-06.\n";
+          writeFileSync(target, previous + note);
+          if (!readFileSync(target, "utf8").includes(note))
+            throw new Error("synthetic verification");
+          response(
+            thread,
+            turn,
+            "Informação de pedidos registrada; anotações sintéticas verificadas em .stag/negocio.md.",
+          );
+        } catch {
+          response(
+            thread,
+            turn,
+            "Falha ao salvar as anotações; resumo do vídeo disponível, sem afirmar memorização.",
+          );
+        }
         break;
       }
       if ([memoryCorpus.record, memoryCorpus.correct, memoryCorpus.recall].includes(input)) {

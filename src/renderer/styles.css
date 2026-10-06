@@ -1508,3 +1508,30 @@ summary::-webkit-details-marker {
     display: none;
   }
 }
+.video-controls,
+.pending-video {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.video-controls {
+  flex-wrap: wrap;
+  color: #69665f;
+}
+.pending-video {
+  justify-content: space-between;
+  background: #f0f4ef;
+  border-radius: 8px;
+  margin: 8px;
+}
+.pending-video > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.pending-video button {
+  flex-shrink: 0;
+}

@@ -1,7 +1,9 @@
 import { build } from "esbuild";
 import { build as buildRenderer } from "vite";
 import { prepareCodex } from "./prepare-codex.mjs";
+import { prepareMedia } from "./prepare-media.mjs";
 await prepareCodex();
+await prepareMedia();
 await build({
   entryPoints: { index: "src/main/index.ts", preload: "src/main/preload.ts" },
   outdir: "dist/main",

@@ -29,6 +29,7 @@ try {
       "src/main/policy.ts",
       "src/main/project-git.ts",
       "src/main/project-sources.ts",
+      "src/main/request-video.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -41,6 +42,9 @@ try {
   const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
+  );
+  const { videoContext, videoMessage } = await import(
+    pathToFileURL(join(dir, "request-video.mjs")).href
   );
   const { assistantInstructions, threadPolicy, turnPolicy, codexEnvironment } = await import(
     pathToFileURL(join(dir, "policy.mjs")).href
@@ -152,7 +156,7 @@ try {
   // The server reports cwd/runtime roots separately from additional configured roots.
   assert.deepEqual(started.sandbox.writableRoots, []);
   // A real user turn is required for UI history; raw injected Responses items aren't UI turns.
-  async function syntheticTurn(input, sourceList = sources, authorized = false) {
+  async function syntheticTurn(input, sourceList = sources, authorized = false, extraContext = {}) {
     let timer;
     let listener;
     const completed = new Promise((resolve, reject) => {
@@ -168,7 +172,10 @@ try {
         threadId: started.thread.id,
         cwd: project,
         input,
-        additionalContext: projectSourcesContext(project, sourceList, authorized, true),
+        additionalContext: {
+          ...projectSourcesContext(project, sourceList, authorized, true),
+          ...extraContext,
+        },
         ...turnPolicy("project", project),
       });
       assert.equal((await completed).status, "completed");
@@ -199,6 +206,33 @@ try {
       );
   }
   verifyEngineeringContract();
+  const syntheticVideo = {
+    summary: {
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "video-sintetico.mp4",
+      seconds: 10,
+      frames: 1,
+      audio: "transcribed",
+    },
+    frames: [{ seconds: 5, image: { dataUrl: imageFixture.dataUrl } }],
+    transcript: [{ start: 0, end: 5, text: "Regra sintética: pedidos requerem aprovação." }],
+  };
+  await syntheticTurn(
+    [
+      { type: "text", text: videoMessage(syntheticVideo) },
+      { type: "image", url: imageFixture.dataUrl },
+    ],
+    sources,
+    false,
+    { stag_video: videoContext(syntheticVideo) },
+  );
+  const videoDelivered = JSON.stringify({
+    input: provider.inputs.at(-1),
+    instructions: provider.instructions.at(-1),
+  });
+  assert.ok(videoDelivered.includes(syntheticVideo.transcript[0].text));
+  assert.ok(videoDelivered.includes("Só afirme memorização após gravar e reler"));
+  assert.ok(videoDelivered.includes(syntheticVideo.summary.id));
   const providerImage = provider.inputs
     .flat()
     .flatMap((item) => item.content || [])

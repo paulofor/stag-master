@@ -24,6 +24,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
       const queueIds = new Set<string>();
       const clearQueue = () => {
+        state.pendingVideo = null;
         state.queuedMessages = [];
         state.queuePaused = false;
         queueIds.clear();
@@ -52,6 +53,21 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         request: async (action: Action) => {
           state.error = null;
           switch (action.type) {
+            case "selectVideo":
+              state.pendingVideo = {
+                status: "ready",
+                summary: {
+                  id: crypto.randomUUID(),
+                  name: "projeto-sintetico.mp4",
+                  seconds: 42,
+                  frames: 3,
+                  audio: "transcribed",
+                },
+              };
+              break;
+            case "removeVideo":
+              state.pendingVideo = null;
+              break;
             case "connect":
               state.connection = "ready";
               break;
@@ -156,6 +172,10 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.items = conversations.get(action.threadId) || [];
               break;
             case "send": {
+              if (action.videoId) {
+                action.text += `${action.text ? "\n\n" : ""}Vídeo do projeto: projeto-sintetico.mp4`;
+                state.pendingVideo = null;
+              }
               state.busy = true;
               if (!state.threadId) {
                 state.threadId = `thread-${++count}`;

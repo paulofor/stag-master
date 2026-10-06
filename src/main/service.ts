@@ -31,6 +31,12 @@ import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
 import { prepareProjectGit, projectGitInstructions } from "./project-git";
 import { projectSourcesContext } from "./project-sources";
 import {
+  videoContext,
+  videoMessage,
+  type PreparedVideo,
+  type VideoProcessor,
+} from "./request-video";
+import {
   browserArguments,
   browserApproval,
   browserTool,
@@ -90,6 +96,7 @@ interface Options {
     setVisible: (visible: boolean) => void;
   };
   platform?: string;
+  video?: VideoProcessor;
 }
 const modelSchema = z.object({
   id: z.string(),
@@ -142,6 +149,9 @@ export class AssistantService extends EventEmitter {
   private completedTurns = new Set<string>();
   private safetyBlockId = 0;
   private projectPreparation = new AbortController();
+  private videoPreparation: AbortController | null = null;
+  private videoWork: Promise<void> = Promise.resolve();
+  private preparedVideo: PreparedVideo | null = null;
   constructor(private options: Options) {
     super();
     this.state = structuredClone(emptySnapshot);
@@ -238,6 +248,12 @@ export class AssistantService extends EventEmitter {
     this.state.error = null;
     try {
       switch (action.type) {
+        case "selectVideo":
+          await this.selectVideo();
+          break;
+        case "removeVideo":
+          this.clearVideo();
+          break;
         case "connect":
           await this.connect();
           break;
@@ -288,7 +304,7 @@ export class AssistantService extends EventEmitter {
           if (this.state.queuedMessages.length || this.drainingMessages)
             throw new Error("Continue ou esvazie a fila antes de enviar outra mensagem.");
           this.state.queuePaused = false;
-          await this.send(action.text, action.images || []);
+          await this.send(action.text, action.images || [], action.videoId);
           break;
         case "enqueue":
           this.requireQueueThread(action.threadId);
@@ -400,6 +416,52 @@ export class AssistantService extends EventEmitter {
   private requireQueueThread(threadId: string): void {
     if (!this.state.project || !this.state.threadId || this.state.threadId !== threadId)
       throw new Error("A conversa mudou. Confira a conversa antes de alterar a fila.");
+  }
+  private clearVideo(): void {
+    this.videoPreparation?.abort();
+    this.videoPreparation = null;
+    this.preparedVideo = null;
+    this.state.pendingVideo = null;
+  }
+  private async selectVideo(): Promise<void> {
+    if (!this.options.video || !this.state.project)
+      throw new Error("Selecione uma pasta de projeto para anexar um vídeo.");
+    if (this.videoPreparation || this.sending || this.state.busy)
+      throw new Error("Aguarde ou cancele a preparação/execução atual.");
+    const previous = this.preparedVideo;
+    const controller = new AbortController();
+    this.videoPreparation = controller;
+    this.state.pendingVideo = { status: "preparing", phase: "Selecionando vídeo…" };
+    this.publish();
+    const work = this.videoWork.then(async () => {
+      if (controller.signal.aborted) return;
+      const path = await this.options.video!.select();
+      if (controller.signal.aborted) return;
+      if (!path) {
+        this.state.pendingVideo = previous ? { status: "ready", summary: previous.summary } : null;
+        return;
+      }
+      const prepared = await this.options.video!.prepare(path, controller.signal, (phase) => {
+        if (!controller.signal.aborted) {
+          this.state.pendingVideo = { status: "preparing", phase };
+          this.publish();
+        }
+      });
+      if (controller.signal.aborted) return;
+      this.preparedVideo = prepared;
+      this.state.pendingVideo = { status: "ready", summary: prepared.summary };
+    });
+    this.videoWork = work.catch(() => {});
+    try {
+      await work;
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        this.state.pendingVideo = previous ? { status: "ready", summary: previous.summary } : null;
+        throw error;
+      }
+    } finally {
+      if (this.videoPreparation === controller) this.videoPreparation = null;
+    }
   }
   private clearMessageQueue(): void {
     this.messageQueueEpoch++;
@@ -536,8 +598,10 @@ export class AssistantService extends EventEmitter {
       result.account?.type === "chatgpt"
         ? { email: result.account.email || null, plan: result.account.planType || null }
         : null;
-    if (previousAccount && previousAccount.email !== this.state.account?.email)
+    if (previousAccount && previousAccount.email !== this.state.account?.email) {
       this.clearMessageQueue();
+      this.clearVideo();
+    }
     this.publish();
   }
   private async refreshModels(): Promise<void> {
@@ -613,6 +677,7 @@ export class AssistantService extends EventEmitter {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
     this.toolEpoch++;
+    this.clearVideo();
     this.clearMessageQueue();
     this.toolRequests.clear();
     this.stopping = false;
@@ -751,7 +816,10 @@ export class AssistantService extends EventEmitter {
         "\n" +
         projectGitInstructions(this.state.project?.git),
     });
-    if (this.state.threadId !== id) this.clearMessageQueue();
+    if (this.state.threadId !== id) {
+      this.clearMessageQueue();
+      this.clearVideo();
+    }
     this.state.threadId = id;
     this.contextInstructionsDirty = false;
     this.completedTurns = new Set(
@@ -770,7 +838,14 @@ export class AssistantService extends EventEmitter {
     this.state.busy = last?.status === "inProgress";
     if (this.state.busy) this.turnId = last!.id;
   }
-  private async send(input: string, images: RequestImage[]): Promise<void> {
+  private async send(input: string, images: RequestImage[], videoId?: string): Promise<void> {
+    const video = videoId ? this.preparedVideo : null;
+    if (
+      videoId &&
+      (!video || video.summary.id !== videoId || this.state.pendingVideo?.status !== "ready")
+    )
+      throw new Error("Vídeo indisponível nesta conversa. Selecione o arquivo novamente.");
+    if (video && images.length) throw new Error("Envie o vídeo separadamente das imagens coladas.");
     if (this.sending || this.state.busy) throw new Error("Aguarde ou pare a execução atual.");
     if (this.state.connection !== "ready" || !this.state.account)
       throw new Error("Entre com sua conta ChatGPT para continuar.");
@@ -779,7 +854,7 @@ export class AssistantService extends EventEmitter {
     if (!selectedModel)
       throw new Error("Nenhum modelo disponível. Reconecte para atualizar a lista.");
     if (
-      images.length &&
+      (images.length || video) &&
       selectedModel.inputModalities &&
       !selectedModel.inputModalities.includes("image")
     )
@@ -801,6 +876,9 @@ export class AssistantService extends EventEmitter {
       return;
     }
     const localId = `local-${Date.now()}`;
+    if (video) input = `${input}${input ? "\n\n" : ""}${videoMessage(video)}`;
+    const sentImages = video ? video.frames.map((frame) => frame.image) : images;
+    const displayImages = requestImagesSchema.safeParse(sentImages);
     this.sending = true;
     try {
       if (this.state.threadId && this.contextInstructionsDirty)
@@ -850,7 +928,9 @@ export class AssistantService extends EventEmitter {
         id: localId,
         kind: "user",
         text: input,
-        ...(images.length ? { images } : {}),
+        ...(displayImages.success && displayImages.data.length
+          ? { images: displayImages.data }
+          : {}),
       });
       this.publish();
       const result = await this.call<{ turn: WireTurn }>("turn/start", {
@@ -858,26 +938,36 @@ export class AssistantService extends EventEmitter {
         cwd: this.state.project.path,
         input: [
           ...(input ? [{ type: "text", text: input }] : []),
-          ...images.map((image) => ({ type: "image", url: image.dataUrl })),
+          ...sentImages.map((image) => ({ type: "image", url: image.dataUrl })),
         ],
         model: this.state.model,
         effort: this.state.effort,
-        additionalContext: projectSourcesContext(
-          this.state.project.path,
-          this.state.projectSources,
-          this.state.browser.authorized,
-          !!this.settings.threads[this.state.threadId!]?.browserTool,
-        ),
+        additionalContext: {
+          ...projectSourcesContext(
+            this.state.project.path,
+            this.state.projectSources,
+            this.state.browser.authorized,
+            !!this.settings.threads[this.state.threadId!]?.browserTool,
+          ),
+          stag_video: video
+            ? videoContext(video)
+            : { kind: "untrusted", value: JSON.stringify({ attached: false }) },
+        },
         ...turnPolicy(this.state.mode, this.state.project.path),
       });
       // A small turn can finish before this response arrives. Do not resurrect it.
       if (this.state.busy) this.turnId = result.turn.id;
+      if (video && this.preparedVideo === video) this.clearVideo();
     } catch (error) {
       this.state.busy = false;
       this.turnId = null;
       this.state.items = this.state.items.filter((item) => item.id !== localId);
       // A timed-out request may have started upstream; reconnect instead of replaying.
       if (/demorou/.test(errorText(error))) this.rpc?.close();
+      if (video)
+        throw new Error(
+          "Não foi possível confirmar o envio do vídeo. O anexo foi preservado; confira o histórico antes de tentar novamente.",
+        );
       throw error;
     } finally {
       this.sending = false;
@@ -1353,11 +1443,15 @@ export class AssistantService extends EventEmitter {
   dispose(): void {
     this.disposed = true;
     this.clearMessageQueue();
+    this.clearVideo();
     this.projectPreparation.abort();
     this.toolEpoch++;
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();
     this.pending.clear();
+  }
+  async mediaSettled(): Promise<void> {
+    await this.videoWork;
   }
 }

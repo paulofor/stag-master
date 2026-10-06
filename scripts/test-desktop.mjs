@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, cp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, cp, readFile, writeFile, rm, symlink } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { _electron, expect } from "@playwright/test";
 import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
@@ -44,6 +46,29 @@ try {
   await mkdir(data);
   await cp("dist", join(dir, "dist"), { recursive: true });
   await cp("native", join(dir, "native"), { recursive: true });
+  await mkdir(join(dir, ".local"), { recursive: true });
+  if (process.platform === "win32")
+    await cp(".local/media", join(dir, ".local/media"), { recursive: true });
+  else await symlink(resolve(".local/media"), join(dir, ".local/media"), "dir");
+  const videoFixture = join(dir, "projeto-sintetico.mp4");
+  await promisify(execFile)(
+    resolve(".local/media", process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg"),
+    [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=c=blue:s=320x180:r=2",
+      "-t",
+      "2",
+      "-c:v",
+      "libx264",
+      "-threads",
+      "2",
+      videoFixture,
+    ],
+  );
   await writeFile(
     join(dir, "package.json"),
     JSON.stringify({ name: "stag-desktop-test", type: "module", main: "boot.cjs" }),
@@ -200,6 +225,39 @@ try {
     }
   });
   assert.equal(rejected, true);
+  await application.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, videoFixture);
+  await page.getByRole("button", { name: "Anexar vídeo", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Vídeo da solicitação" })).toContainText(
+    "sem fala reconhecida",
+    { timeout: 30000 },
+  );
+  const pendingVideo = await page.evaluate(
+    async () => (await window.stag.getSnapshot()).pendingVideo,
+  );
+  assert.equal(pendingVideo.status, "ready");
+  await page.reload();
+  await expect(page.getByRole("region", { name: "Vídeo da solicitação" })).toContainText(
+    "projeto-sintetico.mp4",
+  );
+  await page.getByRole("button", { name: "Remover vídeo", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Vídeo da solicitação" })).toHaveCount(0);
+  const staleVideo = await page.evaluate(async (id) => {
+    try {
+      await window.stag.request({ type: "send", text: "", videoId: id });
+      return false;
+    } catch {
+      return true;
+    }
+  }, pendingVideo.summary.id);
+  assert.equal(staleVideo, true);
+  await application.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+  }, project);
+  console.log(
+    "Vídeo no Electron: seleção nativa, decoder real, reload, remoção e referência antiga recusada OK.",
+  );
   const imageInput = page.getByLabel("Mensagem para o assistente");
   await application.evaluate(async ({ clipboard }) =>
     clipboard.writeText("Tarefa sintética colada"),

@@ -60,12 +60,15 @@ export const actionSchema = z.discriminatedUnion("type", [
       type: z.literal("send"),
       text: z.string().trim().max(100000),
       images: requestImagesSchema.optional(),
+      videoId: z.uuid().optional(),
     })
     .strict()
     .refine(
-      (action) => !!action.text || !!action.images?.length,
+      (action) => !!action.text || !!action.images?.length || !!action.videoId,
       "Escreva uma mensagem ou cole uma imagem.",
     ),
+  z.object({ type: z.literal("selectVideo") }).strict(),
+  z.object({ type: z.literal("removeVideo") }).strict(),
   z
     .object({
       type: z.literal("answer"),
