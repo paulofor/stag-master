@@ -1,4 +1,22 @@
-# Matriz de homologação da versão 0.4.21
+# Matriz de homologação da versão 0.4.22
+
+## Largura do navegador — versão 0.4.22
+
+Matriz definida antes dos testes. A imagem do cliente mostra o navegador com cerca de 53% da janela e conteúdo cortado horizontalmente. O painel passa a ocupar aproximadamente 64%, preservando ao menos 360 pixels para a conversa no modo lado a lado. Até 900 pixels, permanece a alternância entre conversa e navegador. A largura adicional reduz a necessidade de rolagem; sites mais largos que o espaço disponível ainda podem rolar.
+
+Lacuna observada no harness: havia verificações de posicionamento e overflow do aplicativo, mas faltava conferir espaço para conteúdo largo e sua correspondência com a WebContentsView real após redimensionar. Reutilizar a fixture loopback e os testes de interface/Electron, sem novas dependências.
+
+| Área                     | Cenário e aceite                                                                                                                              | Evidência prevista                           |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Caminho feliz            | Em 1584 pixels (janela da referência), página sintética de 1000 pixels cabe no navegador sem rolagem horizontal                               | Electron real e fixture loopback, screenshot |
+| Responsividade           | 1584, 1280 e 901 pixels preservam conversa legível, navegador maior e ausência de overflow do aplicativo; compacto e Pixel 7 alternam painéis | Chromium e testes existentes                 |
+| Integração e recuperação | Bounds nativos acompanham a área do renderer; fechar/reabrir preserva rascunho e revoga consentimento; retomada/sessões continuam isoladas    | Electron de produção + E2E existentes        |
+| Observabilidade e dados  | Somente páginas e projetos sintéticos, sem contas reais; métricas e fila mantêm o comportamento existente                                     | check + test:desktop                         |
+| Entrega                  | Versão 0.4.22; Windows nativo e instalador sem publicação automática de release; Linux não comprova execução nativa Windows                   | Jobs PR/main e artefato Windows              |
+
+Evidência local: `npm run check` passou com typecheck, 370 testes de contrato, build, vídeo/ASR sintético, handshake Codex real com provedor local e 68 cenários Chromium. `xvfb-run -a npm run test:desktop` passou com o navegador de produção: página sintética de 1000 pixels carregada, barra vertical presente, ausência de rolagem horizontal e bounds sincronizados após ampliar a janela. Screenshots da interface e do conteúdo remoto conferidos; fechar/reabrir, sessões, TLS, recuperação e isolamento mantidos. `npm run format:check`, sintaxe dos scripts JavaScript alterados e diff aprovados. Dependências preparadas localmente sob Node 22.12.0. O kernel Linux bloqueia namespaces bwrap no smoke existente; esta sandbox não comprova execução nativa Windows, que continua exigida nos jobs do PR/main. Não foram usados o site, os dados ou a sessão corporativa da imagem do cliente.
+
+O primeiro CI do PR aprovou os jobs Linux/servidor e as verificações de largura no Windows, mas falhou ao salvar a captura nativa: a pasta `.local/screenshots` não existia, pois o caminho Windows não executa as capturas anteriores exclusivas do fluxo Linux. O harness agora cria a pasta explicitamente no início. A integração Electron foi repetida localmente após mover a pasta de capturas existente, sem depender de artefatos anteriores, e passou; sintaxe, formatação e diff conferidos antes de atualizar o mesmo PR. Nenhuma alteração adicional de produção foi necessária.
 
 ## Pedidos preventivos e recusas indevidas — versão 0.4.21
 

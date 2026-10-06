@@ -16,6 +16,13 @@ export async function startBrowserSite() {
   ).outputFiles[0].text;
   const effects = { submissions: 0, downloads: 0 };
   const server = createServer((request, response) => {
+    if (request.url === "/wide") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Página larga sintética</title>
+        <style>body{margin:0;font:16px system-ui}main{min-width:1000px;min-height:1200px;background:#eef3e9;padding:24px;box-sizing:border-box}header{display:flex;justify-content:space-between}</style>
+        <body><main><header><h1>Consulta sintética</h1><button>Nova remessa sintética</button></header><p>Página de teste com largura mínima de 1000 pixels.</p></main></body></html>`);
+      return;
+    }
     if (request.url === "/session-login") {
       response.writeHead(200, {
         "Content-Type": "text/html; charset=utf-8",

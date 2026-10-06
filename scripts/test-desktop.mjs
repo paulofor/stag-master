@@ -14,7 +14,7 @@ import imageFixture from "../tests/fixtures/request-image.json" with { type: "js
 import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 
-await mkdir(".local", { recursive: true });
+await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
 const project = join(dir, "projeto-fixture");
 const data = join(dir, "data");
@@ -789,6 +789,62 @@ try {
     );
   }
   await validateBrowser(application, dir, site, page);
+  // Check the renderer and its actual WebContentsView together with a wide local page.
+  const originalSize = await application.evaluate(({ BrowserWindow }) => {
+    const host = BrowserWindow.getAllWindows()[0];
+    const size = host.getContentSize();
+    host.setContentSize(1584, 900);
+    return size;
+  });
+  await page.evaluate(async (url) => {
+    await window.stag.request({ type: "browserVisibility", visible: true });
+    await window.stag.request({ type: "browserControl", control: { action: "navigate", url } });
+  }, new URL("wide", site.url).href);
+  await expect(page.getByRole("region", { name: "Navegador do assistente" })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const viewport = await page.locator(".browser-viewport").boundingBox();
+      return application.evaluate(({ BrowserWindow }, bounds) => {
+        const host = BrowserWindow.getAllWindows()[0];
+        const view = host.contentView.children.find(
+          (child) => child.webContents && child.webContents !== host.webContents,
+        );
+        const native = view.getBounds();
+        return Math.abs(native.x - bounds.x) <= 1 && Math.abs(native.width - bounds.width) <= 1;
+      }, viewport);
+    })
+    .toBe(true);
+  const wideLayout = await application.evaluate(async ({ BrowserWindow }) => {
+    const host = BrowserWindow.getAllWindows()[0];
+    const view = host.contentView.children.find(
+      (child) => child.webContents && child.webContents !== host.webContents,
+    );
+    return {
+      hostWidth: host.getContentSize()[0],
+      browserWidth: view.getBounds().width,
+      title: view.webContents.getTitle(),
+      fits: await view.webContents.executeJavaScript(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth",
+      ),
+      screenshot: (await view.webContents.capturePage()).toDataURL(),
+    };
+  });
+  assert.equal(wideLayout.title, "Página larga sintética");
+  assert.ok(wideLayout.browserWidth >= wideLayout.hostWidth * 0.6);
+  // Some Windows runners clamp windows to the screen; verify absence of scroll when space permits.
+  if (wideLayout.hostWidth >= 1584) assert.equal(wideLayout.fits, true);
+  await writeFile(
+    ".local/screenshots/electron-browser-wide-content.png",
+    Buffer.from(wideLayout.screenshot.split(",")[1], "base64"),
+  );
+  await page.screenshot({ path: ".local/screenshots/electron-browser-wide.png" });
+  await page.getByRole("button", { name: "Fechar navegador" }).click();
+  await application.evaluate(({ BrowserWindow }, size) => {
+    BrowserWindow.getAllWindows()[0].setContentSize(...size);
+  }, originalSize);
+  console.log(
+    "Browser layout: painel ampliado, bounds nativos sincronizados e página larga sintética conferidos.",
+  );
   await validateSavedSession(application, page, site, "prepare");
   assert.deepEqual(errors, []);
   await application.close();
