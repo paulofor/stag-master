@@ -20,6 +20,8 @@ import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
 import { BrowserPanel } from "./browser-panel";
+import { prepareVideo } from "./request-video";
+import { videoExtensions } from "../shared/request-video";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "stag", privileges: { standard: true, secure: true, supportFetchAPI: true } },
@@ -118,6 +120,29 @@ async function start(): Promise<void> {
       },
     },
     browser,
+    video: {
+      select: async () => {
+        const result = await dialog.showOpenDialog(window!, {
+          title: "Anexar vídeo do projeto",
+          properties: ["openFile"],
+          filters: [{ name: "Vídeos (até 100 MB e 10 minutos)", extensions: videoExtensions }],
+        });
+        return result.canceled ? null : result.filePaths[0] || null;
+      },
+      prepare: async (path, signal, progress) => {
+        const prepared = await prepareVideo(
+          path,
+          join(resourceRoot, app.isPackaged ? "media" : ".local/media"),
+          join(app.getPath("temp"), "stag-media"),
+          signal,
+          progress,
+        );
+        for (const frame of prepared.frames)
+          if (nativeImage.createFromDataURL(frame.image.dataUrl).isEmpty())
+            throw new Error("Não foi possível decodificar as imagens do vídeo.");
+        return prepared;
+      },
+    },
   });
   browser.on("state", (info) => service?.updateBrowser(info));
   service.updateBrowser(browser.snapshot());
@@ -246,7 +271,14 @@ app
     app.quit();
   });
 app.on("window-all-closed", () => app.quit());
-app.on("before-quit", () => {
+let quitting = false;
+app.on("before-quit", (event) => {
+  if (quitting) return;
+  event.preventDefault();
   service?.dispose();
   browser?.dispose();
+  void (service?.mediaSettled() || Promise.resolve()).finally(() => {
+    quitting = true;
+    app.quit();
+  });
 });

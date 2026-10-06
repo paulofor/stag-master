@@ -12,6 +12,8 @@ import memoryCorpus from "../fixtures/memory-scenarios.json";
 import sourceCorpus from "../fixtures/source-scenarios.json";
 import imageFixture from "../fixtures/request-image.json";
 import { projectMemoryInstructions } from "../../src/main/project-memory";
+import { type PreparedVideo, type VideoProcessor } from "../../src/main/request-video";
+import { videoInstructions } from "../../src/shared/request-video";
 import { prepareProjectGit as prepareGit, createGitRunner } from "../../src/main/project-git";
 import {
   desktopConfirmationReason,
@@ -33,6 +35,24 @@ let store: SettingsStore;
 const openExternal = vi.fn(async (_url: string) => {});
 const selectProject = vi.fn<() => Promise<string | null>>();
 const prepareProjectGit = vi.fn<typeof prepareGit>();
+const syntheticVideo = (): PreparedVideo => ({
+  summary: {
+    id: randomUUID(),
+    name: "projeto-sintetico.mp4",
+    seconds: 42,
+    frames: 2,
+    audio: "transcribed",
+  },
+  frames: [0, 40].map((seconds) => ({ seconds, image: { dataUrl: imageFixture.dataUrl } })),
+  transcript: [
+    {
+      start: 0,
+      end: 5,
+      text: "The project manages customer orders. Every order needs approval before shipping.",
+    },
+  ],
+});
+const video: VideoProcessor = { select: vi.fn(), prepare: vi.fn() };
 const desktop = {
   confirmationReason: vi.fn(async (args: unknown) =>
     desktopConfirmationReason(args as DesktopArguments),
@@ -60,6 +80,8 @@ beforeEach(async () => {
   dir = await mkdtemp(resolve(".local/service-test-"));
   store = new SettingsStore(resolve(dir, "settings.json"));
   selectProject.mockResolvedValue(dir);
+  vi.mocked(video.select).mockResolvedValue(resolve(dir, "video.mp4"));
+  vi.mocked(video.prepare).mockResolvedValue(syntheticVideo());
   prepareProjectGit.mockImplementation((path, options) =>
     prepareGit(path, {
       ...options,
@@ -91,6 +113,7 @@ beforeEach(async () => {
     prepareProjectGit,
     desktop,
     browser,
+    video,
     platform: "win32",
   });
   await service.init();
@@ -98,6 +121,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   service.dispose();
+  await service.mediaSettled();
   await rpc.shutdown();
   vi.resetAllMocks();
   desktop.confirmationReason.mockImplementation(async (args) =>
@@ -130,6 +154,124 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+describe("vídeo para as anotações do projeto", () => {
+  const attach = async () => {
+    await service.request({ type: "selectVideo" });
+    const pending = service.snapshot().pendingVideo;
+    expect(pending?.status).toBe("ready");
+    if (pending?.status !== "ready") throw new Error("Anexo ausente");
+    return pending.summary.id;
+  };
+  it("envia quadros e fala não confiável, grava notas sintéticas e recupera o histórico", async () => {
+    await ready();
+    await mkdir(resolve(dir, ".stag"));
+    await writeFile(resolve(dir, ".stag/negocio.md"), "Nota anterior do cliente\n");
+    const videoId = await attach();
+    expect(JSON.stringify(service.snapshot())).not.toContain("Every order");
+    await service.request({ type: "send", text: "", videoId });
+    await complete();
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(1);
+    expect(service.snapshot().pendingVideo).toBeNull();
+    const note = await readFile(resolve(dir, ".stag/negocio.md"), "utf8");
+    expect(note).toContain("Nota anterior do cliente");
+    expect(note).toContain("aprovação antes do envio");
+    expect(note).toContain("00:00");
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    const turn = calls.find((call) => call.method === "turn/start").params;
+    expect(turn.input.filter((entry: any) => entry.type === "image")).toHaveLength(2);
+    expect(turn.additionalContext.stag_video.kind).toBe("untrusted");
+    expect(JSON.parse(turn.additionalContext.stag_video.value).id).toBe(videoId);
+    expect(
+      calls.find((call) => call.method === "thread/start").params.developerInstructions,
+    ).toContain(videoInstructions);
+    const threadId = service.snapshot().threadId!;
+    await service.request({ type: "newChat" });
+    await service.request({ type: "resume", threadId });
+    expect(service.snapshot().items.at(-1)?.text).toContain("anotações sintéticas verificadas");
+    const resumed = await rpc.call<any[]>("_fixture/readCalls");
+    expect(
+      resumed.find((call) => call.method === "thread/resume").params.developerInstructions,
+    ).toContain(videoInstructions);
+    expect(await readFile(resolve(dir, "settings.json"), "utf8")).not.toContain("Every order");
+  });
+  it("Leitura, falha de escrita e recuperação não inventam gravação", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "send", text: "", videoId: await attach() });
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("não foram salvas");
+    await expect(readFile(resolve(dir, ".stag/negocio.md"))).rejects.toThrow();
+    await service.request({ type: "preferences", mode: "project" });
+    await writeFile(resolve(dir, ".stag"), "impedimento sintético");
+    await service.request({ type: "send", text: "", videoId: await attach() });
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("Falha ao salvar");
+    await rm(resolve(dir, ".stag"));
+    await service.request({ type: "send", text: "", videoId: await attach() });
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("anotações sintéticas verificadas");
+  });
+  it("cancelamento/falha preservam anexo anterior e envio recusado pode ser corrigido", async () => {
+    await ready();
+    const id = await attach();
+    vi.mocked(video.select).mockResolvedValueOnce(null);
+    await service.request({ type: "selectVideo" });
+    vi.mocked(video.prepare).mockRejectedValueOnce(new Error("Não foi possível preparar o vídeo."));
+    await expect(service.request({ type: "selectVideo" })).rejects.toThrow("preparar");
+    expect(service.snapshot().pendingVideo).toMatchObject({ status: "ready", summary: { id } });
+    await expect(
+      service.request({ type: "send", text: "", videoId: randomUUID() }),
+    ).rejects.toThrow("indisponível");
+    await expect(
+      service.request({
+        type: "send",
+        text: "",
+        videoId: id,
+        images: [{ dataUrl: imageFixture.dataUrl }],
+      }),
+    ).rejects.toThrow("separadamente");
+    await expect(
+      service.request({ type: "send", text: "sonda vídeo rejeitado", videoId: id }),
+    ).rejects.toThrow("confirmar o envio");
+    expect(service.snapshot().pendingVideo).toMatchObject({ status: "ready", summary: { id } });
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toHaveLength(0);
+    await service.request({ type: "send", text: "", videoId: id });
+    await complete();
+    expect(service.snapshot().pendingVideo).toBeNull();
+  });
+  it("remove e descarta preparação antiga ao trocar conversa, sem ressuscitar anexo", async () => {
+    await ready();
+    let finish!: (value: PreparedVideo) => void;
+    vi.mocked(video.prepare).mockImplementationOnce(async (_path, signal, progress) => {
+      progress("Transcrição sintética em andamento");
+      const result = await new Promise<PreparedVideo>((resolve) => {
+        finish = resolve;
+      });
+      expect(signal.aborted).toBe(true);
+      return result;
+    });
+    const job = service.request({ type: "selectVideo" });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    await service.request({ type: "newChat" });
+    finish(syntheticVideo());
+    await job;
+    expect(service.snapshot().pendingVideo).toBeNull();
+    const id = await attach();
+    await service.request({ type: "removeVideo" });
+    await expect(service.request({ type: "send", text: "", videoId: id })).rejects.toThrow(
+      "indisponível",
+    );
+    await attach();
+    const neighbor = resolve(dir, "vizinho");
+    await mkdir(neighbor);
+    selectProject.mockResolvedValue(neighbor);
+    await service.request({ type: "selectProject" });
+    expect(service.snapshot().pendingVideo).toBeNull();
+    await send("Analise este projeto");
+    await complete();
+    await expect(readFile(resolve(neighbor, ".stag/negocio.md"))).rejects.toThrow();
+  });
+});
 describe("sessões de sites por projeto", () => {
   const remember = (enabled = true, projectPath = dir) =>
     service.request({ type: "browserSession", projectPath, remember: enabled });

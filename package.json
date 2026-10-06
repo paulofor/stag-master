@@ -1,6 +1,6 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "description": "Assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
@@ -19,10 +19,11 @@
     "test:e2e": "playwright test",
     "test:desktop": "node scripts/test-desktop.mjs",
     "test:codex": "node scripts/smoke-codex.mjs",
+    "test:video": "node scripts/test-video.mjs",
     "test:windows": "node scripts/test-windows.mjs",
     "test:server:config": "node --test server/test/config.test.mjs",
     "test:server": "npm run test:server:config && node server/test/run.mjs",
-    "check": "npm run typecheck && npm test && npm run build && npm run test:codex && npm run test:e2e",
+    "check": "npm run typecheck && npm test && npm run build && npm run test:video && npm run test:codex && npm run test:e2e",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -47,6 +48,10 @@
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": ".local/media",
+        "to": "media"
+      },
       {
         "from": ".local/codex",
         "to": "codex"

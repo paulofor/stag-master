@@ -3,9 +3,11 @@ import { cyberSafetyInstructions } from "./cyber-safety";
 import { engineeringInstructions } from "./engineering-policy";
 import { projectMemoryInstructions } from "./project-memory";
 import { projectSourcesInstructions } from "./project-sources";
+import { videoInstructions } from "../shared/request-video";
 import { browserSessionInstructions, browserCertificateInstructions } from "./browser-tools";
 
 const baseInstructions = `${engineeringInstructions}
+${videoInstructions}
 ${cyberSafetyInstructions}
 ${browserSessionInstructions}
 ${browserCertificateInstructions}

@@ -35,6 +35,7 @@ import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
+import { videoTime } from "../shared/request-video";
 import {
   maxRequestImages,
   maxRequestImageBytes,
@@ -146,7 +147,8 @@ export function App() {
         return false;
       }
       setError(null);
-      setPending(true);
+      const preparation = action.type === "selectVideo" || action.type === "removeVideo";
+      if (!preparation) setPending(true);
       try {
         const before = stateRef.current;
         const next = await bridge.request(action);
@@ -170,25 +172,27 @@ export function App() {
         );
         return false;
       } finally {
-        setPending(false);
+        if (!preparation) setPending(false);
       }
     },
     [bridge, clearImages],
   );
   const canSubmit =
-    (!!draft.trim() || images.length > 0) &&
+    (!!draft.trim() || images.length > 0 || state.pendingVideo?.status === "ready") &&
     !!state.account &&
     !!state.project &&
     !!state.model &&
     state.connection === "ready" &&
     !pending &&
     !pasting &&
+    state.pendingVideo?.status !== "preparing" &&
     !sendingDraft;
   const canSend = canSubmit && !state.busy && !state.queuedMessages.length;
   const canEnqueue =
     canSubmit &&
     !!draft.trim() &&
     !images.length &&
+    !state.pendingVideo &&
     !!state.threadId &&
     state.queuedMessages.length < maxQueuedMessages;
   async function send(queued = false) {
@@ -200,7 +204,14 @@ export function App() {
     setAtBottom(true);
     const action: Action = queued
       ? { type: "enqueue", text, threadId: state.threadId!, id: crypto.randomUUID() }
-      : { type: "send", text, ...(images.length ? { images } : {}) };
+      : {
+          type: "send",
+          text,
+          ...(images.length ? { images } : {}),
+          ...(state.pendingVideo?.status === "ready"
+            ? { videoId: state.pendingVideo.summary.id }
+            : {}),
+        };
     if (await run(action)) {
       setDraft("");
       clearImages();
@@ -213,6 +224,10 @@ export function App() {
     const files = Array.from(event.clipboardData.files);
     if (!files.length) return; // Normal text paste remains the textarea's native behavior.
     event.preventDefault();
+    if (state.pendingVideo) {
+      setError("Envie o vídeo separadamente das imagens coladas.");
+      return;
+    }
     if (pasteInProgress.current || sendInProgress.current || pending) return;
     setError(null);
     if (images.length + files.length > maxRequestImages) {
@@ -663,6 +678,39 @@ export function App() {
           )}
           <MessageQueue state={state} pending={pending} run={run} />
           <section className="composer" aria-label="Escrever mensagem">
+            {state.pendingVideo && (
+              <div className="pending-video" role="region" aria-label="Vídeo da solicitação">
+                <div role="status">
+                  {state.pendingVideo.status === "preparing" ? (
+                    state.pendingVideo.phase
+                  ) : (
+                    <>
+                      <strong>{state.pendingVideo.summary.name}</strong>
+                      <span>
+                        {videoTime(state.pendingVideo.summary.seconds)} ·{" "}
+                        {state.pendingVideo.summary.frames} imagens ·{" "}
+                        {state.pendingVideo.summary.audio === "transcribed"
+                          ? "fala transcrita"
+                          : "sem fala reconhecida"}
+                      </span>
+                      <span>
+                        {state.mode === "read"
+                          ? "Modo Leitura: o assistente poderá analisar, sem salvar anotações."
+                          : "Ao enviar, o assistente extrairá informações para as anotações do projeto."}
+                      </span>
+                      <span>Amostragem e transcrição podem omitir detalhes ou conter erros.</span>
+                    </>
+                  )}
+                </div>
+                <button
+                  className="text-button"
+                  disabled={sendingDraft}
+                  onClick={() => void run({ type: "removeVideo" })}
+                >
+                  {state.pendingVideo.status === "preparing" ? "Cancelar vídeo" : "Remover vídeo"}
+                </button>
+              </div>
+            )}
             <ImageStrip
               images={images}
               disabled={pasting || sendingDraft}
@@ -684,6 +732,27 @@ export function App() {
                 : images.length && state.busy
                   ? "A fila aceita somente texto. Envie as imagens após a tarefa atual."
                   : "Cole imagens com Ctrl+V · até 4 imagens, 4 MB no total"}
+            </div>
+            <div className="video-controls">
+              <button
+                className="text-button"
+                disabled={
+                  !state.project ||
+                  pending ||
+                  sendingDraft ||
+                  pasting ||
+                  !!images.length ||
+                  state.busy ||
+                  state.pendingVideo?.status === "preparing"
+                }
+                onClick={() => void run({ type: "selectVideo" })}
+              >
+                Anexar vídeo
+              </button>
+              <span>
+                Até 100 MB e 10 min · MP4, MOV, MKV, WebM. Preparação local; imagens e transcrição
+                vão ao assistente ao enviar.
+              </span>
             </div>
             <div className="composer-controls">
               <button
