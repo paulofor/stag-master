@@ -1,4 +1,4 @@
-import type { PendingVideo } from "./request-video";
+import type { PendingVideo, VideoAnalysisSummary } from "./request-video";
 export type AccessMode = "read" | "project" | "windows";
 export type RpcId = number | string;
 export interface Model {
@@ -81,6 +81,7 @@ export interface Snapshot {
   threadId: string | null;
   busy: boolean;
   pendingVideo: PendingVideo | null;
+  videoAnalysis: VideoAnalysisSummary | null;
   queuedMessages: QueuedMessage[];
   queuePaused: boolean;
   items: ChatItem[];
@@ -119,6 +120,7 @@ export const emptySnapshot: Snapshot = {
   threadId: null,
   busy: false,
   pendingVideo: null,
+  videoAnalysis: null,
   queuedMessages: [],
   queuePaused: false,
   items: [],
@@ -157,6 +159,8 @@ export type Action =
   | { type: "newChat" }
   | { type: "resume"; threadId: string }
   | { type: "send"; text: string; images?: RequestImage[]; videoId?: string }
+  | { type: "analyzeVideo" }
+  | { type: "videoAnalysis"; id: string; control: "pause" | "resume" | "cancel" | "retry" }
   | { type: "selectVideo" }
   | { type: "removeVideo" }
   | { type: "enqueue"; threadId: string; id: string; text: string }

@@ -233,6 +233,71 @@ try {
   assert.ok(videoDelivered.includes(syntheticVideo.transcript[0].text));
   assert.ok(videoDelivered.includes("Só afirme memorização após gravar e reler"));
   assert.ok(videoDelivered.includes(syntheticVideo.summary.id));
+  syntheticVideo.summary.seconds = 601;
+  syntheticVideo.summary.segment = { index: 1, total: 3, start: 300, end: 600 };
+  syntheticVideo.frames[0].seconds = 305;
+  syntheticVideo.transcript[0].start = 300;
+  syntheticVideo.transcript[0].end = 305;
+  await syntheticTurn(
+    [
+      { type: "text", text: videoMessage(syntheticVideo) },
+      { type: "image", url: imageFixture.dataUrl },
+    ],
+    sources,
+    false,
+    { stag_video: videoContext(syntheticVideo) },
+  );
+  const longDelivered = JSON.stringify({
+    input: provider.inputs.at(-1),
+    instructions: provider.instructions.at(-1),
+  });
+  assert.ok(longDelivered.includes("trecho 2/3"));
+  assert.ok(longDelivered.includes("identificador estável"));
+  const readForRecovery = await rpc.call("thread/read", {
+    threadId: started.thread.id,
+    includeTurns: true,
+  });
+  assert.equal(readForRecovery.thread.turns.at(-1).status, "completed");
+  assert.ok(
+    readForRecovery.thread.turns
+      .at(-1)
+      .items.some(
+        (item) =>
+          item.type === "userMessage" &&
+          JSON.stringify(item).includes(`Análise STAG ${syntheticVideo.summary.id}`),
+      ),
+  );
+  const paginatedResume = await rpc.call("thread/resume", {
+    threadId: started.thread.id,
+    excludeTurns: true,
+    cwd: project,
+    ...threadPolicy("project", project),
+    developerInstructions: assistantInstructions(
+      "project",
+      process.platform,
+      false,
+      true,
+      project,
+      sources,
+    ),
+  });
+  assert.deepEqual(paginatedResume.thread.turns, []);
+  const pageForRecovery = await rpc.call("thread/turns/list", {
+    threadId: started.thread.id,
+    limit: 1,
+    sortDirection: "desc",
+    itemsView: "full",
+  });
+  assert.equal(pageForRecovery.data.length, 1);
+  assert.equal(pageForRecovery.data[0].status, "completed");
+  assert.ok(pageForRecovery.nextCursor);
+  assert.ok(
+    pageForRecovery.data[0].items.some(
+      (item) =>
+        item.type === "userMessage" &&
+        JSON.stringify(item).includes(`Análise STAG ${syntheticVideo.summary.id}`),
+    ),
+  );
   const providerImage = provider.inputs
     .flat()
     .flatMap((item) => item.content || [])

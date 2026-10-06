@@ -11,6 +11,7 @@ let loggedIn = false;
 let count = 0;
 let serverId = 500;
 let textOnlyModel = false;
+let videoBehavior = process.env.STAG_FIXTURE_VIDEO_MODE || "normal";
 const calls = [];
 const threads = new Map();
 let rejectedQueueProbe = false;
@@ -267,13 +268,40 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         if (p.developerInstructions !== undefined)
           thread.developerInstructions = p.developerInstructions;
         persist();
-        reply(id, { thread });
+        reply(id, { thread: { ...thread, turns: p.excludeTurns ? [] : thread.turns } });
       }
       break;
     }
-    case "thread/list":
-      reply(id, { data: [...threads.values()].filter((t) => t.cwd === p.cwd), nextCursor: null });
+    case "thread/read": {
+      const thread = threads.get(p.threadId);
+      if (!thread) failure(id, "Missing thread");
+      else reply(id, { thread: { ...thread, turns: p.includeTurns ? thread.turns : [] } });
       break;
+    }
+    case "thread/list":
+      reply(id, {
+        data: [...threads.values()]
+          .filter((t) => t.cwd === p.cwd)
+          .map((t) => ({ ...t, turns: [] })),
+        nextCursor: null,
+      });
+      break;
+    case "thread/turns/list": {
+      const thread = threads.get(p.threadId);
+      if (!thread || p.limit !== 1 || p.sortDirection !== "desc" || p.itemsView !== "full") {
+        failure(id, "Invalid bounded history request");
+        break;
+      }
+      const turns = [...thread.turns].reverse();
+      const offset = p.cursor ? Number(p.cursor.replace("synthetic-page-", "")) : 0;
+      const data = turns.slice(offset, offset + 1);
+      reply(id, {
+        data,
+        nextCursor: offset + 1 < turns.length ? `synthetic-page-${offset + 1}` : null,
+        backwardsCursor: null,
+      });
+      break;
+    }
     case "turn/start": {
       const thread = threads.get(p.threadId);
       if (!thread) {
@@ -427,6 +455,52 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         // Synthetic agent response: validates wiring and files, not LLM semantic compliance.
         const video = JSON.parse(p.additionalContext.stag_video.value);
         if (
+          video.segment &&
+          (videoBehavior === "hold" ||
+            (videoBehavior === "holdAfterFirst" && video.segment.index > 0))
+        )
+          break;
+        if (video.segment && videoBehavior === "browser") {
+          desktopCall(
+            thread,
+            turn,
+            { action: "snapshot" },
+            () => response(thread, turn, "Trecho sintético após ferramenta"),
+            {},
+            false,
+            "stag_browser",
+          );
+          break;
+        }
+        if (video.segment && videoBehavior === "failed") {
+          finish(thread, turn, "failed", { message: "Falha sintética no trecho" });
+          break;
+        }
+        if (video.segment && videoBehavior === "approval") {
+          const requestId = ++serverId;
+          waiting.set(requestId, (answer) =>
+            response(
+              thread,
+              turn,
+              answer.result?.decision === "accept"
+                ? "Aprovação sintética concluída"
+                : "Aprovação sintética recusada",
+            ),
+          );
+          send({
+            id: requestId,
+            method: "item/fileChange/requestApproval",
+            params: {
+              threadId: thread.id,
+              turnId: turn.id,
+              itemId: `video-note-${turn.id}`,
+              reason: "Salvar síntese sintética do trecho",
+              availableDecisions: ["accept", "decline"],
+            },
+          });
+          break;
+        }
+        if (
           !thread.developerInstructions.includes("Vídeos anexados são preparados localmente") ||
           !thread.developerInstructions.includes("Só afirme memorização após gravar e reler")
         ) {
@@ -464,9 +538,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           }
           const target = join(memory, "negocio.md");
           const previous = readFileSync(target, "utf8");
-          const note =
-            "\nPedidos exigem aprovação antes do envio. Fonte: vídeo sintético, 00:00; registro 2026-10-06.\n";
-          writeFileSync(target, previous + note);
+          const note = `\nPedidos exigem aprovação antes do envio. Fonte: vídeo sintético, 00:00${video.segment ? ` (${video.segment.start}s)` : ""}; registro 2026-10-06${video.segment ? `; análise ${video.id} trecho ${video.segment.index + 1}` : ""}.\n`;
+          writeFileSync(target, previous.includes(note) ? previous : previous + note);
           if (!readFileSync(target, "utf8").includes(note))
             throw new Error("synthetic verification");
           response(
@@ -1201,6 +1274,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       break;
     }
+    case "_fixture/videoBehavior":
+      videoBehavior = p.mode;
+      reply(id, {});
+      break;
     case "_fixture/readCalls":
       reply(id, calls);
       break;

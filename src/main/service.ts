@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename } from "node:path";
 import { z } from "zod";
@@ -35,7 +35,14 @@ import {
   videoMessage,
   type PreparedVideo,
   type VideoProcessor,
+  type BackgroundVideoProcessor,
 } from "./request-video";
+import {
+  VideoAnalysisManager,
+  VideoAnalysisStore,
+  type VideoAnalysisJob,
+  type AnalysisTurn,
+} from "./video-analysis";
 import {
   browserArguments,
   browserApproval,
@@ -97,6 +104,7 @@ interface Options {
   };
   platform?: string;
   video?: VideoProcessor;
+  videoAnalysis?: { store: VideoAnalysisStore; processor: BackgroundVideoProcessor };
 }
 const modelSchema = z.object({
   id: z.string(),
@@ -140,6 +148,8 @@ export class AssistantService extends EventEmitter {
   private messageQueueEpoch = 0;
   private queuedIds = new Set<string>();
   private changing = false;
+  private contextWork: Promise<void> = Promise.resolve();
+  private finishContext: (() => void) | null = null;
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
   private browserConsentThread: string | null = null;
@@ -152,14 +162,71 @@ export class AssistantService extends EventEmitter {
   private videoPreparation: AbortController | null = null;
   private videoWork: Promise<void> = Promise.resolve();
   private preparedVideo: PreparedVideo | null = null;
+  private analysis: VideoAnalysisManager | null = null;
+  private analysisWaiter: {
+    threadId: string;
+    turnId: string | null;
+    resolve: (turn: AnalysisTurn) => void;
+    reject: (error: Error) => void;
+  } | null = null;
+  private analysisInterruptRequested = false;
   constructor(private options: Options) {
     super();
     this.state = structuredClone(emptySnapshot);
     this.state.platform = options.platform || process.platform;
     this.state.browser.available = !!options.browser;
+    if (options.videoAnalysis)
+      this.analysis = new VideoAnalysisManager(
+        options.videoAnalysis.store,
+        options.videoAnalysis.processor,
+        {
+          context: () => ({
+            projectPath: this.state.project?.path || null,
+            threadId: this.state.threadId,
+            mode: this.state.mode,
+            accountKey: this.analysisAccountKey(),
+          }),
+          changed: () => {
+            this.publish();
+            void this.drainMessageQueue();
+          },
+          ready: async () => {
+            await this.contextWork;
+            await this.toolQueue;
+            if (
+              this.state.busy ||
+              this.sending ||
+              this.state.approvals.length ||
+              this.state.connection !== "ready" ||
+              !this.state.account
+            )
+              throw new Error("A conversa não está pronta para o próximo trecho.");
+          },
+          submit: (job, video) => this.waitAnalysisTurn(job, null, video),
+          waitTurn: (job, turn) => this.waitAnalysisTurn(job, turn),
+          recover: (job) => this.recoverAnalysisTurn(job),
+          interrupt: async (job) => {
+            if (this.state.threadId !== job.threadId) return;
+            if (this.analysisWaiter) {
+              this.analysisInterruptRequested = true;
+              if (this.turnId && this.state.busy) await this.stop();
+            } else if (job.pending && this.turnId && this.state.busy) {
+              const previous = await this.recoverAnalysisTurn(job);
+              if (previous?.status === "inProgress" && previous.id === this.turnId)
+                await this.stop();
+            }
+          },
+          failure: (message) => {
+            this.state.error = message;
+            this.state.queuePaused = true;
+            this.state.metrics.failures++;
+            this.publish();
+          },
+        },
+      );
   }
   snapshot(): Snapshot {
-    return structuredClone(this.state);
+    return structuredClone({ ...this.state, videoAnalysis: this.analysis?.summary() || null });
   }
   updateBrowser(info: BrowserInfo): void {
     Object.assign(this.state.browser, info);
@@ -169,6 +236,7 @@ export class AssistantService extends EventEmitter {
     if (!this.disposed) this.emit("snapshot", this.snapshot());
   }
   private recordSafetyBlock(kind: "assistant" | "status" = "status"): void {
+    this.analysis?.detach();
     this.state.queuePaused = true;
     this.state.metrics.failures++;
     this.state.items.push({
@@ -210,6 +278,12 @@ export class AssistantService extends EventEmitter {
       }
     }
     this.restoreBrowserProfile();
+    try {
+      await this.analysis?.init();
+    } catch (error) {
+      this.state.error = errorText(error);
+      this.state.metrics.failures++;
+    }
     this.publish();
   }
   private restoreBrowserProfile(): void {
@@ -223,7 +297,11 @@ export class AssistantService extends EventEmitter {
     const revokingBrowser =
       (action.type === "browserConsent" && !action.allow) ||
       (action.type === "browserVisibility" && !action.visible);
-    if (this.changing && !["stop", "answer"].includes(action.type) && !revokingBrowser)
+    if (
+      this.changing &&
+      !["stop", "answer", "removeVideo"].includes(action.type) &&
+      !revokingBrowser
+    )
       throw new Error("Aguarde a ação em andamento.");
     const changesContext =
       [
@@ -235,19 +313,47 @@ export class AssistantService extends EventEmitter {
         "preferences",
         "newChat",
         "resume",
+        "analyzeVideo",
       ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
-      action.type === "browserControl";
+      action.type === "browserControl" ||
+      (action.type === "videoAnalysis" &&
+        ["resume", "retry"].includes(action.control) &&
+        this.analysis?.summary()?.threadId !== this.state.threadId);
     if (
       changesContext &&
       (this.state.busy || this.sending || this.drainingMessages) &&
       action.type !== "connect"
     )
       throw new Error("Pare a execução antes de mudar a conversa.");
-    if (changesContext) this.changing = true;
+    if (changesContext) {
+      this.changing = true;
+      this.contextWork = new Promise((resolve) => {
+        this.finishContext = resolve;
+      });
+    }
     this.state.error = null;
     try {
       switch (action.type) {
+        case "analyzeVideo":
+          await this.startVideoAnalysis();
+          break;
+        case "videoAnalysis": {
+          if (!this.analysis)
+            throw new Error("Análise em segundo plano disponível somente no STAG desktop.");
+          const summary = this.analysis.summary();
+          if (!summary || summary.id !== action.id)
+            throw new Error("Análise indisponível neste projeto, conversa ou conta.");
+          if (summary.threadId !== this.state.threadId) {
+            if (this.state.busy || this.sending)
+              throw new Error("Pare a execução antes de retomar a análise salva.");
+            await this.resume(summary.threadId);
+          }
+          if (action.control === "pause" || action.control === "cancel")
+            this.state.queuePaused = true;
+          await this.analysis.control(action.id, action.control);
+          break;
+        }
         case "selectVideo":
           await this.selectVideo();
           break;
@@ -301,6 +407,10 @@ export class AssistantService extends EventEmitter {
           await this.resume(action.threadId);
           break;
         case "send":
+          if (this.analysis?.working)
+            throw new Error(
+              "Pause ou conclua a análise de vídeo antes de enviar outra mensagem. Você pode adicionar textos à fila.",
+            );
           if (this.state.queuedMessages.length || this.drainingMessages)
             throw new Error("Continue ou esvazie a fila antes de enviar outra mensagem.");
           this.state.queuePaused = false;
@@ -407,7 +517,11 @@ export class AssistantService extends EventEmitter {
       this.publish();
       throw new Error(this.state.error);
     } finally {
-      if (changesContext) this.changing = false;
+      if (changesContext) {
+        this.changing = false;
+        this.finishContext?.();
+        this.finishContext = null;
+      }
       this.publish();
       void this.drainMessageQueue();
     }
@@ -426,7 +540,7 @@ export class AssistantService extends EventEmitter {
   private async selectVideo(): Promise<void> {
     if (!this.options.video || !this.state.project)
       throw new Error("Selecione uma pasta de projeto para anexar um vídeo.");
-    if (this.videoPreparation || this.sending || this.state.busy)
+    if (this.videoPreparation || this.sending || this.state.busy || this.analysis?.working)
       throw new Error("Aguarde ou cancele a preparação/execução atual.");
     const previous = this.preparedVideo;
     const controller = new AbortController();
@@ -463,6 +577,212 @@ export class AssistantService extends EventEmitter {
       if (this.videoPreparation === controller) this.videoPreparation = null;
     }
   }
+  private analysisAccountKey(): string | null {
+    return this.state.account?.email
+      ? createHash("sha256").update(this.state.account.email.trim().toLowerCase()).digest("hex")
+      : null;
+  }
+  private rejectAnalysisTurn(): void {
+    this.analysisWaiter?.reject(
+      new Error("A conexão foi encerrada. Confira o histórico antes de retomar."),
+    );
+    this.analysisWaiter = null;
+  }
+  private async startVideoAnalysis(): Promise<void> {
+    if (!this.analysis || !this.options.videoAnalysis || !this.options.video || !this.state.project)
+      throw new Error("Selecione uma pasta no STAG desktop para analisar o vídeo.");
+    if (
+      this.analysis.working ||
+      this.videoPreparation ||
+      this.state.pendingVideo ||
+      this.sending ||
+      this.state.busy ||
+      this.state.queuedMessages.length
+    )
+      throw new Error(
+        "Conclua ou pause a execução e remova o anexo atual antes de iniciar outro vídeo.",
+      );
+    const existing = this.analysis.summary();
+    if (existing && !["completed", "cancelled"].includes(existing.status))
+      throw new Error("Retome ou cancele a análise salva antes de selecionar outro vídeo.");
+    const accountKey = this.analysisAccountKey();
+    if (!accountKey || this.state.connection !== "ready")
+      throw new Error("Entre com sua conta ChatGPT antes de analisar o vídeo.");
+    const model = this.state.models.find((entry) => entry.model === this.state.model);
+    if (!model || (model.inputModalities && !model.inputModalities.includes("image")))
+      throw new Error("Selecione um modelo da sua conta que aceite imagens.");
+    const project = this.state.project.path;
+    const mode = this.state.mode;
+    const controller = new AbortController();
+    this.videoPreparation = controller;
+    this.state.pendingVideo = {
+      status: "preparing",
+      phase: "Selecionando vídeo para análise em segundo plano…",
+    };
+    this.publish();
+    const work = this.videoWork.then(async () => {
+      const path = await this.options.video!.select();
+      if (!path || controller.signal.aborted) return;
+      const source = await this.options.videoAnalysis!.processor.inspect(path, controller.signal);
+      if (
+        controller.signal.aborted ||
+        this.state.project?.path !== project ||
+        this.state.mode !== mode ||
+        this.analysisAccountKey() !== accountKey
+      )
+        return;
+      await this.ensureThread();
+      this.settings.threads[this.state.threadId!].backgroundVideo = true;
+      await this.options.store.save(this.settings).catch(() => {
+        throw new Error(
+          "Não foi possível salvar o progresso do vídeo. Confira o armazenamento do STAG.",
+        );
+      });
+      if (controller.signal.aborted) return;
+      await this.analysis!.start({
+        id: randomUUID(),
+        projectPath: project,
+        threadId: this.state.threadId!,
+        mode,
+        accountKey,
+        source,
+        next: 0,
+        status: "running",
+        pending: null,
+      });
+    });
+    this.videoWork = work.catch(() => {});
+    try {
+      await work;
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        if (
+          error instanceof Error &&
+          /^(Selecione|O arquivo|Vídeo inválido|Não foi possível (preparar|salvar|ler))/.test(
+            error.message,
+          )
+        )
+          throw error;
+        throw new Error(
+          "Não foi possível iniciar a análise do vídeo. Confira a conexão e o armazenamento do STAG.",
+        );
+      }
+    } finally {
+      if (this.videoPreparation === controller) {
+        this.videoPreparation = null;
+        this.state.pendingVideo = null;
+      }
+    }
+  }
+  private async recoverAnalysisTurn(job: VideoAnalysisJob): Promise<AnalysisTurn | null> {
+    const policy = this.settings.threads[job.threadId];
+    if (
+      policy?.path !== job.projectPath ||
+      policy.mode !== job.mode ||
+      this.state.threadId !== job.threadId
+    )
+      throw new Error("A política original da conversa não está disponível.");
+    const marker = `Análise STAG ${job.id} · trecho ${job.pending!.index + 1}/`;
+    for await (const turn of this.analysisHistory(job.threadId)) {
+      const matches = job.pending?.turnId
+        ? turn.id === job.pending.turnId
+        : turn.items?.some(
+            (item) =>
+              item.type === "userMessage" &&
+              item.content?.some(
+                (content) => content.type === "text" && content.text?.includes(marker),
+              ),
+          );
+      if (matches) return { id: turn.id, status: turn.status };
+    }
+    return null;
+  }
+  private async *analysisHistory(threadId: string): AsyncGenerator<WireTurn> {
+    let cursor: string | null = null;
+    const cursors = new Set<string>();
+    // One bounded turn per RPC frame; a 12-hour video must not hydrate all images at once.
+    for (let count = 0; count < 1000; count++) {
+      const page: { data: WireTurn[]; nextCursor: string | null } = await this.call<{
+        data: WireTurn[];
+        nextCursor: string | null;
+      }>("thread/turns/list", {
+        threadId,
+        cursor,
+        limit: 1,
+        sortDirection: "desc",
+        itemsView: "full",
+      });
+      if (
+        !Array.isArray(page.data) ||
+        page.data.length > 1 ||
+        page.data.some((turn) => !turn.id || typeof turn.status !== "string")
+      )
+        throw new Error("Não foi possível recuperar o histórico paginado do vídeo.");
+      for (const turn of page.data) {
+        const videoTurn = turn.items?.some(
+          (item) =>
+            item.type === "userMessage" &&
+            item.content?.some(
+              (content) => content.type === "text" && content.text?.startsWith("Análise STAG "),
+            ),
+        );
+        yield {
+          ...turn,
+          items: turn.items?.map((item) =>
+            videoTurn && item.type === "userMessage"
+              ? {
+                  ...item,
+                  content: item.content?.map((content) =>
+                    content.type === "image" ? { type: "image" } : content,
+                  ),
+                }
+              : item,
+          ),
+        };
+      }
+      cursor = page.nextCursor;
+      if (!cursor) return;
+      if (cursors.has(cursor))
+        throw new Error("Não foi possível recuperar o histórico paginado do vídeo.");
+      cursors.add(cursor);
+    }
+  }
+  private async waitAnalysisTurn(
+    job: VideoAnalysisJob,
+    previous: AnalysisTurn | null,
+    video?: PreparedVideo,
+  ): Promise<AnalysisTurn> {
+    let resolve!: (turn: AnalysisTurn) => void;
+    let reject!: (error: Error) => void;
+    const completed = new Promise<AnalysisTurn>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    void completed.catch(() => {});
+    const waiter = { threadId: job.threadId, turnId: previous?.id || null, resolve, reject };
+    if (this.analysisWaiter) throw new Error("Já existe um trecho aguardando a conversa.");
+    this.analysisWaiter = waiter;
+    this.analysisInterruptRequested = false;
+    try {
+      if (video) await this.send("", [], undefined, video);
+      else {
+        // Refresh the surviving turn after attaching the waiter; a completion during recovery is authoritative.
+        const turn = await this.recoverAnalysisTurn(job);
+        if (turn?.status !== "inProgress") {
+          if (!turn) throw new Error("Envio não confirmado. Confira o histórico.");
+          waiter.resolve(turn);
+        } else {
+          this.turnId = turn.id;
+          this.state.busy = true;
+        }
+      }
+      const turn = await completed;
+      await this.toolQueue;
+      return turn;
+    } finally {
+      if (this.analysisWaiter === waiter) this.analysisWaiter = null;
+    }
+  }
   private clearMessageQueue(): void {
     this.messageQueueEpoch++;
     this.state.queuedMessages = [];
@@ -473,6 +793,7 @@ export class AssistantService extends EventEmitter {
     const canDrain = () =>
       !this.disposed &&
       !this.sending &&
+      !this.analysis?.working &&
       !this.changing &&
       !this.state.busy &&
       !this.state.queuePaused &&
@@ -528,6 +849,8 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.analysis?.detach();
+    this.rejectAnalysisTurn();
     if (this.state.queuedMessages.length || this.state.busy || this.sending)
       this.state.queuePaused = true;
     this.toolEpoch++;
@@ -562,6 +885,8 @@ export class AssistantService extends EventEmitter {
       if (this.disposed || this.rpc !== rpc) return;
       this.toolEpoch++;
       this.options.browser?.cancel();
+      this.analysis?.detach();
+      this.rejectAnalysisTurn();
       this.state.connection = "error";
       this.state.queuePaused = true;
       this.state.error = errorText(error);
@@ -599,6 +924,8 @@ export class AssistantService extends EventEmitter {
         ? { email: result.account.email || null, plan: result.account.planType || null }
         : null;
     if (previousAccount && previousAccount.email !== this.state.account?.email) {
+      this.analysis?.detach();
+      this.rejectAnalysisTurn();
       this.clearMessageQueue();
       this.clearVideo();
     }
@@ -676,6 +1003,7 @@ export class AssistantService extends EventEmitter {
   private clearChat(): void {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
+    this.analysis?.detach();
     this.toolEpoch++;
     this.clearVideo();
     this.clearMessageQueue();
@@ -701,7 +1029,10 @@ export class AssistantService extends EventEmitter {
   }
   private async browserConsent(allow: boolean): Promise<void> {
     if (!this.options.browser) throw new Error("Navegador disponível somente no STAG desktop.");
-    if (!allow) this.state.queuePaused = true;
+    if (!allow) {
+      this.state.queuePaused = true;
+      this.analysis?.detach();
+    }
     if (allow && (this.state.busy || this.sending))
       throw new Error("Pare a execução antes de autorizar o navegador.");
     if (allow && this.state.threadId && !this.settings.threads[this.state.threadId]?.browserTool)
@@ -802,6 +1133,7 @@ export class AssistantService extends EventEmitter {
     }
     const result = await this.call<{ thread: WireThread }>("thread/resume", {
       threadId: id,
+      ...(policy.backgroundVideo ? { excludeTurns: true } : {}),
       cwd: policy.path,
       ...threadPolicy(policy.mode, policy.path),
       developerInstructions:
@@ -816,7 +1148,13 @@ export class AssistantService extends EventEmitter {
         "\n" +
         projectGitInstructions(this.state.project?.git),
     });
+    if (policy.backgroundVideo) {
+      const turns: WireTurn[] = [];
+      for await (const turn of this.analysisHistory(id)) turns.push(turn);
+      result.thread.turns = turns.reverse();
+    }
     if (this.state.threadId !== id) {
+      this.analysis?.detach();
       this.clearMessageQueue();
       this.clearVideo();
     }
@@ -838,8 +1176,50 @@ export class AssistantService extends EventEmitter {
     this.state.busy = last?.status === "inProgress";
     if (this.state.busy) this.turnId = last!.id;
   }
-  private async send(input: string, images: RequestImage[], videoId?: string): Promise<void> {
-    const video = videoId ? this.preparedVideo : null;
+  private async ensureThread(): Promise<void> {
+    const project = this.state.project;
+    if (!project) throw new Error("Selecione uma pasta de projeto.");
+    if (!this.state.threadId) {
+      const result = await this.call<{ thread: WireThread }>("thread/start", {
+        cwd: project.path,
+        model: this.state.model,
+        ...threadPolicy(this.state.mode, project.path),
+        developerInstructions:
+          assistantInstructions(
+            this.state.mode,
+            this.state.platform,
+            this.state.browser.authorized,
+            !!this.options.browser,
+            project.path,
+            this.state.projectSources,
+          ) +
+          "\n" +
+          projectGitInstructions(project.git),
+        serviceName: "stag_desktop",
+        dynamicTools: [
+          ...(this.state.mode === "windows" ? [desktopTool] : []),
+          ...(this.options.browser ? [browserTool] : []),
+        ],
+      });
+      this.state.threadId = result.thread.id;
+      this.contextInstructionsDirty = false;
+      if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
+      if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
+      this.settings.threads[result.thread.id] = {
+        path: project.path,
+        mode: this.state.mode,
+        browserTool: !!this.options.browser,
+      };
+      await this.options.store.save(this.settings);
+    }
+  }
+  private async send(
+    input: string,
+    images: RequestImage[],
+    videoId?: string,
+    analysisVideo?: PreparedVideo,
+  ): Promise<void> {
+    const video = analysisVideo || (videoId ? this.preparedVideo : null);
     if (
       videoId &&
       (!video || video.summary.id !== videoId || this.state.pendingVideo?.status !== "ready")
@@ -878,7 +1258,7 @@ export class AssistantService extends EventEmitter {
     const localId = `local-${Date.now()}`;
     if (video) input = `${input}${input ? "\n\n" : ""}${videoMessage(video)}`;
     const sentImages = video ? video.frames.map((frame) => frame.image) : images;
-    const displayImages = requestImagesSchema.safeParse(sentImages);
+    const displayImages = requestImagesSchema.safeParse(analysisVideo ? [] : sentImages);
     this.sending = true;
     try {
       if (this.state.threadId && this.contextInstructionsDirty)
@@ -891,39 +1271,7 @@ export class AssistantService extends EventEmitter {
       this.state.diff = "";
       this.state.metrics.elapsedMs = 0;
       this.publish();
-      if (!this.state.threadId) {
-        const result = await this.call<{ thread: WireThread }>("thread/start", {
-          cwd: this.state.project.path,
-          model: this.state.model,
-          ...threadPolicy(this.state.mode, this.state.project.path),
-          developerInstructions:
-            assistantInstructions(
-              this.state.mode,
-              this.state.platform,
-              this.state.browser.authorized,
-              !!this.options.browser,
-              this.state.project.path,
-              this.state.projectSources,
-            ) +
-            "\n" +
-            projectGitInstructions(this.state.project.git),
-          serviceName: "stag_desktop",
-          dynamicTools: [
-            ...(this.state.mode === "windows" ? [desktopTool] : []),
-            ...(this.options.browser ? [browserTool] : []),
-          ],
-        });
-        this.state.threadId = result.thread.id;
-        this.contextInstructionsDirty = false;
-        if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
-        if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
-        this.settings.threads[result.thread.id] = {
-          path: this.state.project.path,
-          mode: this.state.mode,
-          browserTool: !!this.options.browser,
-        };
-        await this.options.store.save(this.settings);
-      }
+      await this.ensureThread();
       this.state.items.push({
         id: localId,
         kind: "user",
@@ -957,6 +1305,8 @@ export class AssistantService extends EventEmitter {
       });
       // A small turn can finish before this response arrives. Do not resurrect it.
       if (this.state.busy) this.turnId = result.turn.id;
+      if (analysisVideo && this.analysisWaiter) this.analysisWaiter.turnId = result.turn.id;
+      if (analysisVideo && this.analysisInterruptRequested && this.state.busy) await this.stop();
       if (video && this.preparedVideo === video) this.clearVideo();
     } catch (error) {
       this.state.busy = false;
@@ -976,6 +1326,7 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    this.analysis?.detach();
     this.state.queuePaused = true;
     if (!this.state.busy) return;
     if (!this.turnId || !this.state.threadId)
@@ -1004,10 +1355,15 @@ export class AssistantService extends EventEmitter {
         .filter((c) => c.type === "text")
         .map((c) => c.text || "")
         .join("\n");
+      const analysisMessage =
+        this.settings.threads[this.state.threadId || ""]?.backgroundVideo &&
+        message.startsWith("Análise STAG ");
       const parsedImages = requestImagesSchema.safeParse(
-        (item.content || [])
-          .filter((content) => content.type === "image")
-          .map((content) => ({ dataUrl: content.url })),
+        analysisMessage
+          ? []
+          : (item.content || [])
+              .filter((content) => content.type === "image")
+              .map((content) => ({ dataUrl: content.url })),
       );
       const images = parsedImages.success ? parsedImages.data : [];
       const local = this.state.items.findIndex(
@@ -1091,6 +1447,8 @@ export class AssistantService extends EventEmitter {
     switch (message.method) {
       case "turn/started":
         this.turnId = text(object(p.turn).id);
+        if (this.analysisWaiter && this.analysisWaiter.threadId === p.threadId)
+          this.analysisWaiter.turnId = this.turnId;
         this.state.busy = true;
         break;
       case "item/started":
@@ -1128,6 +1486,7 @@ export class AssistantService extends EventEmitter {
         this.state.approvals = this.state.approvals.filter((a) => a.id !== String(p.requestId));
         break;
       case "error":
+        this.analysis?.detach();
         this.state.error = text(object(p.error).message) || "Falha na execução.";
         this.state.queuePaused = true;
         break;
@@ -1154,6 +1513,12 @@ export class AssistantService extends EventEmitter {
             kind: "status",
             text: "Execução interrompida.",
           });
+        if (
+          this.analysisWaiter &&
+          this.analysisWaiter.threadId === p.threadId &&
+          (!this.analysisWaiter.turnId || this.analysisWaiter.turnId === turn.id)
+        )
+          this.analysisWaiter.resolve({ id: turn.id, status: turn.status });
         void this.refreshHistory().catch(() => {});
         break;
       }
@@ -1388,7 +1753,13 @@ export class AssistantService extends EventEmitter {
           };
         }
       }
-      if (ownsTurn()) ownerRpc.respond(waiting.message.id!, result);
+      if (ownsTurn()) {
+        if (!result.success && this.analysis?.working) {
+          this.analysis.detach();
+          this.state.queuePaused = true;
+        }
+        ownerRpc.respond(waiting.message.id!, result);
+      }
       this.publish();
     });
     // Desktop and browser actions share one queue, including approved operations.
@@ -1400,6 +1771,10 @@ export class AssistantService extends EventEmitter {
     if (!waiting || waiting.message.id === undefined || !this.rpc)
       throw new Error("Esse pedido já foi resolvido.");
     const approval = this.state.approvals.find((a) => a.id === action.id);
+    if (approval?.kind !== "questions" && action.accept !== true && this.analysis?.working) {
+      this.analysis.detach();
+      this.state.queuePaused = true;
+    }
     if (approval?.kind === "questions") {
       const answers: Record<string, { answers: string[] }> = {};
       for (const q of approval.questions || []) {
@@ -1442,6 +1817,8 @@ export class AssistantService extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
+    this.analysis?.dispose();
+    this.rejectAnalysisTurn();
     this.clearMessageQueue();
     this.clearVideo();
     this.projectPreparation.abort();
@@ -1453,5 +1830,6 @@ export class AssistantService extends EventEmitter {
   }
   async mediaSettled(): Promise<void> {
     await this.videoWork;
+    await this.analysis?.settled();
   }
 }

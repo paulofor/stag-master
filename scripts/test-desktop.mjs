@@ -20,6 +20,7 @@ const project = join(dir, "projeto-fixture");
 const data = join(dir, "data");
 let application;
 let site;
+let backgroundSaved;
 async function stagWindow(application) {
   // Playwright also reports WebContentsView pages as windows. During profile restore,
   // the initial temporary page is replaced; firstWindow() can return that closing page.
@@ -114,7 +115,10 @@ try {
     XDG_CONFIG_HOME: gitTest.env.XDG_CONFIG_HOME,
   });
   // Reuse the fixture's isolated persistence so reconnect exercises a surviving thread.
-  if (process.platform !== "win32") env.STAG_FIXTURE_STATE = join(dir, "app-server-state.json");
+  if (process.platform !== "win32") {
+    env.STAG_FIXTURE_STATE = join(dir, "app-server-state.json");
+    env.STAG_FIXTURE_VIDEO_MODE = "holdAfterFirst";
+  }
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
@@ -846,8 +850,70 @@ try {
     "Browser layout: painel ampliado, bounds nativos sincronizados e página larga sintética conferidos.",
   );
   await validateSavedSession(application, page, site, "prepare");
+  if (process.platform !== "win32") {
+    const longVideo = join(dir, "reuniao-longa-sintetica.mp4");
+    await promisify(execFile)(resolve(".local/media/ffmpeg"), [
+      "-v",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "color=s=64x64:r=2",
+      "-t",
+      "601",
+      "-c:v",
+      "libx264",
+      "-threads",
+      "2",
+      longVideo,
+    ]);
+    await page.evaluate(() => window.stag.request({ type: "newChat" }));
+    await application.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] });
+    }, longVideo);
+    await page
+      .getByLabel("Mensagem para o assistente")
+      .fill("Rascunho preservado durante vídeo longo");
+    await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            const state = await window.stag.getSnapshot();
+            return { completed: state.videoAnalysis?.completed, busy: state.busy };
+          }),
+        { timeout: 30000 },
+      )
+      .toEqual({ completed: 1, busy: true });
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].restore());
+    await page.getByRole("button", { name: "Parar execução", exact: true }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(async () => (await window.stag.getSnapshot()).videoAnalysis?.working),
+      )
+      .toBe(false);
+    const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
+    await expect(panel).toContainText("1 de 3 trechos");
+    await expect(page.getByLabel("Mensagem para o assistente")).toHaveValue(
+      "Rascunho preservado durante vídeo longo",
+    );
+    backgroundSaved = await page.evaluate(
+      async () => (await window.stag.getSnapshot()).videoAnalysis,
+    );
+    const checkpoint = JSON.parse(await readFile(join(data, "video-analysis.json"), "utf8"))[0];
+    assert.equal(checkpoint.next, 1);
+    assert.equal(checkpoint.status, "paused");
+    assert.equal(JSON.stringify(checkpoint).includes("data:image"), false);
+    assert.equal(JSON.stringify(checkpoint).includes("transcript"), false);
+    await page.screenshot({ path: ".local/screenshots/electron-background-video-paused.png" });
+    console.log(
+      "Vídeo em segundo plano no Electron: diálogo/decoder de produção, processamento minimizado, pausa e checkpoint conferidos.",
+    );
+  }
   assert.deepEqual(errors, []);
   await application.close();
+  if (process.platform !== "win32") env.STAG_FIXTURE_VIDEO_MODE = "normal";
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
@@ -863,6 +929,31 @@ try {
   const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
   assert.deepEqual(restarted.projectSources, [source]);
   assert.equal(restarted.browser.authorized, false);
+  if (backgroundSaved) {
+    assert.equal(restarted.videoAnalysis.id, backgroundSaved.id);
+    assert.equal(restarted.videoAnalysis.completed, 1);
+    assert.equal(restarted.videoAnalysis.status, "paused");
+    assert.equal(restarted.busy, false);
+    await restartedPage.getByRole("button", { name: "Retomar análise", exact: true }).click();
+    await expect
+      .poll(
+        () =>
+          restartedPage.evaluate(
+            async () => (await window.stag.getSnapshot()).videoAnalysis?.status,
+          ),
+        { timeout: 30000 },
+      )
+      .toBe("completed");
+    const final = await restartedPage.evaluate(async () => window.stag.getSnapshot());
+    assert.equal(final.threadId, backgroundSaved.threadId);
+    assert.equal(final.videoAnalysis.completed, 3);
+    const stored = JSON.parse(await readFile(join(data, "video-analysis.json"), "utf8"))[0];
+    assert.equal(stored.next, 3);
+    assert.equal(stored.pending, null);
+    console.log(
+      "Vídeo em segundo plano: reinício real, conversa/política originais, retomada do segundo trecho e conclusão confirmados.",
+    );
+  }
   await validateSavedSession(application, restartedPage, site, "verify");
   await application.close();
   application = await _electron.launch({

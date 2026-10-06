@@ -33,6 +33,7 @@ import { BrowserPane } from "./BrowserPane";
 import { AboutDialog } from "./AboutDialog";
 import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
+import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
 import { videoTime } from "../shared/request-video";
@@ -187,7 +188,8 @@ export function App() {
     !pasting &&
     state.pendingVideo?.status !== "preparing" &&
     !sendingDraft;
-  const canSend = canSubmit && !state.busy && !state.queuedMessages.length;
+  const analysisRunning = state.videoAnalysis?.working || state.videoAnalysis?.status === "running";
+  const canSend = canSubmit && !state.busy && !analysisRunning && !state.queuedMessages.length;
   const canEnqueue =
     canSubmit &&
     !!draft.trim() &&
@@ -676,6 +678,7 @@ export function App() {
               </button>
             </section>
           )}
+          <VideoAnalysisPanel state={state} pending={pending} run={run} />
           <MessageQueue state={state} pending={pending} run={run} />
           <section className="composer" aria-label="Escrever mensagem">
             {state.pendingVideo && (
@@ -743,15 +746,36 @@ export function App() {
                   pasting ||
                   !!images.length ||
                   state.busy ||
+                  analysisRunning ||
                   state.pendingVideo?.status === "preparing"
                 }
                 onClick={() => void run({ type: "selectVideo" })}
               >
                 Anexar vídeo
               </button>
+              <button
+                className="text-button"
+                disabled={
+                  !state.project ||
+                  !state.account ||
+                  !state.model ||
+                  pending ||
+                  sendingDraft ||
+                  pasting ||
+                  !!images.length ||
+                  state.busy ||
+                  !!state.pendingVideo ||
+                  !!state.queuedMessages.length ||
+                  (!!state.videoAnalysis &&
+                    !["completed", "cancelled"].includes(state.videoAnalysis.status))
+                }
+                onClick={() => void run({ type: "analyzeVideo" })}
+              >
+                Analisar em segundo plano
+              </button>
               <span>
-                Até 100 MB e 10 min · MP4, MOV, MKV, WebM. Preparação local; imagens e transcrição
-                vão ao assistente ao enviar.
+                Anexo: 100 MB/10 min. Segundo plano: 20 GB/12 h, 5 min por turno da sua conta. Só
+                imagens e fala extraídas localmente são enviadas.
               </span>
             </div>
             <div className="composer-controls">
@@ -800,7 +824,7 @@ export function App() {
                   <ChevronDown size={12} />
                 </label>
               </div>
-              {(state.busy || state.queuedMessages.length > 0) && (
+              {(state.busy || analysisRunning || state.queuedMessages.length > 0) && (
                 <button
                   className="queue-button"
                   aria-label="Adicionar texto à fila"
