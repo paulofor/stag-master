@@ -1,11 +1,11 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.14",
+  "version": "0.4.15",
   "description": "Assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
   "main": "dist/main/index.cjs",
-  "author": "STAG",
+  "author": "Paulo Forestieri",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0"
@@ -36,6 +36,7 @@
   "build": {
     "appId": "io.stag.desktop",
     "productName": "STAG",
+    "copyright": "Desenvolvido por: Paulo Forestieri",
     "directories": {
       "output": "release"
     },
@@ -65,6 +66,7 @@
       "artifactName": "STAG-${version}-Windows-${arch}-Setup.${ext}"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

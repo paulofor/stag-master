@@ -14,6 +14,7 @@ import {
   FolderOpen,
   Globe2,
   History,
+  Info,
   LogOut,
   ListPlus,
   Monitor,
@@ -29,6 +30,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrowserPane } from "./BrowserPane";
+import { AboutDialog } from "./AboutDialog";
 import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
 import { MessageQueue } from "./MessageQueue";
@@ -107,10 +109,12 @@ export function App() {
   const [menu, setMenu] = useState<"history" | "account" | null>(null);
   const [windowsDialog, setWindowsDialog] = useState(false);
   const [sourcesDialog, setSourcesDialog] = useState(false);
+  const [aboutDialog, setAboutDialog] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [browserFocused, setBrowserFocused] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const accountButton = useRef<HTMLButtonElement>(null);
   const revision = useRef(0);
   const bridge = window.stag;
   useEffect(() => {
@@ -250,7 +254,7 @@ export function App() {
     const onKey = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
-        if (!state.busy && !pending && !sourcesDialog && !windowsDialog) {
+        if (!state.busy && !pending && !sourcesDialog && !windowsDialog && !aboutDialog) {
           void run({ type: "newChat" });
         }
       }
@@ -261,7 +265,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, state.busy, pending, sourcesDialog, windowsDialog]);
+  }, [run, state.busy, pending, sourcesDialog, windowsDialog, aboutDialog]);
   const chosenModel = state.models.find((m) => m.model === state.model);
   const disabledContext = state.busy || pending;
   const visibleError = error || state.error;
@@ -324,6 +328,7 @@ export function App() {
               <Plus size={19} />
             </button>
             <button
+              ref={accountButton}
               className={`icon-button ${menu === "account" ? "selected" : ""}`}
               title="Conta e conexão"
               aria-label="Conta e conexão"
@@ -436,6 +441,17 @@ export function App() {
                       Sair da conta
                     </button>
                   )}
+                  <button
+                    className="menu-row"
+                    onClick={() => {
+                      accountButton.current?.focus();
+                      setMenu(null);
+                      setAboutDialog(true);
+                    }}
+                  >
+                    <Info size={15} />
+                    Sobre o STAG
+                  </button>
                 </>
               )}
             </section>
@@ -847,6 +863,7 @@ export function App() {
             </section>
           </div>
         )}
+        {aboutDialog && <AboutDialog close={() => setAboutDialog(false)} />}
         {sourcesDialog && state.project && (
           <ProjectSourcesDialog
             key={state.project.path}
@@ -866,7 +883,7 @@ export function App() {
           state={state.browser}
           busy={state.busy}
           pending={pending}
-          obscured={sourcesDialog}
+          obscured={sourcesDialog || aboutDialog}
           run={run}
           backToChat={() => setBrowserFocused(false)}
         />
