@@ -29,11 +29,25 @@ test("sessão por projeto é opcional e esquecer revoga o controle", async ({ pa
   await expect(remember).not.toBeChecked();
 });
 test("navegador ao lado, endereço e fechamento preservam conversa", async ({ page }, info) => {
-  await page.setViewportSize({ width: 1280, height: 900 });
   await ready(page);
-  const chat = await page.locator(".app-shell").boundingBox();
-  const browser = await page.getByRole("region", { name: "Navegador do assistente" }).boundingBox();
-  expect(browser!.x).toBeGreaterThanOrEqual(chat!.x + chat!.width);
+  for (const width of [1584, 1280, 901]) {
+    await page.setViewportSize({ width, height: 900 });
+    const chat = await page.locator(".app-shell").boundingBox();
+    const browser = await page
+      .getByRole("region", { name: "Navegador do assistente" })
+      .boundingBox();
+    expect(browser!.x).toBeGreaterThanOrEqual(chat!.x + chat!.width - 1);
+    expect(chat!.width).toBeGreaterThanOrEqual(360);
+    expect(browser!.width).toBeGreaterThanOrEqual(width * 0.6);
+    expect(browser!.x + browser!.width).toBeLessThanOrEqual(width + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await page.setViewportSize({ width: 1584, height: 1080 });
+  expect((await page.locator(".browser-viewport").boundingBox())!.width).toBeGreaterThanOrEqual(
+    1000,
+  );
   await page.getByLabel("Endereço do navegador").fill("https://fixture.invalid/docs");
   await page.getByRole("button", { name: "Ir", exact: true }).click();
   await expect(page.getByLabel("Endereço do navegador")).toHaveValue(
