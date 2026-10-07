@@ -14,7 +14,7 @@ const inheritedPolicy = process.env.PSExecutionPolicyPreference;
 const inheritedModules = process.env.PSModulePath;
 try {
   await build({
-    entryPoints: ["src/main/desktop-tools.ts"],
+    entryPoints: ["src/main/desktop-tools.ts", "src/main/waiting-sound.ts"],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
     bundle: true,
@@ -23,6 +23,9 @@ try {
   });
   const { DesktopTools, windowsPowerShellEnvironment } = await import(
     pathToFileURL(join(dir, "desktop-tools.mjs")).href
+  );
+  const { WaitingSound, waitingWave } = await import(
+    pathToFileURL(join(dir, "waiting-sound.mjs")).href
   );
   const runPowerShell = (args, options = {}) =>
     execFileSync("powershell.exe", args, {
@@ -66,6 +69,49 @@ try {
   console.log("Windows: conferir Restricted e preservação das políticas pelo driver de produção.");
   // Compare scopes in separate diagnostic processes; the no-flag probe below remains Restricted.
   const before = policies();
+  console.log("Windows: áudio sintético de cinco segundos pelo script de produção sob Restricted.");
+  const soundScript = resolve("native/waiting-sound.ps1");
+  const wave = waitingWave();
+  assert.equal(wave.readUInt32LE(40) / wave.readUInt32LE(28), 5);
+  const played = runPowerShell(
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", soundScript],
+    { input: wave.toString("base64"), encoding: "utf8" },
+  );
+  assert.equal(
+    played
+      .replace(/^\uFEFF/, "")
+      .replace(/\r\n/g, "\n")
+      .trim(),
+    "STAG_WAIT_SOUND_READY\nSTAG_WAIT_SOUND_DONE",
+  );
+  for (const input of ["invalid synthetic audio", Buffer.alloc(wave.length).toString("base64")]) {
+    assert.throws(
+      () =>
+        runPowerShell(
+          ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", soundScript],
+          { input, encoding: "utf8", stdio: "pipe" },
+        ),
+      /STAG_WAIT_SOUND_FAILED/,
+    );
+  }
+  const sound = new WaitingSound(soundScript);
+  const warnings = [];
+  const warn = console.warn;
+  try {
+    console.warn = (...args) => warnings.push(args);
+    sound.play();
+    await sound.settled();
+    sound.play();
+    sound.stop();
+    await sound.settled();
+    sound.play();
+    await sound.settled();
+    assert.deepEqual(warnings, [], "Driver deve recuperar sem falhas ou áudio pendente.");
+  } finally {
+    console.warn = warn;
+    sound.stop();
+    await sound.settled();
+  }
   const fixture = resolve("tests/fixtures/desktop-process.ps1");
   const input = Buffer.from(JSON.stringify({ action: "list_windows" })).toString("base64");
   assert.throws(

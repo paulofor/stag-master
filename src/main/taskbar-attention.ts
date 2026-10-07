@@ -1,5 +1,6 @@
 import { nativeImage, type BrowserWindow } from "electron";
 import type { Snapshot } from "../shared/types";
+import type { AttentionSound } from "./waiting-sound";
 
 export const waitingTitle = "STAG — Aguardando sua resposta";
 
@@ -20,15 +21,21 @@ export function attentionIcon() {
 /** Presentation only: authoritative pending requests still belong to AssistantService. */
 export class TaskbarAttention {
   private waiting = false;
+  private waitingThread: string | null = null;
   private flashing = false;
   private disposed = false;
   private readonly icon = attentionIcon();
-  private readonly refresh = () => this.updateFlash();
+  private readonly refresh = () => {
+    if (this.window.isFocused() && !this.window.isMinimized() && this.window.isVisible())
+      this.sound?.stop();
+    this.updateFlash();
+  };
   private readonly preserveTitle = (event: Electron.Event) => event.preventDefault();
 
   constructor(
     private readonly window: BrowserWindow,
     private readonly platform = process.platform,
+    private readonly sound?: AttentionSound,
   ) {
     window.on("focus", this.refresh);
     window.on("blur", this.refresh);
@@ -42,6 +49,12 @@ export class TaskbarAttention {
     if (this.disposed || this.window.isDestroyed()) return;
     const waiting =
       snapshot.connection === "ready" && !!snapshot.threadId && snapshot.approvals.length > 0;
+    const waitingThread = waiting ? snapshot.threadId : null;
+    if (waitingThread !== this.waitingThread) {
+      this.waitingThread = waitingThread;
+      this.sound?.stop();
+      if (waiting && this.platform === "win32") this.sound?.play();
+    }
     if (waiting !== this.waiting) {
       this.waiting = waiting;
       this.window.setTitle(waiting ? waitingTitle : "STAG");
@@ -72,13 +85,19 @@ export class TaskbarAttention {
     this.window.removeListener("hide", this.refresh);
     this.window.removeListener("closed", this.dispose);
     this.window.removeListener("page-title-updated", this.preserveTitle);
+    this.sound?.stop();
     if (!this.window.isDestroyed()) {
       this.window.flashFrame(false);
       this.window.setTitle("STAG");
       if (this.platform === "win32") this.window.setOverlayIcon(null, "");
     }
     this.waiting = false;
+    this.waitingThread = null;
     this.flashing = false;
     this.disposed = true;
   };
+
+  settled(): Promise<void> {
+    return this.sound?.settled() || Promise.resolve();
+  }
 }

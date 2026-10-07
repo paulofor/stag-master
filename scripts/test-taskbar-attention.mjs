@@ -1,17 +1,59 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { join } from "node:path";
+import { writeFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createRequire } from "node:module";
 import { expect } from "@playwright/test";
 
 export async function buildTaskbarHarness(dir) {
   await build({
-    entryPoints: ["src/main/taskbar-attention.ts"],
-    outfile: join(dir, "taskbar-attention.cjs"),
+    entryPoints: ["src/main/taskbar-attention.ts", "src/main/waiting-sound.ts"],
+    outdir: dir,
+    outExtension: { ".js": ".cjs" },
     bundle: true,
     platform: "node",
     format: "cjs",
     external: ["electron"],
   });
+}
+
+export async function validateWaitingAudio(dir) {
+  const { waitingWave } = createRequire(import.meta.url)(join(dir, "waiting-sound.cjs"));
+  const path = join(dir, "synthetic-waiting.wav");
+  const execute = promisify(execFile);
+  const media = join(process.cwd(), ".local/media");
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  try {
+    await writeFile(path, waitingWave());
+    const { stdout } = await execute(
+      join(media, `ffprobe${suffix}`),
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration:stream=codec_name,sample_rate,channels",
+        "-of",
+        "json",
+        path,
+      ],
+      { timeout: 30000 },
+    );
+    const info = JSON.parse(stdout);
+    assert.equal(Number(info.format.duration), 5);
+    assert.deepEqual(info.streams, [
+      { codec_name: "pcm_s16le", sample_rate: "22050", channels: 1 },
+    ]);
+    await execute(join(media, `ffmpeg${suffix}`), ["-v", "error", "-i", path, "-f", "null", "-"], {
+      timeout: 30000,
+    });
+    console.log(
+      "Som: PCM sintético de 5 s, mono, decodificado pelos FFprobe/FFmpeg fixados; sem mídia do cliente.",
+    );
+  } finally {
+    await rm(path, { force: true });
+  }
 }
 
 // Observe and forward the actual native APIs, installed only in the isolated test boot.
@@ -48,7 +90,13 @@ export async function validateTaskbarAttention(application, page) {
       title: "STAG synthetic attention",
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
-    const attention = new TaskbarAttention(target);
+    let soundPlays = 0;
+    let soundStops = 0;
+    const attention = new TaskbarAttention(target, process.platform, {
+      play: () => soundPlays++,
+      stop: () => soundStops++,
+      settled: async () => {},
+    });
     const state = {
       connection: "ready",
       threadId: "synthetic",
@@ -62,6 +110,7 @@ export async function validateTaskbarAttention(application, page) {
       attention.update(state);
       attention.update({ ...state, approvals: [{ id: "second", kind: "command" }] });
       const started = global.taskbarCalls.filter((call) => call.id === target.id);
+      const soundsStarted = soundPlays;
       attention.update({ ...state, approvals: [] });
       const cleared = target.getTitle();
       attention.update(state);
@@ -108,6 +157,7 @@ export async function validateTaskbarAttention(application, page) {
         };
       }
       attention.dispose();
+      await attention.settled();
       const calls = global.taskbarCalls.filter((call) => call.id === target.id);
       return {
         size: icon.getSize(),
@@ -122,6 +172,9 @@ export async function validateTaskbarAttention(application, page) {
         calls,
         focusedPreserved,
         nativeFocus,
+        soundsStarted,
+        soundPlays,
+        soundStops,
       };
     } finally {
       attention.dispose();
@@ -141,6 +194,9 @@ export async function validateTaskbarAttention(application, page) {
   );
   assert.equal(result.calls.at(-1).value, false);
   if (process.platform === "win32") {
+    assert.equal(result.soundsStarted, 1, "Snapshots e várias pendências não repetem áudio.");
+    assert.equal(result.soundPlays, 2, "Novo período de espera pode tocar novamente.");
+    assert.ok(result.soundStops >= 4, "Foco, resolução e encerramento interrompem o áudio.");
     assert.deepEqual(result.nativeFocus, {
       minimized: true,
       flashingMinimized: true,
@@ -153,10 +209,10 @@ export async function validateTaskbarAttention(application, page) {
     );
     assert.equal(result.calls.at(-1).method, "setOverlayIcon");
     assert.equal(result.calls.at(-1).description, "");
-  }
+  } else assert.equal(result.soundPlays, 0);
   assert.deepEqual(await page.evaluate(() => window.stag.getSnapshot()), before);
   console.log(
-    "Barra de tarefas: NativeImage real, APIs de produção, ausência de foco/ativação, espera, deduplicação, resolução e descarte conferidos.",
+    "Barra de tarefas: NativeImage real, APIs de produção, ausência de foco/ativação, espera, som por período, deduplicação, resolução e descarte conferidos.",
   );
 }
 
