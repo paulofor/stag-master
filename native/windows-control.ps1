@@ -170,11 +170,15 @@ function Get-StagAllowedProcess([int]$processId) {
         'forticlient' { $product = '^FortiClient(?: VPN| Standalone)?$'; $publisher = '^Fortinet,? Inc\.?$' }
         default { throw 'STAG_DESKTOP_DENIED: Somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient.' }
     }
+    # Get-Process returns System.Diagnostics.Process; version metadata belongs to its main module.
+    # Missing/inaccessible metadata must fail closed, without requesting elevation or exposing paths.
+    try { $productName = [string]$target.MainModule.FileVersionInfo.ProductName }
+    catch { throw 'STAG_DESKTOP_DENIED: Metadados do executavel indisponiveis.' }
     # A title, renamed executable or model-provided name cannot grant access.
     if (-not $target.Path -or [IO.Path]::GetFileName($target.Path) -ine ($name + '.exe') -or
         $target.MainWindowHandle -eq 0 -or -not [StagWindow]::IsWindowVisible($target.MainWindowHandle) -or
         [StagWindow]::WindowProcessId($target.MainWindowHandle) -ne $processId -or
-        [string]$target.FileVersionInfo.ProductName -notmatch $product) {
+        $productName -notmatch $product) {
         throw 'STAG_DESKTOP_DENIED: Executavel ou janela nao reconhecidos.'
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $target.Path
