@@ -33,7 +33,6 @@ export async function validateDesktopIndicator(application, page) {
     await target.loadURL(
       `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>STAG synthetic indicator target</title><style>body{background:#f5f4f1;margin:0}button{position:fixed;left:1px;top:45%;height:42px}input{margin:80px}</style><button onclick="this.textContent=\'Clicado\'">Alvo sintético</button><input aria-label="Texto sintético">')}`,
     );
-    target.setBounds(screen.getPrimaryDisplay().bounds);
     // Keep the synthetic target above the taskbar so all four monitor-edge hit tests
     // refer to fixture content. The later indicator is still on top of this window.
     target.setAlwaysOnTop(true, "screen-saver");
@@ -42,6 +41,7 @@ export async function validateDesktopIndicator(application, page) {
     // Windows still requires native minimization, rather than pretending the request succeeded.
     if (process.platform === "linux" && !host.isMinimized()) host.hide();
     target.show();
+    target.setBounds(screen.getPrimaryDisplay().bounds);
     target.focus();
     const indicator = new global.DesktopIndicatorHarness.DesktopControlIndicator("win32");
     const harness = {

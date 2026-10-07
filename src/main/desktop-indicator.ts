@@ -115,7 +115,13 @@ export class DesktopControlIndicator {
           }),
         );
         controller.signal.throwIfAborted();
-        for (const window of windows) window.showInactive();
+        for (const [index, window] of windows.entries()) {
+          window.showInactive();
+          controller.signal.throwIfAborted();
+          // Initial Chromium widget placement may clamp to workArea. Apply the whole monitor
+          // after showing, so the bottom border reaches the desktop edge above the taskbar.
+          window.setBounds(displays[index].bounds);
+        }
       }
       controller.signal.throwIfAborted();
       executing = true;

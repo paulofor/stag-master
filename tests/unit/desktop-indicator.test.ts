@@ -15,6 +15,10 @@ vi.mock("electron", async () => {
   const { EventEmitter } = await import("node:events");
   class Window extends EventEmitter {
     destroyed = false;
+    bounds: Electron.Rectangle;
+    setBounds = vi.fn((bounds: Electron.Rectangle) => {
+      this.bounds = { ...bounds };
+    });
     showInactive = vi.fn();
     setEnabled = vi.fn();
     setIgnoreMouseEvents = vi.fn();
@@ -29,6 +33,13 @@ vi.mock("electron", async () => {
     });
     constructor(public options: Electron.BrowserWindowConstructorOptions) {
       super();
+      // Chromium's initial widget placement may constrain a transparent window to workArea.
+      this.bounds = {
+        x: options.x!,
+        y: options.y!,
+        width: options.width!,
+        height: options.height! - 48,
+      };
       native.windows.push(this);
     }
     isDestroyed() {
@@ -78,43 +89,48 @@ describe("indicador Windows durante a operação", () => {
     });
     expect(native.windows).toHaveLength(0);
     const work = indicator.run(execute);
-    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
-    expect(native.windows).toHaveLength(2);
-    for (const [index, window] of native.windows.entries()) {
-      expect(window.options).toMatchObject({
-        ...native.displays[index].bounds,
-        transparent: true,
-        frame: false,
-        focusable: false,
-        skipTaskbar: true,
-        show: false,
-        hasShadow: false,
-        webPreferences: {
-          sandbox: true,
-          contextIsolation: true,
-          nodeIntegration: false,
-          javascript: false,
-        },
-      });
-      expect(window.options.webPreferences).not.toHaveProperty("preload");
-      expect(window.setIgnoreMouseEvents).toHaveBeenCalledExactlyOnceWith(true);
-      expect(window.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
-      expect(window.showInactive).toHaveBeenCalledOnce();
-      const html = decodeURIComponent(window.loadURL.mock.calls[0][0].split(",")[1]);
-      expect(html).toContain("STAG controlando o Windows");
-      expect(html).toContain("prefers-reduced-motion");
-      expect(html).not.toMatch(/<script|https?:\/\//);
-      const event = { preventDefault: vi.fn() };
-      window.webContents.emit("will-navigate", event);
-      expect(event.preventDefault).toHaveBeenCalledOnce();
-      expect(window.webContents.setWindowOpenHandler.mock.calls[0][0]()).toEqual({
-        action: "deny",
-      });
-      const callback = vi.fn();
-      window.webContents.session.webRequest.onBeforeRequest.mock.calls[0][1]({}, callback);
-      expect(callback).toHaveBeenCalledWith({ cancel: true });
+    try {
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      expect(native.windows).toHaveLength(2);
+      for (const [index, window] of native.windows.entries()) {
+        expect(window.options).toMatchObject({
+          ...native.displays[index].bounds,
+          transparent: true,
+          frame: false,
+          focusable: false,
+          skipTaskbar: true,
+          show: false,
+          hasShadow: false,
+          webPreferences: {
+            sandbox: true,
+            contextIsolation: true,
+            nodeIntegration: false,
+            javascript: false,
+          },
+        });
+        expect(window.options.webPreferences).not.toHaveProperty("preload");
+        expect(window.setIgnoreMouseEvents).toHaveBeenCalledExactlyOnceWith(true);
+        expect(window.setEnabled).toHaveBeenCalledExactlyOnceWith(false);
+        expect(window.showInactive).toHaveBeenCalledOnce();
+        expect(window.bounds).toEqual(native.displays[index].bounds);
+        const html = decodeURIComponent(window.loadURL.mock.calls[0][0].split(",")[1]);
+        expect(html).toContain("STAG controlando o Windows");
+        expect(html).toContain("prefers-reduced-motion");
+        expect(html).not.toMatch(/<script|https?:\/\//);
+        const event = { preventDefault: vi.fn() };
+        window.webContents.emit("will-navigate", event);
+        expect(event.preventDefault).toHaveBeenCalledOnce();
+        expect(window.webContents.setWindowOpenHandler.mock.calls[0][0]()).toEqual({
+          action: "deny",
+        });
+        const callback = vi.fn();
+        window.webContents.session.webRequest.onBeforeRequest.mock.calls[0][1]({}, callback);
+        expect(callback).toHaveBeenCalledWith({ cancel: true });
+      }
+    } finally {
+      wait.release();
+      await work;
     }
-    wait.release();
     await expect(work).resolves.toBe("resultado");
   });
 
