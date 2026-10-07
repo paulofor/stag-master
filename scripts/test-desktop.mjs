@@ -92,7 +92,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog,BrowserWindow} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.

@@ -31,8 +31,19 @@ describe("fronteiras do cliente", () => {
   it("movimento periódico só aceita a opção e o thread, sem comandos ou parâmetros nativos", () => {
     const action = { type: "mouseMovement", threadId: "synthetic", enabled: true };
     expect(actionSchema.parse(action)).toEqual(action);
-    for (const field of ["x", "y", "interval", "processId", "stagPeriodicMovement", "script"])
+    for (const field of [
+      "x",
+      "y",
+      "interval",
+      "processId",
+      "stagPeriodicMovement",
+      "stagHostProcessId",
+      "stagHostWindow",
+      "script",
+    ])
       expect(() => actionSchema.parse({ ...action, [field]: 1 })).toThrow();
+    for (const field of ["stagHostProcessId", "stagHostWindow"])
+      expect(() => desktopArguments.parse({ action: "list_windows", [field]: 42 })).toThrow();
     expect(() =>
       desktopArguments.parse({ action: "nudge_cursor", stagPeriodicMovement: true }),
     ).toThrow();

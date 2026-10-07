@@ -66,8 +66,38 @@ export const desktopArguments = z.discriminatedUnion("action", [
     .strict(),
 ]);
 export type DesktopArguments = z.infer<typeof desktopArguments>;
-const cursorPulseSchema = z.object({ moved: z.boolean() }).strict();
+const cursorPulseSchema = z.discriminatedUnion("moved", [
+  z.object({ moved: z.literal(true) }).strict(),
+  z
+    .object({
+      moved: z.literal(false),
+      reason: z
+        .enum([
+          "unverified_target",
+          "forticlient",
+          "buttons_pressed",
+          "cursor_outside",
+          "target_changed",
+          "pointer_busy",
+        ])
+        .optional(),
+    })
+    .strict(),
+]);
 export type CursorPulseResult = z.infer<typeof cursorPulseSchema>;
+export function cursorPulseStatus(result: CursorPulseResult): string {
+  if (result.moved) return "Mouse movido · próximo em 5 min";
+  const reasons = {
+    unverified_target:
+      "janela não permitida ou não verificada; use STAG, Postman, IntelliJ, VS Code ou DBeaver",
+    forticlient: "FortiClient não recebe movimento automático",
+    buttons_pressed: "botão do mouse pressionado",
+    cursor_outside: "cursor fora da janela ativa ou sobre outra janela",
+    target_changed: "janela, foco ou destino mudou",
+    pointer_busy: "mouse em uso",
+  };
+  return `Intervalo omitido · ${result.reason ? reasons[result.reason] : "alvo ocupado ou indisponível"}`;
+}
 export interface ToolResult {
   contentItems: ({ type: "inputText"; text: string } | { type: "inputImage"; imageUrl: string })[];
   success: boolean;
@@ -258,6 +288,7 @@ export class DesktopTools {
   constructor(
     private script: string,
     private platform = process.platform,
+    private getAssistantWindowHandle?: () => Buffer | null,
   ) {}
   cancel(): void {
     for (const controller of this.invocations) controller.abort();
@@ -292,6 +323,8 @@ export class DesktopTools {
       stagCheckOnly?: true;
       stagCriticalApproved?: true;
       stagPeriodicMovement?: true;
+      stagHostProcessId?: number;
+      stagHostWindow?: string;
     } = {},
     signal?: AbortSignal,
   ): Promise<{ stdout: string }> {
@@ -313,6 +346,8 @@ export class DesktopTools {
       stagCheckOnly?: true;
       stagCriticalApproved?: true;
       stagPeriodicMovement?: true;
+      stagHostProcessId?: number;
+      stagHostWindow?: string;
     },
     signal: AbortSignal,
   ): Promise<{ stdout: string }> {
@@ -385,9 +420,20 @@ export class DesktopTools {
   }
   /** Fixed main-only gesture. Neither the model nor renderer can supply a target or coordinates. */
   async pulseCursor(signal?: AbortSignal): Promise<CursorPulseResult> {
+    // Bind only this gesture to the actual main window. Never grant the public tool access to STAG.
+    const handle = this.getAssistantWindowHandle?.();
+    let hostContext = {};
+    if (handle) {
+      if (!Buffer.isBuffer(handle) || ![4, 8].includes(handle.length))
+        throw new Error("Janela do STAG indisponível para o movimento.");
+      const value = handle.length === 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
+      if (value <= 0n || value > 0x7fffffffffffffffn)
+        throw new Error("Janela do STAG indisponível para o movimento.");
+      hostContext = { stagHostProcessId: process.pid, stagHostWindow: value.toString() };
+    }
     const result = await this.invoke(
       { action: "nudge_cursor" },
-      { stagPeriodicMovement: true },
+      { stagPeriodicMovement: true, ...hostContext },
       signal,
     );
     return cursorPulseSchema.parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));

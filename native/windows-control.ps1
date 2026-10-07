@@ -247,15 +247,37 @@ if ($request.action -eq 'nudge_cursor') {
     if ($request.stagPeriodicMovement -isnot [bool] -or $request.stagPeriodicMovement -ne $true) {
         throw 'STAG_DESKTOP_DENIED: Movimento periodico nao autorizado pelo main.'
     }
+    # The host is bound by main to its exact HWND/PID, not by title, executable name or a tool argument.
+    # This exception exists only inside the fixed gesture; other actions still use the signed allowlist.
+    function Get-StagPulseHost([IntPtr]$window) {
+        $handle = [long]0
+        if (($request.stagHostProcessId -isnot [int] -and $request.stagHostProcessId -isnot [long]) -or
+            $request.stagHostProcessId -le 0 -or $request.stagHostProcessId -gt [int]::MaxValue -or
+            $request.stagHostWindow -isnot [string] -or $request.stagHostWindow -notmatch '^[1-9][0-9]{0,18}$' -or
+            -not [long]::TryParse($request.stagHostWindow, [ref]$handle) -or
+            $window.ToInt64() -ne $handle -or
+            [StagWindow]::WindowProcessId($window) -ne $request.stagHostProcessId) { return $null }
+        try { $hostTarget = Get-Process -Id ([int]$request.stagHostProcessId) -ErrorAction Stop }
+        catch { throw 'STAG_DESKTOP_DENIED: Janela do STAG indisponivel.' }
+        Assert-StagWindow $hostTarget $window
+        return $hostTarget
+    }
     $moved = $false
+    $reason = 'unverified_target'
     try {
         $window = [StagWindow]::GetForegroundWindow()
-        $target = Get-StagAllowedProcess ([int][StagWindow]::WindowProcessId($window))
-        if ($target.ProcessName -ieq 'FortiClient' -or [StagWindow]::ButtonsPressed()) {
-            '{"moved":false}'
+        $target = Get-StagPulseHost $window
+        if (-not $target) { $target = Get-StagAllowedProcess ([int][StagWindow]::WindowProcessId($window)) }
+        if ($target.ProcessName -ieq 'FortiClient') {
+            '{"moved":false,"reason":"forticlient"}'
+            return
+        }
+        if ([StagWindow]::ButtonsPressed()) {
+            '{"moved":false,"reason":"buttons_pressed"}'
             return
         }
         $origin = [StagWindow]::Cursor()
+        $reason = 'cursor_outside'
         if ((Get-StagCoordinateWindow $target $origin[0] $origin[1]) -ne $window) {
             throw 'STAG_DESKTOP_DENIED: Cursor fora da janela em primeiro plano.'
         }
@@ -263,12 +285,17 @@ if ($request.action -eq 'nudge_cursor') {
         $dx = if ($origin[0] + 2 -lt $bounds[0] + $bounds[2]) { 2 } else { -2 }
         $x = $origin[0] + $dx
         $y = $origin[1]
+        $reason = 'target_changed'
         if ((Get-StagCoordinateWindow $target $x $y) -ne $window) {
             throw 'STAG_DESKTOP_DENIED: Destino do cursor mudou.'
         }
         $current = [StagWindow]::Cursor()
-        if (($current -join ',') -ne ($origin -join ',') -or [StagWindow]::ButtonsPressed()) {
-            '{"moved":false}'
+        if ([StagWindow]::ButtonsPressed()) {
+            '{"moved":false,"reason":"buttons_pressed"}'
+            return
+        }
+        if (($current -join ',') -ne ($origin -join ',')) {
+            '{"moved":false,"reason":"pointer_busy"}'
             return
         }
         Assert-StagForeground $target
@@ -289,7 +316,8 @@ if ($request.action -eq 'nudge_cursor') {
     } catch {
         if ($_.Exception.Message -notmatch 'STAG_DESKTOP_DENIED') { throw }
     }
-    @{ moved = $moved } | ConvertTo-Json -Compress
+    if ($moved) { '{"moved":true}' }
+    else { @{ moved = $false; reason = $reason } | ConvertTo-Json -Compress }
     return
 }
 

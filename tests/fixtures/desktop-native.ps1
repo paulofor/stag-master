@@ -37,12 +37,23 @@ public static class StagWindow {
     public static int LoseFocusAfterKeys;
     public static int CursorX = 10, CursorY = 20, CursorReads;
     public static bool ButtonsHeld, UserMovesAfterNudge, MoveDuringCheck, BlockDestination, ButtonsAfterNudge;
+    public static Dictionary<long, uint> WindowOwners = new Dictionary<long, uint>();
+    public static Dictionary<long, long> WindowParents = new Dictionary<long, long>();
+    public static IntPtr HiddenWindow;
+    public static bool ChangeProcessDuringPulse;
+    public static int ProcessReads;
     public static IntPtr HitWindow = new IntPtr(4242);
     public static IntPtr Foreground = new IntPtr(4242);
     public static bool SetProcessDPIAware() { return true; }
-    public static bool IsWindowVisible(IntPtr window) { return window != IntPtr.Zero; }
-    public static uint WindowProcessId(IntPtr window) { return (uint)window.ToInt64(); }
-    public static IntPtr GetAncestor(IntPtr window, uint flags) { return window; }
+    public static bool IsWindowVisible(IntPtr window) { return window != IntPtr.Zero && window != HiddenWindow; }
+    public static uint WindowProcessId(IntPtr window) {
+        uint owner;
+        return WindowOwners.TryGetValue(window.ToInt64(), out owner) ? owner : (uint)window.ToInt64();
+    }
+    public static IntPtr GetAncestor(IntPtr window, uint flags) {
+        long parent;
+        return WindowParents.TryGetValue(window.ToInt64(), out parent) ? new IntPtr(parent) : window;
+    }
     public static IntPtr WindowAt(int x, int y) { return BlockDestination && x == 12 ? new IntPtr(9001) : HitWindow; }
     public static int[] Cursor() {
         if (MoveDuringCheck && ++CursorReads == 2) CursorX++;
@@ -168,6 +179,9 @@ function Get-Process {
     if (-not $global:StagProcesses.ContainsKey($Id)) { throw 'Synthetic process not found.' }
     if ([StagWindow]::ChangeAfterCapture -and [StagWindow]::Events.Contains("capture:$Id")) { throw 'Synthetic process exited during capture.' }
     $copy = $global:StagProcesses[$Id].PSObject.Copy()
+    if ([StagWindow]::ChangeProcessDuringPulse -and ++[StagWindow]::ProcessReads -gt 1) {
+        $copy.StartTime = [datetime]'2026-02-01'
+    }
     if ([StagWindow]::ChangeProcessAfterFocus -and [StagWindow]::Events.Contains("focus:$Id")) {
         $copy.StartTime = [datetime]'2026-02-01'
     }
@@ -475,10 +489,14 @@ function Reset-PulseFixture {
     [StagWindow]::ButtonsAfterNudge = $false
     [StagWindow]::LoseFocusAfterMove = $false
     [StagWindow]::ChangeAfterMove = $false
+    [StagWindow]::ChangeProcessDuringPulse = $false
+    [StagWindow]::ProcessReads = 0
 }
-function Assert-Pulse([bool]$moved, [string[]]$events = @()) {
-    $result = Invoke-DesktopContract @{ action = 'nudge_cursor'; stagPeriodicMovement = $true } | ConvertFrom-Json
+function Assert-Pulse([bool]$moved, [string[]]$events = @(), [hashtable]$context = @{}, [string]$reason = '') {
+    $result = Invoke-DesktopContract (@{ action = 'nudge_cursor'; stagPeriodicMovement = $true } + $context) | ConvertFrom-Json
     if ($result.moved -ne $moved) { throw 'Unexpected movement result.' }
+    if ($reason -and $result.reason -cne $reason) { throw 'Unexpected omission reason.' }
+    if ($moved -and $result.PSObject.Properties.Name -contains 'reason') { throw 'Successful movement must not report omission.' }
     Assert-Events $events
 }
 Reset-PulseFixture
@@ -493,16 +511,17 @@ foreach ($processId in @(8383, 8484, 8585, 9001, 9002, 9003, 9005)) {
     Reset-PulseFixture
     [StagWindow]::Foreground = [IntPtr]$processId
     [StagWindow]::HitWindow = [IntPtr]$processId
-    Assert-Pulse $false
+    Assert-Pulse $false @() @{} $(if ($processId -lt 9000) { 'forticlient' } else { 'unverified_target' })
 }
 foreach ($flag in @('ButtonsHeld', 'MoveDuringCheck', 'BlockDestination')) {
     Reset-PulseFixture
     [StagWindow]::$flag = $true
-    Assert-Pulse $false
+    $reason = switch ($flag) { 'ButtonsHeld' { 'buttons_pressed' } 'MoveDuringCheck' { 'pointer_busy' } 'BlockDestination' { 'target_changed' } }
+    Assert-Pulse $false @() @{} $reason
 }
 Reset-PulseFixture
 [StagWindow]::HitWindow = [IntPtr]9001
-Assert-Pulse $false
+Assert-Pulse $false @() @{} 'cursor_outside'
 Reset-PulseFixture
 $originalSignature = $global:StagSignatures[$global:StagProcesses[4242].Path]
 $global:StagSignatures[$global:StagProcesses[4242].Path] = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [StagCertificate]::new('Synthetic wrong publisher') }
@@ -525,4 +544,69 @@ Reset-PulseFixture
 Assert-Pulse $true @('cursor:-197,20', 'cursor:-199,20')
 Reset-PulseFixture
 Assert-Pulse $true @('cursor:12,20', 'cursor:10,20')
+
+# The STAG main window has its own exact binding; it is not a signed external app.
+# HWNDs and PIDs are different, and the embedded browser has child HWNDs.
+Add-SyntheticProcess 10101 'STAG' 'STAG' 'Synthetic unsigned app'
+Add-SyntheticProcess 10102 'STAG' 'STAG' 'Synthetic unsigned app'
+$global:StagSignatures[$global:StagProcesses[10101].Path].Status = 'NotSigned'
+[StagWindow]::WindowOwners[11001] = 10101
+[StagWindow]::WindowOwners[11002] = 10101
+[StagWindow]::WindowOwners[11003] = 10102
+[StagWindow]::WindowParents[12001] = 11001
+$hostBinding = @{ stagHostProcessId = 10101; stagHostWindow = '11001' }
+Reset-PulseFixture
+[StagWindow]::Foreground = [IntPtr]11001
+[StagWindow]::HitWindow = [IntPtr]11001
+Assert-Pulse $true @('cursor:12,20', 'cursor:10,20') $hostBinding
+[StagWindow]::HitWindow = [IntPtr]12001
+Assert-Pulse $true @('cursor:12,20', 'cursor:10,20') $hostBinding
+Assert-Pulse $false @() @{}
+foreach ($invalidBinding in @(
+    @{ stagHostProcessId = 10102; stagHostWindow = '11001' },
+    @{ stagHostProcessId = 10101; stagHostWindow = '11002' },
+    @{ stagHostProcessId = 10101; stagHostWindow = '0' },
+    @{ stagHostProcessId = 10101; stagHostWindow = '-1' },
+    @{ stagHostProcessId = 10101; stagHostWindow = 'invalid' },
+    @{ stagHostProcessId = '10101'; stagHostWindow = '11001' },
+    @{ stagHostProcessId = 10101; stagHostWindow = '9223372036854775808' }
+)) { Assert-Pulse $false @() $invalidBinding }
+[StagWindow]::HiddenWindow = [IntPtr]11001
+Assert-Pulse $false @() $hostBinding
+[StagWindow]::HiddenWindow = [IntPtr]::Zero
+[StagWindow]::Foreground = [IntPtr]11003
+[StagWindow]::HitWindow = [IntPtr]11003
+Assert-Pulse $false @() $hostBinding
+[StagWindow]::Foreground = [IntPtr]11002
+[StagWindow]::HitWindow = [IntPtr]11002
+Assert-Pulse $false @() $hostBinding
+# The same binding must never allow model-controlled input/capture on STAG.
+foreach ($operation in @('focus_window', 'screenshot', 'click', 'send_keys', 'type_text', 'scroll')) {
+    Assert-Denied (@{ action = $operation; processId = 10101; x = 10; y = 20; keys = '^s'; text = 'synthetic'; delta = -120 } + $hostBinding)
+}
+Reset-PulseFixture
+[StagWindow]::Foreground = [IntPtr]11001
+[StagWindow]::HitWindow = [IntPtr]12001
+Assert-Pulse $true @('cursor:12,20', 'cursor:10,20') $hostBinding
+foreach ($flag in @('ButtonsHeld', 'MoveDuringCheck', 'BlockDestination', 'ChangeProcessDuringPulse')) {
+    Reset-PulseFixture
+    [StagWindow]::Foreground = [IntPtr]11001
+    [StagWindow]::HitWindow = [IntPtr]12001
+    [StagWindow]::$flag = $true
+    Assert-Pulse $false @() $hostBinding
+}
+foreach ($flag in @('UserMovesAfterNudge', 'ButtonsAfterNudge', 'LoseFocusAfterMove', 'ChangeAfterMove')) {
+    Reset-PulseFixture
+    [StagWindow]::Foreground = [IntPtr]11001
+    [StagWindow]::HitWindow = [IntPtr]12001
+    [StagWindow]::$flag = $true
+    Assert-Pulse $true @('cursor:12,20') $hostBinding
+}
+Reset-PulseFixture
+[StagWindow]::Foreground = [IntPtr]11001
+[StagWindow]::HitWindow = [IntPtr]12001
+[StagWindow]::WindowOwners[11001] = 10102
+Assert-Pulse $false @() $hostBinding
+[StagWindow]::WindowOwners[11001] = 10101
+Assert-Pulse $true @('cursor:12,20', 'cursor:10,20') $hostBinding
 Write-Output "Native desktop dispatcher: $contracts synthetic contracts OK; no real desktop APIs executed."

@@ -14,12 +14,16 @@ if ($request.action -eq 'open_forticlient') {
     return
 }
 if ($request.action -eq 'nudge_cursor') {
+    $fields = ($request.PSObject.Properties.Name | Sort-Object) -join ','
+    $hostBound = $fields -eq 'action,stagHostProcessId,stagHostWindow,stagPeriodicMovement'
     if ($request.stagPeriodicMovement -ne $true -or
-        (($request.PSObject.Properties.Name | Sort-Object) -join ',') -ne 'action,stagPeriodicMovement' -or
+        ($fields -ne 'action,stagPeriodicMovement' -and -not $hostBound) -or
+        ($hostBound -and ($request.stagHostProcessId -le 0 -or $request.stagHostWindow -cne '11001')) -or
         (Get-ExecutionPolicy -Scope Process) -ne 'Bypass') {
         throw 'Synthetic periodic driver contract failed.'
     }
-    '{"moved":false}'
+    if ($hostBound) { '{"moved":false,"reason":"cursor_outside"}' }
+    else { '{"moved":false}' }
     return
 }
 @{

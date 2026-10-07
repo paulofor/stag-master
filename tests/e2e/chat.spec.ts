@@ -318,6 +318,46 @@ test("movimento periódico exige conversa Windows e desliga sem perder rascunho"
   await expect(region).toHaveCount(0);
   await expect(input).toHaveValue("Rascunho preservado");
 });
+test("omissão explica onde posicionar o mouse sem perder rascunho ou causar overflow", async ({
+  page,
+}, info) => {
+  await installBridge(page, {
+    account: { email: "fixture@example.invalid", plan: "teste" },
+    project: { path: "C:/Projetos/exemplo", name: "exemplo" },
+    mode: "windows",
+    threadId: "synthetic-mouse-thread",
+    mouseMovement: {
+      enabled: true,
+      moves: 0,
+      skipped: 2,
+      status:
+        "Intervalo omitido · janela não permitida ou não verificada; use STAG, Postman, IntelliJ, VS Code ou DBeaver",
+    },
+  });
+  await page.reload();
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("Rascunho preservado");
+  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
+  await expect(region.getByRole("status")).toContainText("use STAG");
+  await expect(region.getByRole("status")).toContainText("2 intervalo(s) omitido(s)");
+  await expect(region.getByRole("button")).toHaveAttribute(
+    "title",
+    /STAG \(inclusive navegador integrado\)/,
+  );
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-mouse-omission.png` });
+  await page.setViewportSize({ width: 360, height: 600 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  const button = await page.getByRole("button", { name: "Enviar mensagem" }).boundingBox();
+  expect(button!.y + button!.height).toBeLessThanOrEqual(600);
+  await region.getByRole("button", { name: "Desligar movimento do mouse" }).click();
+  await expect(region.getByRole("status")).toHaveText("Desligado");
+  await expect(input).toHaveValue("Rascunho preservado");
+});
 test("erro permite reconectar e Markdown não executa HTML/imagens remotas", async ({ page }) => {
   await ready(page);
   const input = page.getByLabel("Mensagem para o assistente");

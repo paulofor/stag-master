@@ -233,6 +233,34 @@ describe("indicador Windows durante a operação", () => {
 });
 
 describe("integração de produção com o desktop", () => {
+  it("gesto periódico preserva a janela do STAG e seu foco enquanto mostra o indicador", async () => {
+    const host = {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      hide: vi.fn(),
+      showInactive: vi.fn(),
+    };
+    const driver = {
+      execute: vi.fn(),
+      confirmationReason: vi.fn(),
+      cancel: vi.fn(),
+      pulseCursor: vi.fn(async (signal: AbortSignal) => {
+        expect(signal.aborted).toBe(false);
+        expect(host.hide).not.toHaveBeenCalled();
+        expect(native.windows.every((window) => !window.options.focusable)).toBe(true);
+        return { moved: false as const, reason: "cursor_outside" as const };
+      }),
+    };
+    const control = createDesktopControl(host, driver, indicator);
+    await expect(control.pulseCursor(new AbortController().signal)).resolves.toEqual({
+      moved: false,
+      reason: "cursor_outside",
+    });
+    expect(driver.pulseCursor).toHaveBeenCalledOnce();
+    expect(host.hide).not.toHaveBeenCalled();
+    expect(host.showInactive).not.toHaveBeenCalled();
+    expect(native.windows.every((window) => window.destroyed)).toBe(true);
+  });
   it("cancelamento enquanto o painel se oculta não inicia entrada e restaura sem foco", async () => {
     const driver = {
       execute: vi.fn(async () => ({ success: true, contentItems: [] })),

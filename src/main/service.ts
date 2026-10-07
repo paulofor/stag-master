@@ -23,6 +23,7 @@ import {
   desktopArguments,
   desktopApproval,
   desktopTool,
+  cursorPulseStatus,
   type DesktopTools,
   type ToolResult,
   type CursorPulseResult,
@@ -335,9 +336,9 @@ export class AssistantService extends EventEmitter {
       const summary = this.state.mouseMovement;
       if (result.moved) summary.moves++;
       else summary.skipped++;
-      summary.status = result.moved
-        ? "Mouse movido · próximo em 5 min"
-        : "Intervalo omitido · alvo ocupado ou indisponível";
+      summary.status = blocked
+        ? "Intervalo omitido · aguardando aprovação ou mudança de contexto"
+        : cursorPulseStatus(result);
       this.publish();
     });
     // One outstanding interval at most; all native/browser actions use the same queue.

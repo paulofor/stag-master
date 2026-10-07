@@ -720,7 +720,7 @@ export function App() {
                           !state.account ||
                           state.connection !== "ready"))
                     }
-                    title="Ative numa conversa Windows autorizada. Move até 2 pixels e retorna, somente sobre uma janela permitida em primeiro plano, sem clicar."
+                    title="Ative numa conversa Windows autorizada. Move até 2 pixels e retorna com o cursor sobre STAG (inclusive navegador integrado), Postman, IntelliJ, VS Code ou DBeaver em primeiro plano, sem clicar."
                     onClick={() =>
                       state.threadId &&
                       void run({
