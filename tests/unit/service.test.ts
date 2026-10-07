@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile, appendFile, readdir } from "no
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
-import { RpcClient } from "../../src/main/rpc";
+import { RpcClient, type RpcMessage } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment, threadPolicy } from "../../src/main/policy";
 import { engineeringInstructions } from "../../src/main/engineering-policy";
@@ -914,10 +914,48 @@ describe("vídeo em segundo plano na conversa", () => {
   it("cancelamento de seleção e projeto inválido preservam avanço; outra raiz não herda", async () => {
     await ready();
     await rpc.call("_fixture/videoBehavior", { mode: "hold" });
-    await service.request({ type: "analyzeVideo" });
-    await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
-    await service.request({ type: "stop" });
+    let started: RpcMessage | undefined;
+    const onStarted = (message: RpcMessage) => {
+      if (
+        message.method === "turn/started" &&
+        message.params?.threadId === service.snapshot().threadId
+      )
+        started = message;
+    };
+    rpc.on("notification", onStarted);
+    const original = rpc.call.bind(rpc);
+    let release!: () => void;
+    const dispatch = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi
+      .spyOn(rpc, "call")
+      .mockImplementation(
+        async <T>(method: string, params?: Record<string, unknown>): Promise<T> => {
+          if (method === "turn/start") await dispatch;
+          return original<T>(method, params);
+        },
+      );
+    try {
+      await service.request({ type: "analyzeVideo" });
+      await vi.waitFor(() => expect(service.snapshot().busy).toBe(true));
+      expect(started).toBeUndefined();
+      // A busy snapshot precedes the server handshake. Stop only the acknowledged turn.
+      release();
+      await vi.waitFor(() => expect(started).toBeDefined());
+      await service.request({ type: "stop" });
+    } finally {
+      release();
+      spy.mockRestore();
+      rpc.off("notification", onStarted);
+    }
     await service.mediaSettled();
+    const interruptions = (await calls()).filter((call) => call.method === "turn/interrupt");
+    expect(interruptions).toHaveLength(1);
+    expect(interruptions[0].params.threadId).toBe(service.snapshot().threadId);
+    expect(interruptions[0].params.turnId).toBeTypeOf("string");
+    expect(started?.params?.turn).toMatchObject({ id: interruptions[0].params.turnId });
+    expect(service.snapshot().error).toBeNull();
     const previous = service.snapshot().videoAnalysis!;
     selectProject.mockResolvedValueOnce(null);
     await service.request({ type: "selectProject" });
