@@ -257,21 +257,37 @@ export async function validateDesktopIndicator(application, page) {
     await running();
     assert.ok((await indicatorWindows()) > 0, "Movimento periódico usa o mesmo indicador.");
     assert.equal(await finish(), "ok");
+    // Exercise main-context construction and child views on Linux too, before native platform gating.
+    await application.evaluate(async ({ WebContentsView }) => {
+      const h = global.desktopIndicatorHarness;
+      const view = new WebContentsView({
+        webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+      });
+      h.target.contentView.addChildView(view);
+      const { width, height } = h.target.getContentBounds();
+      view.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height });
+      await view.webContents.loadURL(
+        "data:text/html,<title>Navegador sintetico</title><body style='background:ivory'>Pagina sintetica</body>",
+      );
+      h.pulseView = view;
+    });
+    const pulse = () =>
+      application.evaluate(async (_electron, scriptPath) => {
+        const h = global.desktopIndicatorHarness;
+        const driver = new global.DesktopDriverHarness.DesktopTools(
+          scriptPath,
+          process.platform,
+          () => (h.target.isDestroyed() ? null : h.target.getNativeWindowHandle()),
+        );
+        const control = global.DesktopIndicatorHarness.createDesktopControl(
+          h.target,
+          driver,
+          h.indicator,
+        );
+        return control.pulseCursor(new AbortController().signal);
+      }, resolve("native/windows-control.ps1"));
     if (process.platform === "win32") {
       // Real gesture only on the exact, test-owned Electron window; no client windows or accounts.
-      await application.evaluate(async ({ WebContentsView }) => {
-        const h = global.desktopIndicatorHarness;
-        const view = new WebContentsView({
-          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-        });
-        h.target.contentView.addChildView(view);
-        const { width, height } = h.target.getContentBounds();
-        view.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height });
-        await view.webContents.loadURL(
-          "data:text/html,<title>Navegador sintetico</title><body style='background:ivory'>Pagina sintetica</body>",
-        );
-        h.pulseView = view;
-      });
       const binding = await application.evaluate(() => ({
         processId: process.pid,
         handle: global.desktopIndicatorHarness.target
@@ -315,23 +331,7 @@ export async function validateDesktopIndicator(application, page) {
           embedded,
         );
         assert.deepEqual(await probe("preparePulse"), { ready: true });
-        const result = await application.evaluate(async () => {
-          const h = global.desktopIndicatorHarness;
-          const driver = new global.DesktopDriverHarness.DesktopTools(
-            require("node:path").join(
-              require("electron").app.getAppPath(),
-              "native/windows-control.ps1",
-            ),
-            "win32",
-            () => (h.target.isDestroyed() ? null : h.target.getNativeWindowHandle()),
-          );
-          const control = global.DesktopIndicatorHarness.createDesktopControl(
-            h.target,
-            driver,
-            h.indicator,
-          );
-          return control.pulseCursor(new AbortController().signal);
-        });
+        const result = await pulse();
         assert.deepEqual(
           result,
           { moved: true },
@@ -342,6 +342,12 @@ export async function validateDesktopIndicator(application, page) {
       }
       console.log(
         "Movimento Windows nativo: driver de produção, HWND/PID do main, navegador filho, foco/retorno e bordas OK; somente janela sintética.",
+      );
+    } else {
+      await assert.rejects(pulse(), /somente no Windows/);
+      assert.equal(await indicatorWindows(), 0);
+      console.log(
+        "Gesto do main e navegador filho: construção real e recusa de plataforma Linux OK; nenhuma API Windows executada.",
       );
     }
     await begin();
