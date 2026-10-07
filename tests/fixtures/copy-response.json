@@ -1,0 +1,5 @@
+{
+  "markdown": "# Plano do sistema\n\n**Revisão aprovada** com *ênfase* e [documentação](https://example.invalid/docs).\n\n1. Conferir configuração.\n2. Validar implantação.\n   - Preservar isolamento.\n\n> Observação: somente dados sintéticos.\n\n```sql\nSELECT id, nome\nFROM cadastro\nWHERE id < 10;\n```\n\n| Etapa | Resultado |\n| --- | --- |\n| Validação | OK |\n\n- [x] Conferência concluída\n- [ ] Próxima etapa\n\n<script>conteúdo inerte</script>\n\n![Imagem citada](https://example.invalid/tracker.png)\n\n[Link restrito](https://synthetic:synthetic@example.invalid/restrito)",
+  "other": "Outra resposta **separada**.",
+  "progress": "Conferindo **configuração** do sistema…"
+}

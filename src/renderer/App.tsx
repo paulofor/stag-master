@@ -39,6 +39,7 @@ import { ProjectBranchesDialog } from "./ProjectBranchesDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
+import { copyResponse } from "./copy-response";
 import { videoTime } from "../shared/request-video";
 import {
   maxRequestImages,
@@ -1084,7 +1085,13 @@ export function App() {
 }
 
 function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) => void }) {
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const content = useRef<HTMLDivElement>(null);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    setCopyStatus("idle");
+    return () => clearTimeout(copyTimer.current);
+  }, [item.text]);
   if (item.kind === "user")
     return (
       <div className="user-message">
@@ -1102,7 +1109,7 @@ function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) =
           <span>STAG</span>
           {item.phase === "commentary" && <small>em andamento</small>}
         </div>
-        <div className="markdown">
+        <div className="markdown" ref={content}>
           <Markdown
             remarkPlugins={[remarkGfm]}
             skipHtml
@@ -1124,23 +1131,35 @@ function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) =
             {item.text}
           </Markdown>
         </div>
-        {item.text && item.phase !== "commentary" && (
-          <button
-            className="copy-message"
-            aria-label="Copiar resposta"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(item.text);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              } catch {
-                setCopied(false);
-              }
-            }}
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-            {copied ? "Copiado" : "Copiar"}
-          </button>
+        {item.text.trim() && (
+          <div className="message-copy">
+            <button
+              className="copy-message"
+              aria-label="Copiar resposta"
+              title="Copiar com formatação para colar em documentos"
+              onClick={() => {
+                clearTimeout(copyTimer.current);
+                try {
+                  if (!content.current) throw new Error("Resposta indisponível.");
+                  copyResponse(content.current);
+                  setCopyStatus("copied");
+                  copyTimer.current = setTimeout(() => setCopyStatus("idle"), 2000);
+                } catch {
+                  setCopyStatus("failed");
+                }
+              }}
+            >
+              {copyStatus === "copied" ? <Check size={15} /> : <Copy size={15} />}
+              {copyStatus === "copied" ? "Copiado" : "Copiar"}
+            </button>
+            <span role="status" className={copyStatus === "failed" ? "copy-error" : "sr-only"}>
+              {copyStatus === "failed"
+                ? "Não foi possível copiar. Tente novamente."
+                : copyStatus === "copied"
+                  ? "Resposta copiada com formatação."
+                  : ""}
+            </span>
+          </div>
         )}
       </article>
     );

@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-07 — Cópia formatada de respostas em 0.4.29: renderer reconstrói o Markdown exibido com elementos/estilos fixos e links HTTP(S) sem credenciais, entrega HTML e texto simples no evento nativo de cópia por clique/teclado. Sem leitura do clipboard ou nova ponte IPC; inclui atualizações em andamento e histórico. Harness verifica clipboard e colagem em documento sintético no Electron, sem conta Google ou turno pago. Fonte: solicitação do cliente, `copy-response.ts` e matriz de homologação.
+
 2026-10-07 — Corrigida a leitura de identidade dos aplicativos do desktop em 0.4.28: Get-Process fornece metadados por MainModule.FileVersionInfo. O acesso direto a FileVersionInfo rejeitava os aplicativos permitidos, e a fixture ocultava o erro com uma propriedade inexistente. O harness passa a conferir sua estrutura contra o próprio processo PowerShell, com falha fechada e recuperação quando os metadados retornam. Fonte: inspeção local do PowerShell, driver e matriz de homologação; sem acesso ao DBeaver/banco do cliente.
 
 2026-10-06 — A operação open_forticlient abre somente FortiClient.exe oficial instalado no Program Files/Program Files x86, sem shell ou argumentos do agente. A inspeção e a abertura passam pela fila compartilhada e confirmam/revalidam a identidade; o executável fica protegido contra escrita/substituição durante a abertura. Retorno de abertura não comprova conexão. Senha/MFA/SSO externos continuam manuais. Fonte: implementação 0.4.26 e matriz de homologação; interação com a instalação corporativa requer sessão Windows do cliente.

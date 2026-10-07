@@ -14,6 +14,7 @@ import imageFixture from "../tests/fixtures/request-image.json" with { type: "js
 import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
+import { validateResponseCopy } from "./test-copy.mjs";
 
 await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -299,6 +300,7 @@ try {
   console.log(
     "Vídeo no Electron: seleção nativa, decoder real, reload, remoção e referência antiga recusada OK.",
   );
+  await validateResponseCopy(application, page);
   const imageInput = page.getByLabel("Mensagem para o assistente");
   await application.evaluate(async ({ clipboard }) =>
     clipboard.writeText("Tarefa sintética colada"),
