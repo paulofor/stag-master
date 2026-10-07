@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-07 — Aviso sonoro 0.4.32: TaskbarAttention inicia uma sequência PCM fixa de cinco segundos ao entrar em espera; WaitingSound serializa reprodução/cancelamento por subprocesso PowerShell sem shell, somente bytes gerados no código. Foco, resolução, parar, desconectar, trocar e fechar abortam e aguardam close. Sem IPC, dados da conversa, arquivos de áudio externos, alteração do volume ou permissões de desktop. Fonte: solicitação, implementação e matriz desta tarefa; Linux valida waveform/decoder/contratos, reprodução Windows requer o job nativo.
+
 2026-10-07 — Aviso de espera 0.4.31: TaskbarAttention recebe snapshots do main, cria ícone fixo no código e controla título/flashFrame/setOverlayIcon. Sem novo IPC, persistência ou executor. Usa perguntas e aprovações da conversa atual, limpa em resolução/recusa/interrupção/desconexão/troca/encerramento. Harness inclui NativeImage real, APIs Electron e fixture bidirecional isolada. Fonte: implementação e matriz desta solicitação; aparência nativa Windows depende do job correspondente.
 
 2026-10-07 — Indicador de controle Windows em 0.4.30: main cria bordas azuis por monitor durante ações nativas na fila compartilhada, sem foco/entrada ou dados do alvo na camada. Operações e inspeções do subprocesso agora recebem cancelamento; limpeza aguarda close. Falhas, mudança de monitor/DPI, parada e encerramento removem a camada. Fonte: solicitação do cliente e `desktop-indicator.ts`; validação com janelas sintéticas, sem desktop do cliente.

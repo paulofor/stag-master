@@ -17,6 +17,7 @@ import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
 import {
   buildTaskbarHarness,
+  validateWaitingAudio,
   installTaskbarProbe,
   validateTaskbarAttention,
   validateTaskbarService,
@@ -54,6 +55,7 @@ try {
   await buildBrowserHarness(dir);
   await buildDesktopIndicatorHarness(dir);
   await buildTaskbarHarness(dir);
+  await validateWaitingAudio(dir);
   const gitTest = await gitFixture(dir);
   const nestedRepository = join(project, "equipe", "frontend ação");
   await gitTest.init(project);

@@ -1,4 +1,26 @@
-# Matriz de homologação da versão 0.4.31
+# Matriz de homologação da versão 0.4.32
+
+## Sinal sonoro de espera — versão 0.4.32
+
+Matriz definida antes dos testes. Ao entrar em espera por resposta/aprovação, tocar uma sequência suave de cinco segundos no Windows, uma vez por período de espera da conversa atual. O main gera o WAV fixo em memória e usa um subprocesso sem shell para reproduzi-lo, inclusive minimizado, sem foco ou entrada. Focar, resolver/recusar a última pendência, parar, desconectar, trocar de contexto ou encerrar interrompe o som. Snapshots, reload e mudança de foco não repetem o áudio; um novo período de espera pode tocar novamente. O sinal visual continua até a resolução.
+
+Lacuna observada: as regressões do aviso visual não verificam duração, reprodução, sobreposição de sons nem encerramento do processo de áudio. Ampliar o harness existente, com waveform e processos sintéticos, requests bidirecionais e reprodução pelo driver empacotado no Windows. Sem conta, dados, janelas ou mídia do cliente; nenhuma inferência paga.
+
+| Área                         | Cenário e aceite                                                                                                                                                             | Evidência prevista                           |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Caminho feliz                | Perguntas e aprovações em Projeto/Leitura/Windows tocam um sinal de cinco segundos, também com a janela oculta/minimizada                                                    | Unidade, Electron e driver Windows           |
+| Áudio                        | PCM mono gerado pelo código, volume moderado, início/fim suaves, cinco segundos, sem arquivos externos ou dados da conversa                                                  | Amostras, FFprobe/decoder real e SoundPlayer |
+| Validação e isolamento       | Texto livre, trabalho normal, consentimento ocioso e snapshots antigos não tocam; troca de thread interrompe a reprodução anterior                                           | Estado, serviço e controle de áudio          |
+| Deduplicação                 | Reload, deltas, várias pendências e foco/blur não reiniciam o sinal; somente uma reprodução por vez                                                                          | Harness existente e subprocesso controlado   |
+| Recuperação                  | Resposta, recusa, foco, parar, desconexão, troca e fechamento cancelam; aguardar close antes de nova reprodução/saída; falha de áudio preserva aviso visual e próximo pedido | Unidade, Electron e driver de produção       |
+| Integração e observabilidade | Main mantém autoria; sem novo IPC/tool/consentimento; falha registra somente mensagem fixa, sem bytes/caminhos/argumentos; métricas e fila preservadas                       | Driver, probe e snapshots sintéticos         |
+| Segurança e ambiente         | Política só no filho, PSModulePath do PS7 removido, sem alteração de políticas persistentes/volume do sistema; sem entrada ou controle de desktop/browser                    | Unidade + test:windows sob Restricted        |
+| Interface e segregação       | Painel único amplo/compacto/Pixel 7 preservado; CODEX_HOME e projetos sintéticos; Linux não comprova som audível ou aparência nativa Windows                                 | check e test:desktop                         |
+| Entrega                      | Diff e aceite locais antes do PR; jobs PR/main Linux/Windows, instalador 0.4.32 e conteúdo conferidos; `--publish never` preservado                                          | Desktop CI e artefato                        |
+
+A reprodução usa [SoundPlayer.PlaySync](https://learn.microsoft.com/en-us/dotnet/api/system.media.soundplayer.playsync?view=netframework-4.8.1) no processo filho, para manter a conversa responsiva. O volume e a saída dependem do Windows; não alterar mixer, dispositivos ou políticas. O CI exercita a API com áudio sintético, mas não comprova a percepção sonora na máquina do cliente.
+
+Evidência local: `npm run check` passou com typecheck, 517 contratos (nove novos), build, decoder/ASR reais, handshake/schema Codex isolado e 94 cenários Chromium amplo/compacto/Pixel 7. `xvfb-run -a npm run test:desktop` passou, incluindo WAV de 5,000 s decodificado pelos FFprobe/FFmpeg fixados, NativeImage e APIs Electron, ausência de foco/ativação, requests de pergunta/aprovação/recusa, reload, parada, recuperação e isolamento. A regressão com subprocesso real espera o handshake, cancela e aguarda close; os doubles verificam descarte de sons antigos e falhas sem dados em logs. Sintaxe PowerShell e recusa de entrada inválida foram conferidas localmente; sintaxe JavaScript, formatação e diff aprovados. O subprocesso sintético foi isolado das credenciais do ambiente e sua regressão/typecheck revalidados após esse ajuste. Nenhum script shell alterado. Executados com Node estável de `/opt/stag-node/bin`, pois o link padrão da sandbox aponta para checkout removido. A limitação bwrap Linux continua explícita pelo smoke; Windows nativo, Restricted, políticas preservadas e instalador são conferidos no job correspondente antes do merge. Sem conta/janela/mídia do cliente ou inferência paga.
 
 ## Atenção na barra de tarefas — versão 0.4.31
 

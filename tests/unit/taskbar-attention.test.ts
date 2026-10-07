@@ -38,8 +38,9 @@ const state = (approvals: Approval[] = [], patch: Partial<Snapshot> = {}): Snaps
 });
 function setup(platform: NodeJS.Platform = "win32") {
   const window = new Window();
-  const controller = new TaskbarAttention(window as unknown as BrowserWindow, platform);
-  return { window, controller };
+  const sound = { play: vi.fn(), stop: vi.fn(), settled: vi.fn(async () => {}) };
+  const controller = new TaskbarAttention(window as unknown as BrowserWindow, platform, sound);
+  return { window, controller, sound };
 }
 
 describe("Aviso de espera do usuário na barra de tarefas", () => {
@@ -47,7 +48,7 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
     "indica %s em todos os modos sem dados privados",
     (kind) => {
       for (const mode of ["project", "read", "windows"] as const) {
-        const { window, controller } = setup();
+        const { window, controller, sound } = setup();
         controller.update(state([approval(kind)], { mode }));
         expect(window.setTitle).toHaveBeenLastCalledWith(waitingTitle);
         expect(window.setOverlayIcon).toHaveBeenCalledWith(
@@ -55,6 +56,7 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
           "Aguardando sua resposta ou autorização",
         );
         expect(window.flashFrame).toHaveBeenLastCalledWith(true);
+        expect(sound.play).toHaveBeenCalledOnce();
         expect(JSON.stringify(window.setOverlayIcon.mock.calls)).not.toContain("privado");
         controller.dispose();
       }
@@ -62,38 +64,45 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
   );
 
   it("mantém o sinal até a última pendência e não reinicia destaque em deltas/reload", () => {
-    const { window, controller } = setup();
+    const { window, controller, sound } = setup();
     controller.update(state([approval(), approval("command", "second")]));
     controller.update(state([approval("command", "second")]));
     controller.update(state([approval("command", "second")]));
     expect(window.flashFrame).toHaveBeenCalledTimes(1);
     expect(window.setOverlayIcon).toHaveBeenCalledTimes(1);
+    expect(sound.play).toHaveBeenCalledOnce();
     controller.update(state());
+    expect(sound.stop).toHaveBeenCalledTimes(2);
     expect(window.flashFrame).toHaveBeenLastCalledWith(false);
     expect(window.setOverlayIcon).toHaveBeenLastCalledWith(null, "");
     expect(window.setTitle).toHaveBeenLastCalledWith("STAG");
     controller.update(state([approval()]));
+    expect(sound.play).toHaveBeenCalledTimes(2);
     expect(window.flashFrame).toHaveBeenLastCalledWith(true);
   });
 
   it("focar reconhece o destaque mas não resolve a solicitação", () => {
-    const { window, controller } = setup();
+    const { window, controller, sound } = setup();
     controller.update(state([approval()]));
     window.focused = true;
     window.minimized = false;
     window.emit("focus");
+    expect(sound.stop).toHaveBeenCalledTimes(2);
     expect(window.flashFrame).toHaveBeenLastCalledWith(false);
     expect(window.setOverlayIcon).toHaveBeenCalledTimes(1);
     window.focused = false;
     window.emit("blur");
+    controller.update(state([approval()]));
+    expect(sound.play).toHaveBeenCalledOnce();
     expect(window.flashFrame).toHaveBeenLastCalledWith(true);
   });
 
   it("pergunta em primeiro plano só destaca quando a janela fica oculta ou minimizada", () => {
-    const { window, controller } = setup();
+    const { window, controller, sound } = setup();
     window.focused = true;
     window.minimized = false;
     controller.update(state([approval()]));
+    expect(sound.play).toHaveBeenCalledOnce();
     expect(window.flashFrame).not.toHaveBeenCalled();
     window.visible = false;
     window.emit("hide");
@@ -103,16 +112,17 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
   it.each(["disconnected", "connecting", "error"] as const)(
     "limpa ao ficar %s apesar de snapshot com pendências",
     (connection) => {
-      const { window, controller } = setup();
+      const { window, controller, sound } = setup();
       controller.update(state([approval()]));
       controller.update(state([approval()], { connection }));
+      expect(sound.stop).toHaveBeenCalledTimes(2);
       expect(window.setOverlayIcon).toHaveBeenLastCalledWith(null, "");
       expect(window.flashFrame).toHaveBeenLastCalledWith(false);
     },
   );
 
   it("não marca trabalho comum, fila, histórico ou consentimento sem pedido pendente", () => {
-    const { window, controller } = setup();
+    const { window, controller, sound } = setup();
     controller.update(state());
     controller.update(
       state([], {
@@ -124,18 +134,21 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
     controller.update(state([approval()], { threadId: null }));
     expect(window.setOverlayIcon).not.toHaveBeenCalled();
     expect(window.flashFrame).not.toHaveBeenCalled();
+    expect(sound.play).not.toHaveBeenCalled();
   });
 
   it("limpa ao encerrar e não reage após descarte ou janela destruída", () => {
-    const { window, controller } = setup();
+    const { window, controller, sound } = setup();
     controller.update(state([approval()]));
     controller.dispose();
+    expect(sound.stop).toHaveBeenCalledTimes(2);
     expect(window.setOverlayIcon).toHaveBeenLastCalledWith(null, "");
     expect(window.eventNames()).toHaveLength(0);
     vi.clearAllMocks();
     controller.dispose();
     controller.update(state([approval()]));
     expect(window.setOverlayIcon).not.toHaveBeenCalled();
+    expect(sound.play).not.toHaveBeenCalled();
     const other = setup();
     other.window.destroyed = true;
     other.window.emit("closed");
@@ -145,11 +158,47 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
   });
 
   it("não chama APIs exclusivas do Windows em Linux", () => {
-    const { window, controller } = setup("linux");
+    const { window, controller, sound } = setup("linux");
     controller.update(state([approval()]));
     expect(window.setTitle).toHaveBeenLastCalledWith(waitingTitle);
     controller.dispose();
     expect(window.setOverlayIcon).not.toHaveBeenCalled();
+    expect(sound.play).not.toHaveBeenCalled();
+  });
+
+  it("interrompe a conversa anterior mesmo se outra já contém pendências", () => {
+    const { controller, sound } = setup();
+    controller.update(state([approval()]));
+    controller.update(state([approval()], { threadId: "other-thread" }));
+    expect(sound.stop).toHaveBeenCalledTimes(2);
+    expect(sound.play).toHaveBeenCalledTimes(2);
+    expect(sound.stop.mock.invocationCallOrder[1]).toBeLessThan(
+      sound.play.mock.invocationCallOrder[1],
+    );
+    controller.update(state([approval()], { threadId: "other-thread" }));
+    expect(sound.play).toHaveBeenCalledTimes(2);
+  });
+
+  it("aguarda a limpeza do áudio antes de concluir o encerramento", async () => {
+    const { controller, sound } = setup();
+    let close!: () => void;
+    sound.settled.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          close = resolve;
+        }),
+    );
+    controller.update(state([approval()]));
+    controller.dispose();
+    let done = false;
+    const work = controller.settled().then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    close();
+    await work;
+    expect(done).toBe(true);
   });
 
   it("preserva o título após atualização da página", () => {

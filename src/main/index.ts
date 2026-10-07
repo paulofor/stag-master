@@ -18,6 +18,7 @@ import { SettingsStore } from "./settings";
 import { DesktopTools } from "./desktop-tools";
 import { createDesktopControl } from "./desktop-indicator";
 import { TaskbarAttention } from "./taskbar-attention";
+import { WaitingSound } from "./waiting-sound";
 import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
@@ -50,6 +51,7 @@ if (devUrl && devUrl !== "http://127.0.0.1:5173")
   throw new Error("Origem de desenvolvimento inválida.");
 
 async function start(): Promise<void> {
+  const resourceRoot = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const rendererRoot = join(app.getAppPath(), "dist/renderer");
   protocol.handle("stag", (request) => {
     const url = new URL(request.url);
@@ -88,12 +90,15 @@ async function start(): Promise<void> {
   // Indicator windows must not keep the application alive after the conversation window closes.
   window.on("closed", () => app.quit());
   window.on("ready-to-show", () => window?.show());
-  taskbarAttention = new TaskbarAttention(window);
+  taskbarAttention = new TaskbarAttention(
+    window,
+    process.platform,
+    new WaitingSound(join(resourceRoot, "native/waiting-sound.ps1")),
+  );
   browser = new BrowserPanel(window);
   const dataRoot = app.getPath("userData");
   const codexHome = join(dataRoot, "codex");
   await mkdir(codexHome, { recursive: true });
-  const resourceRoot = app.isPackaged ? process.resourcesPath : app.getAppPath();
   const codexRoot = app.isPackaged
     ? join(resourceRoot, "codex")
     : join(resourceRoot, ".local/codex");
@@ -389,7 +394,7 @@ app.on("before-quit", (event) => {
   service?.dispose();
   desktopControl?.dispose();
   browser?.dispose();
-  void (service?.mediaSettled() || Promise.resolve()).finally(() => {
+  void Promise.all([service?.mediaSettled(), taskbarAttention?.settled()]).finally(() => {
     quitting = true;
     app.quit();
   });
