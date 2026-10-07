@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-07 — Corrigida a leitura de identidade dos aplicativos do desktop em 0.4.28: Get-Process fornece metadados por MainModule.FileVersionInfo. O acesso direto a FileVersionInfo rejeitava os aplicativos permitidos, e a fixture ocultava o erro com uma propriedade inexistente. O harness passa a conferir sua estrutura contra o próprio processo PowerShell, com falha fechada e recuperação quando os metadados retornam. Fonte: inspeção local do PowerShell, driver e matriz de homologação; sem acesso ao DBeaver/banco do cliente.
+
 2026-10-06 — A operação open_forticlient abre somente FortiClient.exe oficial instalado no Program Files/Program Files x86, sem shell ou argumentos do agente. A inspeção e a abertura passam pela fila compartilhada e confirmam/revalidam a identidade; o executável fica protegido contra escrita/substituição durante a abertura. Retorno de abertura não comprova conexão. Senha/MFA/SSO externos continuam manuais. Fonte: implementação 0.4.26 e matriz de homologação; interação com a instalação corporativa requer sessão Windows do cliente.
 
 2026-10-06 — STAG é um aplicativo Windows com Electron/React e Codex App Server local. O painel de conversa e suas políticas permanecem no aplicativo. Fonte: `README.md`, `AGENTS.md` e `package.json`.

@@ -2,6 +2,15 @@ param([Parameter(Mandatory = $true)][string]$ScriptPath)
 $ErrorActionPreference = 'Stop'
 $ScriptPath = (Resolve-Path $ScriptPath).Path
 
+# Inspect only this test process's object shape, never client processes or windows.
+# A permissive double must not invent members missing from System.Diagnostics.Process.
+$self = Microsoft.PowerShell.Management\Get-Process -Id $PID
+try {
+    $processShape = @($self.PSObject.Properties.Name)
+    $moduleShape = @($self.MainModule.PSObject.Properties.Name)
+    $versionShape = @($self.MainModule.FileVersionInfo.PSObject.Properties.Name)
+} finally { $self.Dispose() }
+
 # No P/Invoke: the real dispatcher runs with synthetic windows, processes, certificates and pixels.
 Write-Output 'Native desktop harness: compiling synthetic boundaries.'
 Add-Type @'
@@ -124,7 +133,17 @@ function Add-SyntheticProcess([int]$processId, [string]$name, [string]$product, 
     $global:StagProcesses[$processId] = [pscustomobject]@{
         Id = $processId; MainWindowHandle = [IntPtr]$processId; MainWindowTitle = "Synthetic $product";
         ProcessName = $name; Path = $path; StartTime = [datetime]'2026-01-01';
-        FileVersionInfo = [pscustomobject]@{ ProductName = $product }
+        MainModule = [pscustomobject]@{ FileVersionInfo = [pscustomobject]@{ ProductName = $product } }
+    }
+    $synthetic = $global:StagProcesses[$processId]
+    foreach ($node in @(
+        @{ Value = $synthetic; Shape = $processShape },
+        @{ Value = $synthetic.MainModule; Shape = $moduleShape },
+        @{ Value = $synthetic.MainModule.FileVersionInfo; Shape = $versionShape }
+    )) {
+        foreach ($member in $node.Value.PSObject.Properties.Name) {
+            if ($member -notin $node.Shape) { throw "Synthetic process member does not exist in PowerShell: $member" }
+        }
     }
     $global:StagSignatures[$path] = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [StagCertificate]::new($publisher) }
 }
@@ -280,13 +299,13 @@ function Assert-IdentityDenied([int]$processId) {
 }
 foreach ($processId in @(4242, 5252, 6262, 7272, 8282, 8383, 8484, 8585)) {
     $process = $global:StagProcesses[$processId]
-    $originalProduct = $process.FileVersionInfo.ProductName
+    $originalProduct = $process.MainModule.FileVersionInfo.ProductName
     $originalPath = $process.Path
     $signature = $global:StagSignatures[$originalPath]
     $certificate = $signature.SignerCertificate
-    $process.FileVersionInfo.ProductName = 'Unrecognized product'
+    $process.MainModule.FileVersionInfo.ProductName = 'Unrecognized product'
     Assert-IdentityDenied $processId
-    $process.FileVersionInfo.ProductName = $originalProduct
+    $process.MainModule.FileVersionInfo.ProductName = $originalProduct
     $process.Path = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'stag-synthetic', 'renamed.exe')
     Assert-IdentityDenied $processId
     $process.Path = $originalPath
@@ -304,6 +323,33 @@ foreach ($processId in @(4242, 5252, 6262, 7272, 8282, 8383, 8484, 8585)) {
     $null = Invoke-DesktopContract @{ action = 'focus_window'; processId = $processId }
     Assert-Events @("focus:$processId")
 }
+
+# Unreadable/absent module metadata must not be replaced with a title or an invented process member.
+# Other applications remain listable, and recovery restores the same DBeaver process.
+$dbeaver = $global:StagProcesses[7272]
+$originalModule = $dbeaver.MainModule
+$dbeaver | Add-Member -NotePropertyName FileVersionInfo -NotePropertyValue $originalModule.FileVersionInfo
+$unreadableModule = [pscustomobject]@{}
+$unreadableModule | Add-Member -MemberType ScriptProperty -Name FileVersionInfo -Value { throw 'Synthetic metadata access denied' }
+foreach ($module in @($null, [pscustomobject]@{ FileVersionInfo = $null },
+    [pscustomobject]@{ FileVersionInfo = [pscustomobject]@{ ProductName = '' } }, $unreadableModule)) {
+    $dbeaver.MainModule = $module
+    Assert-IdentityDenied 7272
+    Assert-Denied @{ action = 'click'; processId = 7272; stagCheckOnly = $true }
+    $listed = @(Invoke-DesktopContract @{ action = 'list_windows' } | ConvertFrom-Json)
+    if ((($listed.processId | Sort-Object) -join ',') -ne '4242,5252,6262,8282,8383,8484,8585') {
+        throw 'Unreadable DBeaver metadata hid unrelated allowed windows.'
+    }
+    Assert-Events @()
+}
+$dbeaver.PSObject.Properties.Remove('FileVersionInfo')
+$dbeaver.MainModule = $originalModule
+$listed = @(Invoke-DesktopContract @{ action = 'list_windows' } | ConvertFrom-Json)
+if ($listed.processId -notcontains 7272) { throw 'DBeaver did not recover after metadata became available.' }
+Assert-Events @()
+$image = Invoke-DesktopContract @{ action = 'screenshot'; processId = 7272 } | ConvertFrom-Json
+if ($image.processId -ne 7272) { throw 'Recovery captured a different process.' }
+Assert-Events @('capture:7272')
 
 # FortiClient input always needs main's per-action approval, regardless of model risk/intent.
 foreach ($processId in @(8383, 8484, 8585)) {
@@ -344,20 +390,20 @@ $fortiSignature.Status = 'Valid'
 $null = Invoke-DesktopContract @{ action = 'click'; processId = 8383; x = 10; y = 20; stagCriticalApproved = $true }
 Assert-Events @('focus:8383', 'cursor:10,20', 'mouse:2:0', 'mouse:4:0')
 foreach ($product in @('FortiClient Installer', 'FortiClient VPN injected', 'Other VPN')) {
-    $global:StagProcesses[8383].FileVersionInfo.ProductName = $product
+    $global:StagProcesses[8383].MainModule.FileVersionInfo.ProductName = $product
     Assert-IdentityDenied 8383
 }
-$global:StagProcesses[8383].FileVersionInfo.ProductName = 'FortiClient'
+$global:StagProcesses[8383].MainModule.FileVersionInfo.ProductName = 'FortiClient'
 $fortiSignature.SignerCertificate = [StagCertificate]::new('Fortinet, Inc. untrusted')
 Assert-IdentityDenied 8383
 $fortiSignature.SignerCertificate = [StagCertificate]::new('Fortinet, Inc.')
 
 # Prefix/suffix lookalikes do not inherit the DBeaver identity.
 foreach ($product in @('DBeaver Community Installer', 'DBeaver Community injected')) {
-    $global:StagProcesses[7272].FileVersionInfo.ProductName = $product
+    $global:StagProcesses[7272].MainModule.FileVersionInfo.ProductName = $product
     Assert-IdentityDenied 7272
 }
-$global:StagProcesses[7272].FileVersionInfo.ProductName = 'DBeaver Community'
+$global:StagProcesses[7272].MainModule.FileVersionInfo.ProductName = 'DBeaver Community'
 $signature = $global:StagSignatures[$global:StagProcesses[7272].Path]
 $signature.SignerCertificate = [StagCertificate]::new('DBeaver Corp untrusted')
 Assert-IdentityDenied 7272
@@ -462,10 +508,10 @@ $originalSignature = $global:StagSignatures[$global:StagProcesses[4242].Path]
 $global:StagSignatures[$global:StagProcesses[4242].Path] = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [StagCertificate]::new('Synthetic wrong publisher') }
 Assert-Pulse $false
 $global:StagSignatures[$global:StagProcesses[4242].Path] = $originalSignature
-$originalProduct = $global:StagProcesses[4242].FileVersionInfo.ProductName
-$global:StagProcesses[4242].FileVersionInfo.ProductName = 'Synthetic wrong product'
+$originalProduct = $global:StagProcesses[4242].MainModule.FileVersionInfo.ProductName
+$global:StagProcesses[4242].MainModule.FileVersionInfo.ProductName = 'Synthetic wrong product'
 Assert-Pulse $false
-$global:StagProcesses[4242].FileVersionInfo.ProductName = $originalProduct
+$global:StagProcesses[4242].MainModule.FileVersionInfo.ProductName = $originalProduct
 foreach ($flag in @('UserMovesAfterNudge', 'ButtonsAfterNudge', 'LoseFocusAfterMove', 'ChangeAfterMove')) {
     Reset-PulseFixture
     [StagWindow]::$flag = $true

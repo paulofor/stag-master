@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.27
+# Matriz de homologação da versão 0.4.28
+
+## Reconhecimento do DBeaver aberto — versão 0.4.28
+
+Matriz definida antes dos testes da correção. A imagem do cliente mostra DBeaver aberto e desktop autorizado. A investigação confirmou que o driver lia `Process.FileVersionInfo`, propriedade inexistente no processo retornado por `Get-Process`; os metadados pertencem a `Process.MainModule.FileVersionInfo`. A mesma leitura incorreta afetava todos os aplicativos permitidos. A [documentação do PowerShell](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-5.1) confirma a estrutura, também inspecionada no próprio processo de teste, sem enumerar aplicativos do cliente.
+
+Lacuna concreta do harness: o double inventava `FileVersionInfo` diretamente no processo e reproduzia o erro de produção. A fixture passa a representar o módulo principal e conferir seus membros contra os objetos reais do PowerShell que executa o teste. A lista de produtos e fornecedores, as assinaturas válidas, os consentimentos e as confirmações permanecem obrigatórios.
+
+| Área                         | Cenário e aceite                                                                                                                                                      | Evidência prevista                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Caminho feliz                | DBeaver Community e DBeaver reconhecidos, listados e capturados; foco, edição e navegação rotineiras funcionam; demais programas permitidos preservados               | Dispatcher de produção com janelas/processos sintéticos  |
+| Contrato real                | Double de processo/módulo/metadados usa somente propriedades existentes; ausência de FileVersionInfo no processo não oculta uma instalação válida                     | PowerShell local e Windows PowerShell 5.1 no CI          |
+| Validações e falhas          | Módulo/metadados ausentes ou inacessíveis, produto errado, executável renomeado e assinatura inválida são recusados; outros alvos continuam disponíveis               | Fixture nativa, inclusive após aprovação                 |
+| Recuperação                  | Após falha de identidade, nova listagem e captura funcionam; sobreposição, foco perdido, PID substituído e cancelamento conservam a recusa                            | Harness nativo + serviço existente                       |
+| Integração e observabilidade | Mesma fila de desktop/browser, confirmações críticas e FortiClient preservadas; falhas respondem ao agente e usam as métricas existentes                              | Contratos do driver/serviço, smoke App Server e Electron |
+| Segregação e interface       | Apenas janelas, imagens, certificados e projetos sintéticos; nenhuma conexão ao banco, SSO ou sessão da imagem; Chromium amplo/compacto/Pixel 7 sem mudança de layout | check + test:desktop + format:check                      |
+| Entrega                      | Revisão local antes de PR; Windows nativo e instalador sem publicação de release automática; artefato conferido após merge                                            | Jobs PR/main, test:windows e dist:win                    |
+
+Linux valida a estrutura real do PowerShell e o dispatcher com APIs gráficas simuladas; não comprova interação com o DBeaver instalado no Windows do cliente. Não há deploy web nesta correção.
+
+Evidência local: a fixture corrigida falhou com `Window allowlist failed` antes do ajuste do driver e passou depois com 644 verificações sintéticas. O parser e o C# de produção também foram validados com PowerShell 7.6.6, sem APIs gráficas. `npm run check` passou com 472 contratos, build, decoder/ASR reais, smoke Codex isolado e 84 cenários Chromium amplo/compacto/Pixel 7. `xvfb-run -a npm run test:desktop` passou com Electron real, recuperação, aprovações e isolamento. `format:check` e diff conferidos. O smoke registrou o bloqueio de namespaces bwrap desta sandbox; as verificações nativas Windows e o instalador continuam exigidos no PR/main. Nenhum script Bash foi alterado; os scripts PowerShell foram executados pelo harness e validados pelo parser correspondente.
 
 ## Branches dos projetos — versão 0.4.27
 
