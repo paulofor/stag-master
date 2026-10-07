@@ -17,6 +17,7 @@ import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
 import { DesktopTools } from "./desktop-tools";
 import { createDesktopControl } from "./desktop-indicator";
+import { TaskbarAttention } from "./taskbar-attention";
 import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
@@ -29,17 +30,20 @@ import {
 } from "./request-video";
 import { VideoAnalysisStore } from "./video-analysis";
 import { videoExtensions } from "../shared/request-video";
+import { build as packageBuild } from "../../package.json";
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "stag", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
 app.setName("STAG");
+if (process.platform === "win32") app.setAppUserModelId(packageBuild.appId);
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
 let window: BrowserWindow | null = null;
 let service: AssistantService | null = null;
 let browser: BrowserPanel | null = null;
 let desktopControl: ReturnType<typeof createDesktopControl> | null = null;
+let taskbarAttention: TaskbarAttention | null = null;
 let authorizationRevision = 0;
 const devUrl = !app.isPackaged ? process.env.STAG_DEV_URL : undefined;
 if (devUrl && devUrl !== "http://127.0.0.1:5173")
@@ -84,6 +88,7 @@ async function start(): Promise<void> {
   // Indicator windows must not keep the application alive after the conversation window closes.
   window.on("closed", () => app.quit());
   window.on("ready-to-show", () => window?.show());
+  taskbarAttention = new TaskbarAttention(window);
   browser = new BrowserPanel(window);
   const dataRoot = app.getPath("userData");
   const codexHome = join(dataRoot, "codex");
@@ -192,6 +197,7 @@ async function start(): Promise<void> {
   browser.on("state", (info) => service?.updateBrowser(info));
   service.updateBrowser(browser.snapshot());
   service.on("snapshot", (snapshot) => {
+    taskbarAttention?.update(snapshot);
     if (window && !window.isDestroyed()) window.webContents.send("stag:snapshot", snapshot);
   });
   function trusted(event: Electron.IpcMainInvokeEvent): void {
@@ -377,6 +383,7 @@ app.on("second-instance", () => {
 app.on("window-all-closed", () => app.quit());
 let quitting = false;
 app.on("before-quit", (event) => {
+  taskbarAttention?.dispose();
   if (quitting) return;
   event.preventDefault();
   service?.dispose();
