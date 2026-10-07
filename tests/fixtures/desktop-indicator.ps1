@@ -1,8 +1,10 @@
 param([Parameter(Mandatory = $true)][string]$ScriptPath,
-      [Parameter(Mandatory = $true)][long]$TargetHandle)
+      [Parameter(Mandatory = $true)][long]$TargetHandle,
+      [int]$TargetProcessId = 0,
+      [ValidateSet('inspect', 'preparePulse', 'verifyPulse')][string]$Mode = 'inspect')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-# Only this known synthetic Electron window is inspected/captured; no window enumeration or input.
+# Only this known synthetic Electron window is inspected/captured or prepared for the production gesture.
 Add-Type @'
 using System;
 using System.Text;
@@ -28,6 +30,24 @@ Add-Type -TypeDefinition $definition.Value -ReferencedAssemblies System,System.D
 [void][StagWindow]::SetProcessDPIAware()
 if ([StagWindow]::GetForegroundWindow() -ne $target) { throw 'Indicator took foreground away from fixture.' }
 $bounds = [StagWindow]::Bounds($target)
+if ($Mode -ne 'inspect') {
+    if ($TargetProcessId -le 0 -or [StagWindow]::WindowProcessId($target) -ne $TargetProcessId -or
+        [StagWindow]::ButtonsPressed()) { throw 'Synthetic pulse target unavailable.' }
+    $x = $bounds[0] + [int]($bounds[2] * 0.75)
+    $y = $bounds[1] + [int]($bounds[3] / 2)
+    if ([StagWindow]::GetAncestor([StagWindow]::WindowAt($x, $y), 2) -ne $target) {
+        throw 'Synthetic pulse target overlapped; no input.'
+    }
+    if ($Mode -eq 'preparePulse') {
+        if (-not [StagWindow]::SetCursorPos($x, $y)) { throw 'Synthetic cursor preparation failed.' }
+        '{"ready":true}'
+    } else {
+        $cursor = [StagWindow]::Cursor()
+        if ($cursor[0] -ne $x -or $cursor[1] -ne $y) { throw 'Production gesture did not restore cursor.' }
+        '{"restored":true}'
+    }
+    return
+}
 $points = @(@(2, [int]($bounds[3] / 2)), @(($bounds[2] - 3), [int]($bounds[3] / 2)),
             @([int]($bounds[2] / 2), 2), @([int]($bounds[2] / 2), ($bounds[3] - 3)),
             @([int]($bounds[2] / 2), [int]($bounds[3] / 2)))

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,8 +8,9 @@ import { expect } from "@playwright/test";
 
 export async function buildDesktopIndicatorHarness(dir) {
   await build({
-    entryPoints: ["src/main/desktop-indicator.ts"],
-    outfile: join(dir, "desktop-indicator.cjs"),
+    entryPoints: ["src/main/desktop-indicator.ts", "src/main/desktop-tools.ts"],
+    outdir: dir,
+    outExtension: { ".js": ".cjs" },
     bundle: true,
     platform: "node",
     format: "cjs",
@@ -256,6 +257,93 @@ export async function validateDesktopIndicator(application, page) {
     await running();
     assert.ok((await indicatorWindows()) > 0, "Movimento periódico usa o mesmo indicador.");
     assert.equal(await finish(), "ok");
+    if (process.platform === "win32") {
+      // Real gesture only on the exact, test-owned Electron window; no client windows or accounts.
+      await application.evaluate(async ({ WebContentsView }) => {
+        const h = global.desktopIndicatorHarness;
+        const view = new WebContentsView({
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+        });
+        h.target.contentView.addChildView(view);
+        const { width, height } = h.target.getContentBounds();
+        view.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height });
+        await view.webContents.loadURL(
+          "data:text/html,<title>Navegador sintetico</title><body style='background:ivory'>Pagina sintetica</body>",
+        );
+        h.pulseView = view;
+      });
+      const binding = await application.evaluate(() => ({
+        processId: process.pid,
+        handle: global.desktopIndicatorHarness.target
+          .getNativeWindowHandle()
+          .readBigUInt64LE()
+          .toString(),
+      }));
+      const probe = async (mode) => {
+        const result = await promisify(execFile)(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            resolve("tests/fixtures/desktop-indicator.ps1"),
+            "-ScriptPath",
+            resolve("native/windows-control.ps1"),
+            "-TargetHandle",
+            binding.handle,
+            "-TargetProcessId",
+            String(binding.processId),
+            "-Mode",
+            mode,
+          ],
+          {
+            windowsHide: true,
+            timeout: 60000,
+            maxBuffer: 1024 * 1024,
+            env: Object.fromEntries(
+              Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PSMODULEPATH"),
+            ),
+          },
+        );
+        return JSON.parse(result.stdout.replace(/^\uFEFF/, "").trim());
+      };
+      for (const embedded of [false, true]) {
+        await application.evaluate(
+          (_electron, embedded) => global.desktopIndicatorHarness.pulseView.setVisible(embedded),
+          embedded,
+        );
+        assert.deepEqual(await probe("preparePulse"), { ready: true });
+        const result = await application.evaluate(async () => {
+          const h = global.desktopIndicatorHarness;
+          const driver = new global.DesktopDriverHarness.DesktopTools(
+            require("node:path").join(
+              require("electron").app.getAppPath(),
+              "native/windows-control.ps1",
+            ),
+            "win32",
+            () => (h.target.isDestroyed() ? null : h.target.getNativeWindowHandle()),
+          );
+          const control = global.DesktopIndicatorHarness.createDesktopControl(
+            h.target,
+            driver,
+            h.indicator,
+          );
+          return control.pulseCursor(new AbortController().signal);
+        });
+        assert.deepEqual(
+          result,
+          { moved: true },
+          "Gesto de produção deve funcionar sobre a janela principal e o navegador filho.",
+        );
+        assert.deepEqual(await probe("verifyPulse"), { restored: true });
+        assert.equal(await indicatorWindows(), 0);
+      }
+      console.log(
+        "Movimento Windows nativo: driver de produção, HWND/PID do main, navegador filho, foco/retorno e bordas OK; somente janela sintética.",
+      );
+    }
     await begin();
     await running();
     await application.evaluate(() => global.desktopIndicatorHarness.control.dispose());
@@ -271,6 +359,7 @@ export async function validateDesktopIndicator(application, page) {
       h.control.dispose();
       h.release?.();
       await h.work;
+      h.pulseView?.webContents.close();
       h.target.destroy();
       h.host.restore();
       h.host.show();

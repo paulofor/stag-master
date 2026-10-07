@@ -28,6 +28,7 @@ import {
   desktopConfirmationReason,
   type DesktopArguments,
   type ToolResult,
+  type CursorPulseResult,
 } from "../../src/main/desktop-tools";
 import {
   browserConfirmationReason,
@@ -79,7 +80,9 @@ const desktop = {
     contentItems: [{ type: "inputText" as const, text: "[]" }],
   })),
 };
-const pulseCursor = vi.fn(async (_signal: AbortSignal) => ({ moved: true }));
+const pulseCursor = vi.fn(async (_signal: AbortSignal): Promise<CursorPulseResult> => ({
+  moved: true,
+}));
 const browser = {
   execute: vi.fn(async (_args: BrowserArguments): Promise<ToolResult> => ({
     success: true,
@@ -291,6 +294,36 @@ describe("movimento periódico do mouse", () => {
     await vi.advanceTimersByTimeAsync(300000);
     expect(service.snapshot().mouseMovement.moves).toBe(1);
   });
+  it.each([
+    ["unverified_target", "use STAG"],
+    ["forticlient", "FortiClient não recebe movimento automático"],
+    ["buttons_pressed", "botão do mouse pressionado"],
+    ["cursor_outside", "cursor fora da janela ativa"],
+    ["target_changed", "janela, foco ou destino mudou"],
+    ["pointer_busy", "mouse em uso"],
+  ] as const)(
+    "explica %s e recupera no intervalo seguinte, sem alterar métricas LLM",
+    async (reason, text) => {
+      await enable();
+      const metrics = service.snapshot().metrics;
+      pulseCursor.mockResolvedValueOnce({ moved: false, reason });
+      await vi.advanceTimersByTimeAsync(300000);
+      expect(service.snapshot().mouseMovement).toMatchObject({
+        enabled: true,
+        moves: 0,
+        skipped: 1,
+        status: expect.stringContaining(text),
+      });
+      await vi.advanceTimersByTimeAsync(300000);
+      expect(service.snapshot().mouseMovement).toEqual({
+        enabled: true,
+        moves: 1,
+        skipped: 1,
+        status: "Mouse movido · próximo em 5 min",
+      });
+      expect(service.snapshot().metrics).toEqual(metrics);
+    },
+  );
   it.each(["disable", "stop", "newChat", "revoke", "connect", "disconnect", "dispose"] as const)(
     "descarta intervalos ao %s",
     async (action) => {
@@ -405,6 +438,7 @@ describe("movimento periódico do mouse", () => {
     await vi.advanceTimersByTimeAsync(300000);
     expect(pulseCursor).not.toHaveBeenCalled();
     expect(service.snapshot().mouseMovement.skipped).toBe(1);
+    expect(service.snapshot().mouseMovement.status).toContain("aguardando aprovação");
     await approve(false);
     await service.request({ type: "stop" });
     await vi.advanceTimersByTimeAsync(300000);

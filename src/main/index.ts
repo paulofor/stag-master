@@ -105,7 +105,9 @@ async function start(): Promise<void> {
   const codexBinary = join(codexRoot, "bin", process.platform === "win32" ? "codex.exe" : "codex");
   const desktop = createDesktopControl(
     window,
-    new DesktopTools(join(resourceRoot, "native/windows-control.ps1")),
+    new DesktopTools(join(resourceRoot, "native/windows-control.ps1"), process.platform, () =>
+      window && !window.isDestroyed() ? window.getNativeWindowHandle() : null,
+    ),
   );
   desktopControl = desktop;
   service = new AssistantService({
@@ -275,7 +277,7 @@ async function start(): Promise<void> {
         title: "Movimento periódico do mouse",
         message: "Mover o mouse a cada cinco minutos nesta conversa?",
         detail:
-          "O cursor se desloca até 2 pixels e retorna quando o alvo continua válido, sem cliques, teclas ou troca de foco. Funciona somente sobre Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano, sem botões do mouse pressionados. FortiClient e outros aplicativos são omitidos. Continua com o STAG minimizado; desligar, parar, desconectar, trocar de conversa ou fechar encerra os movimentos. Não garante impedir suspensão, bloqueio ou expiração de sessões e não altera políticas do Windows.",
+          "O cursor se desloca até 2 pixels e retorna quando o alvo continua válido, sem cliques, teclas ou troca de foco. Funciona sobre a janela principal do STAG, inclusive o navegador integrado, ou Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano, sem botões do mouse pressionados. O cursor precisa estar sobre essa janela. FortiClient e outros aplicativos são omitidos; o painel informa o motivo. Continua com o STAG minimizado; desligar, parar, desconectar, trocar de conversa ou fechar encerra os movimentos. Não garante impedir suspensão, bloqueio ou expiração de sessões e não altera políticas do Windows.",
         buttons: ["Cancelar", "Ativar movimento"],
         defaultId: 0,
         cancelId: 0,
