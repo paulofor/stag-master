@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-07 — Indicador de controle Windows em 0.4.30: main cria bordas azuis por monitor durante ações nativas na fila compartilhada, sem foco/entrada ou dados do alvo na camada. Operações e inspeções do subprocesso agora recebem cancelamento; limpeza aguarda close. Falhas, mudança de monitor/DPI, parada e encerramento removem a camada. Fonte: solicitação do cliente e `desktop-indicator.ts`; validação com janelas sintéticas, sem desktop do cliente.
+
 2026-10-07 — Cópia formatada de respostas em 0.4.29: renderer reconstrói o Markdown exibido com elementos/estilos fixos e links HTTP(S) sem credenciais, entrega HTML e texto simples no evento nativo de cópia por clique/teclado. Sem leitura do clipboard ou nova ponte IPC; inclui atualizações em andamento e histórico. Harness verifica clipboard e colagem em documento sintético no Electron, sem conta Google ou turno pago. Fonte: solicitação do cliente, `copy-response.ts` e matriz de homologação.
 
 2026-10-07 — Corrigida a leitura de identidade dos aplicativos do desktop em 0.4.28: Get-Process fornece metadados por MainModule.FileVersionInfo. O acesso direto a FileVersionInfo rejeitava os aplicativos permitidos, e a fixture ocultava o erro com uma propriedade inexistente. O harness passa a conferir sua estrutura contra o próprio processo PowerShell, com falha fechada e recuperação quando os metadados retornam. Fonte: inspeção local do PowerShell, driver e matriz de homologação; sem acesso ao DBeaver/banco do cliente.

@@ -15,6 +15,10 @@ import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
+import {
+  buildDesktopIndicatorHarness,
+  validateDesktopIndicator,
+} from "./test-desktop-indicator.mjs";
 
 await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
@@ -42,6 +46,7 @@ async function stagWindow(application) {
 try {
   site = await startBrowserSite();
   await buildBrowserHarness(dir);
+  await buildDesktopIndicatorHarness(dir);
   const gitTest = await gitFixture(dir);
   const nestedRepository = join(project, "equipe", "frontend ação");
   await gitTest.init(project);
@@ -78,7 +83,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -301,6 +306,7 @@ try {
     "Vídeo no Electron: seleção nativa, decoder real, reload, remoção e referência antiga recusada OK.",
   );
   await validateResponseCopy(application, page);
+  await validateDesktopIndicator(application, page);
   const imageInput = page.getByLabel("Mensagem para o assistente");
   await application.evaluate(async ({ clipboard }) =>
     clipboard.writeText("Tarefa sintética colada"),

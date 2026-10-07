@@ -253,10 +253,15 @@ export function windowsPowerShellEnvironment(
 }
 
 export class DesktopTools {
+  private invocations = new Set<AbortController>();
+
   constructor(
     private script: string,
     private platform = process.platform,
   ) {}
+  cancel(): void {
+    for (const controller of this.invocations) controller.abort();
+  }
   async confirmationReason(raw: unknown): Promise<string | null> {
     const input = desktopArguments.parse(raw);
     const reason = desktopConfirmationReason(input);
@@ -290,8 +295,30 @@ export class DesktopTools {
     } = {},
     signal?: AbortSignal,
   ): Promise<{ stdout: string }> {
+    const controller = new AbortController();
+    this.invocations.add(controller);
+    try {
+      return await this.invokeProcess(
+        input,
+        context,
+        signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+      );
+    } finally {
+      this.invocations.delete(controller);
+    }
+  }
+  private async invokeProcess(
+    input: DesktopArguments | { action: "nudge_cursor" },
+    context: {
+      stagCheckOnly?: true;
+      stagCriticalApproved?: true;
+      stagPeriodicMovement?: true;
+    },
+    signal: AbortSignal,
+  ): Promise<{ stdout: string }> {
     if (this.platform !== "win32")
       throw new Error("Controle de desktop disponível somente no Windows.");
+    signal.throwIfAborted();
     // JSON goes through stdin, never interpolated in shell or PowerShell code.
     // Context is owned by main; the strict public schema rejects these internal approval markers.
     const encoded = Buffer.from(JSON.stringify({ ...input, ...context }), "utf8").toString(
@@ -365,13 +392,13 @@ export class DesktopTools {
     );
     return cursorPulseSchema.parse(JSON.parse(result.stdout.replace(/^\uFEFF/, "")));
   }
-  async execute(raw: unknown, approved = false): Promise<ToolResult> {
+  async execute(raw: unknown, approved = false, signal?: AbortSignal): Promise<ToolResult> {
     const input = desktopArguments.parse(raw);
     if (input.action === "open_forticlient" && approved !== true)
       throw new Error(
         "A abertura do FortiClient exige confirmação específica. Nenhum console foi aberto.",
       );
-    const result = await this.invoke(input, approved ? { stagCriticalApproved: true } : {});
+    const result = await this.invoke(input, approved ? { stagCriticalApproved: true } : {}, signal);
     if (input.action === "open_forticlient") {
       z.object({ opened: z.literal(true) })
         .strict()

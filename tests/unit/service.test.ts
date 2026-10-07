@@ -70,6 +70,7 @@ const backgroundVideo: BackgroundVideoProcessor = {
   validate: vi.fn(),
 };
 const desktop = {
+  cancel: vi.fn(),
   confirmationReason: vi.fn(async (args: unknown) =>
     desktopConfirmationReason(args as DesktopArguments),
   ),
@@ -3530,7 +3531,9 @@ describe("fluxo local do assistente", () => {
       accept: true,
     });
     await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+    const canceledBefore = desktop.cancel.mock.calls.length;
     await service.request({ type: "stop" });
+    expect(desktop.cancel.mock.calls.length).toBeGreaterThan(canceledBefore);
     await complete();
     await service.request({ type: "newChat" });
     fail(new Error("Falha antiga de desktop."));
@@ -3539,6 +3542,41 @@ describe("fluxo local do assistente", () => {
     expect(service.snapshot().approvals).toEqual([]);
     expect(service.snapshot().items).toEqual([]);
   });
+  it.each(["stop", "disconnect", "connect", "dispose"])(
+    "cancela desktop ativo ao %s e aguarda limpeza na fila",
+    async (action) => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      let release!: () => void;
+      let canceled = false;
+      desktop.execute.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        throw new Error("resultado antigo sintético");
+      });
+      await send("desktop paralelo");
+      await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
+      desktop.cancel.mockImplementationOnce(() => {
+        canceled = true;
+      });
+      if (action === "stop") await service.request({ type: "stop" });
+      if (action === "disconnect") rpc.close();
+      if (action === "connect") await service.request({ type: "connect" });
+      if (action === "dispose") service.dispose();
+      await vi.waitFor(() => expect(canceled).toBe(true));
+      let settled = false;
+      const cleanup = service.mediaSettled().then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      release();
+      await cleanup;
+      expect(desktop.execute).toHaveBeenCalledOnce();
+      expect(service.snapshot().error).not.toBe("resultado antigo sintético");
+    },
+  );
   it("consentimento não migra para outra conversa Windows", async () => {
     await ready();
     await service.request({ type: "preferences", mode: "windows", windowsConsent: true });

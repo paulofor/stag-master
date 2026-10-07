@@ -15,7 +15,8 @@ import { pathToFileURL } from "node:url";
 import { RpcClient } from "./rpc";
 import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
-import { desktopArguments, DesktopTools, withoutAssistantWindow } from "./desktop-tools";
+import { DesktopTools } from "./desktop-tools";
+import { createDesktopControl } from "./desktop-indicator";
 import { codexEnvironment } from "./policy";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
@@ -38,6 +39,7 @@ if (!singleInstance) app.quit();
 let window: BrowserWindow | null = null;
 let service: AssistantService | null = null;
 let browser: BrowserPanel | null = null;
+let desktopControl: ReturnType<typeof createDesktopControl> | null = null;
 let authorizationRevision = 0;
 const devUrl = !app.isPackaged ? process.env.STAG_DEV_URL : undefined;
 if (devUrl && devUrl !== "http://127.0.0.1:5173")
@@ -79,6 +81,8 @@ async function start(): Promise<void> {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => event.preventDefault());
+  // Indicator windows must not keep the application alive after the conversation window closes.
+  window.on("closed", () => app.quit());
   window.on("ready-to-show", () => window?.show());
   browser = new BrowserPanel(window);
   const dataRoot = app.getPath("userData");
@@ -89,7 +93,11 @@ async function start(): Promise<void> {
     ? join(resourceRoot, "codex")
     : join(resourceRoot, ".local/codex");
   const codexBinary = join(codexRoot, "bin", process.platform === "win32" ? "codex.exe" : "codex");
-  const desktop = new DesktopTools(join(resourceRoot, "native/windows-control.ps1"));
+  const desktop = createDesktopControl(
+    window,
+    new DesktopTools(join(resourceRoot, "native/windows-control.ps1")),
+  );
+  desktopControl = desktop;
   service = new AssistantService({
     createRpc: () =>
       new RpcClient({
@@ -131,15 +139,7 @@ async function start(): Promise<void> {
     openExternal: async (url) => {
       await shell.openExternal(url);
     },
-    desktop: {
-      confirmationReason: (raw) => desktop.confirmationReason(raw),
-      execute: (raw, approved) => {
-        const input = desktopArguments.parse(raw);
-        return ["screenshot", "click", "scroll"].includes(input.action)
-          ? withoutAssistantWindow(window, () => desktop.execute(input, approved))
-          : desktop.execute(input, approved);
-      },
-    },
+    desktop,
     pulseCursor: (signal) => desktop.pulseCursor(signal),
     browser,
     video: {
@@ -380,6 +380,7 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   service?.dispose();
+  desktopControl?.dispose();
   browser?.dispose();
   void (service?.mediaSettled() || Promise.resolve()).finally(() => {
     quitting = true;

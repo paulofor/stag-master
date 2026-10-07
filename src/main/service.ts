@@ -99,7 +99,8 @@ interface Options {
   branches?: ProjectBranchManager;
   confirmBranchDeletion?: (project: string, branch: string) => Promise<boolean>;
   openExternal: (url: string) => Promise<void>;
-  desktop: Pick<DesktopTools, "execute" | "confirmationReason">;
+  desktop: Pick<DesktopTools, "execute" | "confirmationReason"> &
+    Partial<Pick<DesktopTools, "cancel">>;
   pulseCursor?: (signal: AbortSignal) => Promise<CursorPulseResult>;
   browser?: {
     execute: (args: BrowserArguments) => Promise<ToolResult>;
@@ -684,6 +685,7 @@ export class AssistantService extends EventEmitter {
           if (action.remember === this.state.browser.remember) break;
           // End authority immediately, then wait for the shared queue before replacing storage.
           this.toolEpoch++;
+          this.options.desktop.cancel?.();
           this.state.browser.authorized = false;
           this.browserConsentThread = null;
           this.contextInstructionsDirty = true;
@@ -1076,6 +1078,7 @@ export class AssistantService extends EventEmitter {
     if (this.state.queuedMessages.length || this.state.busy || this.sending)
       this.state.queuePaused = true;
     this.toolEpoch++;
+    this.options.desktop.cancel?.();
     this.options.browser?.cancel();
     this.stopping = false;
     this.toolRequests.clear();
@@ -1108,6 +1111,7 @@ export class AssistantService extends EventEmitter {
       this.branchController?.abort();
       this.disableMouseMovement();
       this.toolEpoch++;
+      this.options.desktop.cancel?.();
       this.options.browser?.cancel();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1233,6 +1237,7 @@ export class AssistantService extends EventEmitter {
     this.disableMouseMovement();
     this.analysis?.detach();
     this.toolEpoch++;
+    this.options.desktop.cancel?.();
     this.clearVideo();
     this.clearMessageQueue();
     this.toolRequests.clear();
@@ -1268,6 +1273,7 @@ export class AssistantService extends EventEmitter {
         "Abra uma nova conversa para usar o navegador neste histórico anterior à versão 0.4.",
       );
     this.toolEpoch++;
+    this.options.desktop.cancel?.();
     this.state.browser.authorized = allow;
     this.contextInstructionsDirty = true;
     this.browserConsentThread = allow ? this.state.threadId : null;
@@ -1355,6 +1361,7 @@ export class AssistantService extends EventEmitter {
     if (this.state.threadId !== id) {
       this.disableMouseMovement();
       this.toolEpoch++;
+      this.options.desktop.cancel?.();
       this.toolRequests.clear();
       this.state.browser.authorized = false;
       this.browserConsentThread = null;
@@ -1565,6 +1572,7 @@ export class AssistantService extends EventEmitter {
     this.analysis?.detach();
     this.state.queuePaused = true;
     this.toolEpoch++;
+    this.options.desktop.cancel?.();
     this.options.browser?.cancel();
     if (!this.state.busy) return;
     if (!this.turnId || !this.state.threadId)
@@ -1731,6 +1739,7 @@ export class AssistantService extends EventEmitter {
         if (!this.state.busy || !turn.id) return;
         if (this.turnId && turn.id !== this.turnId) return;
         this.toolEpoch++;
+        this.options.desktop.cancel?.();
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -2061,6 +2070,7 @@ export class AssistantService extends EventEmitter {
     this.projectPreparation.abort();
     this.branchController?.abort();
     this.toolEpoch++;
+    this.options.desktop.cancel?.();
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();
