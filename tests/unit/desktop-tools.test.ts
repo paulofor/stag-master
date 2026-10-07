@@ -43,7 +43,10 @@ describe("movimento fixo pertencente ao main", () => {
     await expect(
       new DesktopTools("unused", "win32").pulseCursor(controller.signal),
     ).resolves.toEqual({ moved: true });
-    expect(runScript.mock.calls[0][2].signal).toBe(controller.signal);
+    const received = runScript.mock.calls[0][2].signal as AbortSignal;
+    expect(received.aborted).toBe(false);
+    controller.abort();
+    expect(received.aborted).toBe(true);
     expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
       action: "nudge_cursor",
       stagPeriodicMovement: true,
@@ -77,6 +80,58 @@ describe("movimento fixo pertencente ao main", () => {
     close();
     await work;
     expect(settled).toBe(true);
+  });
+});
+
+describe("interrupção do subprocesso desktop", () => {
+  it("aborta a execução e aguarda close antes de permitir a limpeza", async () => {
+    let close!: () => void;
+    let received!: AbortSignal;
+    runScript.mockImplementationOnce((_command, _args, options) => {
+      received = options.signal;
+      return Object.assign(
+        new Promise((_resolve, reject) => {
+          received.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        }),
+        {
+          child: {
+            stdin,
+            once: (_event: string, listener: () => void) => {
+              close = listener;
+            },
+          },
+        },
+      );
+    });
+    const driver = new DesktopTools("unused", "win32");
+    let settled = false;
+    const work = driver.execute({ action: "list_windows" }).catch(() => {
+      settled = true;
+    });
+    driver.cancel();
+    expect(received.aborted).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    close();
+    await work;
+    expect(settled).toBe(true);
+    await expect(driver.execute({ action: "list_windows" })).resolves.toMatchObject({
+      success: true,
+    });
+    expect(runScript).toHaveBeenCalledTimes(2);
+  });
+  it("não inicia processo com sinal já cancelado", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      new DesktopTools("unused", "win32").execute(
+        { action: "list_windows" },
+        false,
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+    expect(runScript).not.toHaveBeenCalled();
   });
 });
 
