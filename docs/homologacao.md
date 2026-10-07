@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.28
+# Matriz de homologação da versão 0.4.29
+
+## Copiar respostas para documentos — versão 0.4.29
+
+Matriz definida antes dos testes. O botão existente copiava somente o Markdown original, não aparecia nas respostas em andamento e ocultava falhas da área de transferência. O harness não verificava o conteúdo copiado nem a colagem formatada. A cópia deve incluir HTML limitado à formatação da resposta e texto simples legível, pelo gesto explícito do usuário, sem leitura do clipboard pelo produto ou nova ponte IPC.
+
+| Área                     | Cenário e aceite                                                                                                                                                                | Evidência prevista                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Caminho feliz            | Ícone em cada resposta final, em andamento e retomada; copiar somente aquela resposta, sem rótulo STAG ou botões; títulos, negrito, listas, links, tabelas e código preservados | Chromium e Electron com clipboard nativo e documento editável sintético |
+| Texto simples            | Colagem em textarea legível sem marcadores de Markdown; listas, linhas de código, acentos e células preservados                                                                 | E2E e clipboard nativo                                                  |
+| Validações e segurança   | HTML bruto, scripts, eventos, imagens remotas, URLs com credenciais e controles interativos não passam à cópia; somente estilos fixos; nenhuma consulta externa                 | Conteúdo adversarial inerte e rede observada                            |
+| Falhas e recuperação     | Clipboard indisponível informa falha sem alegar Copiado; tentativa seguinte funciona; nova cópia substitui a anterior; atualização e troca de contexto removem feedback antigo  | E2E com falha controlada, streaming e retomada                          |
+| Integração e métricas    | Cópia não envia turno, não muda aprovações, fila, modo, consentimentos, rascunho ou métricas; preload continua sem API de leitura do clipboard                                  | Snapshots e Electron real                                               |
+| Interface e dispositivos | Botão visível, acessível por teclado e com confirmação breve; conversa única preservada, sem overflow em amplo, compacto e Pixel 7                                              | E2E e screenshots                                                       |
+| Segregação e entrega     | Somente respostas, clipboard, documento, projeto e CODEX_HOME sintéticos; check, test:desktop, formatação e diff antes do PR; Windows nativo e instalador no PR/main            | Harness local e jobs Windows                                            |
+
+O documento de teste usa contenteditable e colagem nativa. Isso comprova os formatos transportados, sem acessar conta ou documento real do Google Drive; o editor de destino decide os detalhes finais da formatação. Linux não comprova clipboard nativo Windows, que deve passar também no job Windows. Não há deploy web neste fluxo.
+
+A exportação usa o [evento copy](https://developer.mozilla.org/en-US/docs/Web/API/Element/copy_event) síncrono e a política de permissões existente. `execCommand("copy")` é uma [API deprecada](https://developer.mozilla.org/en-US/docs/Web/API/Document/execCommand), validada no Chromium/Electron fixado; atualizar o runtime exige preservar este teste nativo. O produto não pede acesso de leitura ao clipboard. O harness usa a [API atual do Electron](https://www.electronjs.org/docs/latest/api/clipboard), `read()`/`ClipboardItem`, somente para conferir dados sintéticos no processo de teste.
+
+Evidência local: a regressão inicial encontrou apenas dois botões para três respostas e passou após a correção. Typecheck, 472 contratos, build, decoder/ASR reais e handshake/schema do Codex isolado passaram nas etapas de `npm run check`. A primeira execução de interface teve colisão de limpeza de traces por duas rodadas simultâneas; a suíte final foi executada sozinha e aprovou 94 cenários, incluindo histórico, cópia formatada, preservação de indentação/numeração, falhas e recuperação. `xvfb-run -a npm run test:desktop` passou com clipboard real, colagem nativa em documento editável e textarea, progresso, cópia manual, recuperação e snapshots/métricas inalterados. Sintaxe JavaScript, formatação, screenshots e diff conferidos; nenhum script shell alterado. Node 22.12.0, respostas/projetos/CODEX_HOME sintéticos e nenhuma inferência paga. O bloqueio local de namespaces bwrap foi declarado pelo smoke; Windows nativo e instalador continuam exigidos nos jobs do PR/main.
 
 ## Reconhecimento do DBeaver aberto — versão 0.4.28
 
