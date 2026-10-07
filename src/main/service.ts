@@ -32,6 +32,9 @@ import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
 import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
 import { prepareProjectGit, projectGitInstructions, GitFailure } from "./project-git";
 import { projectSourcesContext } from "./project-sources";
+import type { DatabaseConnections } from "./database-connections";
+import { databaseTestError } from "./database-errors";
+import type { SqlServerTester } from "./sqlserver";
 import {
   ProjectBranchManager,
   projectBranchesContext,
@@ -114,6 +117,7 @@ interface Options {
     setVisible: (visible: boolean) => void;
   };
   platform?: string;
+  databases?: { connections: DatabaseConnections; test: SqlServerTester };
   video?: VideoProcessor;
   videoAnalysis?: { store: VideoAnalysisStore; processor: BackgroundVideoProcessor };
 }
@@ -175,6 +179,10 @@ export class AssistantService extends EventEmitter {
   private projectPreparation = new AbortController();
   private branches: ProjectBranchManager;
   private branchController: AbortController | null = null;
+  private databasesReady = false;
+  private databaseAbort: AbortController | null = null;
+  private databaseWork: Promise<void> = Promise.resolve();
+  private databaseTestIds = new Set<string>();
   private videoPreparation: AbortController | null = null;
   private videoWork: Promise<void> = Promise.resolve();
   private preparedVideo: PreparedVideo | null = null;
@@ -399,6 +407,17 @@ export class AssistantService extends EventEmitter {
       }
     }
     this.restoreBrowserProfile();
+    this.databasesReady = false;
+    try {
+      await this.options.databases?.connections.init();
+      this.databasesReady = !!this.options.databases;
+      this.refreshDatabases();
+    } catch {
+      this.state.projectDatabases = null;
+      this.state.error =
+        "Não foi possível carregar as conexões salvas. Os demais recursos continuam disponíveis.";
+      this.state.metrics.failures++;
+    }
     try {
       await this.analysis?.init();
     } catch (error) {
@@ -421,7 +440,7 @@ export class AssistantService extends EventEmitter {
     const disablingMouse = action.type === "mouseMovement" && !action.enabled;
     if (
       this.changing &&
-      !["stop", "answer", "removeVideo"].includes(action.type) &&
+      !["stop", "answer", "removeVideo", "cancelDatabaseTest"].includes(action.type) &&
       !revokingBrowser &&
       !disablingMouse
     )
@@ -432,6 +451,10 @@ export class AssistantService extends EventEmitter {
         "logout",
         "selectProject",
         "projectSources",
+        "listDatabases",
+        "saveDatabase",
+        "deleteDatabase",
+        "testDatabase",
         "listBranches",
         "changeBranch",
         "browserSession",
@@ -460,6 +483,43 @@ export class AssistantService extends EventEmitter {
     this.state.error = null;
     try {
       switch (action.type) {
+        case "listDatabases":
+          this.databaseProject(action.projectPath);
+          this.refreshDatabases();
+          break;
+        case "saveDatabase": {
+          const database = this.databaseProject(action.projectPath);
+          await database.connections.save(
+            action.projectPath,
+            action.revision,
+            action.connectionId,
+            action.config,
+            action.password,
+            action.rememberPassword,
+          );
+          this.refreshDatabases();
+          break;
+        }
+        case "deleteDatabase": {
+          const database = this.databaseProject(action.projectPath);
+          await database.connections.remove(
+            action.projectPath,
+            action.revision,
+            action.connectionId,
+          );
+          this.refreshDatabases();
+          break;
+        }
+        case "testDatabase":
+          await this.testDatabase(action);
+          break;
+        case "cancelDatabaseTest":
+          this.databaseProject(action.projectPath);
+          if (this.state.projectDatabases?.test?.id !== action.testId)
+            throw new Error("Esse teste já terminou ou pertence a outra solicitação.");
+          this.databaseAbort?.abort();
+          await this.databaseWork;
+          break;
         case "listBranches":
         case "changeBranch": {
           const path = this.state.project?.path;
@@ -760,6 +820,83 @@ export class AssistantService extends EventEmitter {
     this.videoPreparation = null;
     this.preparedVideo = null;
     this.state.pendingVideo = null;
+  }
+  private refreshDatabases(): void {
+    this.state.projectDatabases =
+      this.state.project && this.databasesReady
+        ? this.options.databases!.connections.snapshot(this.state.project.path)
+        : null;
+  }
+  private databaseProject(path: string) {
+    if (!this.state.project || this.state.project.path !== path)
+      throw new Error("O projeto mudou. Reabra Conexões na pasta desejada.");
+    if (!this.options.databases || !this.databasesReady)
+      throw new Error(
+        "Conexões indisponíveis. Reinicie o STAG para tentar carregar a configuração.",
+      );
+    return this.options.databases;
+  }
+  private async testDatabase(action: Extract<Action, { type: "testDatabase" }>): Promise<void> {
+    const database = this.databaseProject(action.projectPath);
+    if (this.databaseTestIds.has(action.testId)) return;
+    if (this.analysis?.working || this.videoPreparation || this.state.approvals.length)
+      throw new Error("Pause a análise e conclua as ações pendentes antes de testar a conexão.");
+    const password = database.connections.password(
+      action.projectPath,
+      action.revision,
+      action.connectionId,
+      action.config,
+      action.password,
+    );
+    this.databaseTestIds.add(action.testId);
+    if (this.databaseTestIds.size > 100)
+      this.databaseTestIds.delete(this.databaseTestIds.values().next().value!);
+    const controller = new AbortController();
+    this.databaseAbort = controller;
+    const epoch = this.toolEpoch;
+    this.state.projectDatabases!.test = {
+      id: action.testId,
+      status: "testing",
+      message: "Testando conexão…",
+    };
+    this.publish();
+    const execution = this.toolQueue.then(async () => {
+      const started = Date.now();
+      try {
+        if (controller.signal.aborted || this.disposed || epoch !== this.toolEpoch)
+          throw new Error();
+        await database.test(action.config, password, controller.signal);
+        if (controller.signal.aborted || epoch !== this.toolEpoch) throw new Error();
+        if (!controller.signal.aborted && !this.disposed && epoch === this.toolEpoch)
+          this.state.projectDatabases!.test = {
+            id: action.testId,
+            status: "success",
+            message: "Conexão validada. O teste não altera dados e a sessão foi fechada.",
+            elapsedMs: Date.now() - started,
+          };
+      } catch (error) {
+        if (
+          !this.disposed &&
+          this.state.project?.path === action.projectPath &&
+          this.state.projectDatabases?.test?.id === action.testId
+        ) {
+          const canceled = controller.signal.aborted || epoch !== this.toolEpoch;
+          this.state.projectDatabases!.test = {
+            id: action.testId,
+            status: canceled ? "canceled" : "error",
+            message: canceled ? "Teste de conexão cancelado." : databaseTestError(error),
+            elapsedMs: Date.now() - started,
+          };
+          if (!canceled) this.state.metrics.failures++;
+        }
+      } finally {
+        if (this.databaseAbort === controller) this.databaseAbort = null;
+        this.publish();
+      }
+    });
+    this.databaseWork = execution;
+    this.toolQueue = execution.catch(() => {});
+    await execution;
   }
   private async selectVideo(): Promise<void> {
     if (!this.options.video || !this.state.project)
@@ -1073,6 +1210,7 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.databaseAbort?.abort();
     this.disableMouseMovement();
     this.analysis?.detach();
     this.rejectAnalysisTurn();
@@ -1109,6 +1247,7 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.databaseAbort?.abort();
       this.branchController?.abort();
       this.disableMouseMovement();
       this.toolEpoch++;
@@ -1217,6 +1356,7 @@ export class AssistantService extends EventEmitter {
     this.branches.clear();
     this.state.projectBranches = null;
     this.state.projectSources = this.settings.projectSources[path] || [];
+    this.refreshDatabases();
     this.restoreBrowserProfile();
     this.settings.project = path;
     await this.options.store.save(this.settings);
@@ -1262,6 +1402,7 @@ export class AssistantService extends EventEmitter {
     this.state.metrics.elapsedMs = 0;
   }
   private async browserConsent(allow: boolean): Promise<void> {
+    if (!allow) this.databaseAbort?.abort();
     if (!this.options.browser) throw new Error("Navegador disponível somente no STAG desktop.");
     if (!allow) {
       this.state.queuePaused = true;
@@ -1568,6 +1709,8 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    const databaseWork = this.databaseAbort ? this.databaseWork : null;
+    this.databaseAbort?.abort();
     this.branchController?.abort();
     this.disableMouseMovement();
     this.analysis?.detach();
@@ -1575,7 +1718,10 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.browser?.cancel();
-    if (!this.state.busy) return;
+    if (!this.state.busy) {
+      if (databaseWork) await databaseWork;
+      return;
+    }
     if (!this.turnId || !this.state.threadId)
       throw new Error("A execução está iniciando. Tente parar em instantes.");
     this.stopping = true;
@@ -1584,6 +1730,7 @@ export class AssistantService extends EventEmitter {
     this.publish();
     try {
       await this.call("turn/interrupt", { threadId: this.state.threadId, turnId: this.turnId });
+      if (databaseWork) await databaseWork;
     } catch (error) {
       // An uncertain interrupt must not leave an agent waiting on discarded requests.
       this.rpc?.close();
@@ -2062,6 +2209,7 @@ export class AssistantService extends EventEmitter {
     this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
   }
   dispose(): void {
+    this.databaseAbort?.abort();
     this.disableMouseMovement();
     this.disposed = true;
     this.analysis?.dispose();
@@ -2079,6 +2227,7 @@ export class AssistantService extends EventEmitter {
   }
   async mediaSettled(): Promise<void> {
     await this.toolQueue;
+    if (this.options.databases) await this.options.databases.connections.settled();
     await this.videoWork;
     await this.analysis?.settled();
   }

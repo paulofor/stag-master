@@ -6,6 +6,7 @@ import {
   nativeImage,
   net,
   protocol,
+  safeStorage,
   session,
   shell,
 } from "electron";
@@ -15,6 +16,8 @@ import { pathToFileURL } from "node:url";
 import { RpcClient } from "./rpc";
 import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
+import { DatabaseConnections } from "./database-connections";
+import { testSqlServer } from "./sqlserver";
 import { DesktopTools } from "./desktop-tools";
 import { createDesktopControl } from "./desktop-indicator";
 import { TaskbarAttention } from "./taskbar-attention";
@@ -128,6 +131,17 @@ async function start(): Promise<void> {
         },
       }),
     store: new SettingsStore(join(dataRoot, "settings.json")),
+    databases: {
+      connections: new DatabaseConnections(join(dataRoot, "database-connections.json"), {
+        available: () =>
+          safeStorage.isEncryptionAvailable() &&
+          (process.platform !== "linux" ||
+            safeStorage.getSelectedStorageBackend() !== "basic_text"),
+        encrypt: (value) => safeStorage.encryptString(value),
+        decrypt: (value) => safeStorage.decryptString(value),
+      }),
+      test: testSqlServer,
+    },
     confirmBranchDeletion: async (project, branch) => {
       const result = await dialog.showMessageBox(window!, {
         type: "warning",

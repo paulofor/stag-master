@@ -9,6 +9,32 @@ permissions:
   contents: read
 
 jobs:
+  sqlserver:
+    name: SQL Server connection contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-CU22-ubuntu-22.04@sha256:db9a8fe3098b7e8bbde41106bdc7caee942e97124e5fdb71b872ca208de3092d
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: "Stag-Synthetic-Only!23"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Stag-Synthetic-Only!23' -C -Q 'SELECT 1' -b"
+          --health-interval 5s --health-timeout 10s --health-start-period 60s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --include=dev
+      - run: npm run test:sqlserver
+        env:
+          STAG_SQLSERVER_TEST_PORT: "1433"
   server:
     name: Trace server contracts
     runs-on: ubuntu-latest

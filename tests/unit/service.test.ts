@@ -626,8 +626,8 @@ describe("vídeo para as anotações do projeto", () => {
 });
 describe("vídeo em segundo plano na conversa", () => {
   async function analyzed() {
-    await vi.waitFor(() => expect(service.snapshot().videoAnalysis?.status).toBe("completed"));
     await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis?.status).toBe("completed");
   }
   async function calls() {
     return rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");

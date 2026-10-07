@@ -1,0 +1,45 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-CU22-ubuntu-22.04@sha256:db9a8fe3098b7e8bbde41106bdc7caee942e97124e5fdb71b872ca208de3092d
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      # Synthetic test instance only; never a client or production credential.
+      MSSQL_SA_PASSWORD: "Stag-Synthetic-Only!23"
+    ports:
+      - "127.0.0.1:15433:1433"
+    mem_limit: 3g
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/mssql-tools18/bin/sqlcmd",
+          "-S",
+          "localhost",
+          "-U",
+          "sa",
+          "-P",
+          "Stag-Synthetic-Only!23",
+          "-C",
+          "-Q",
+          "SELECT 1",
+          "-b",
+        ]
+      interval: 5s
+      timeout: 10s
+      start_period: 60s
+      retries: 20
+    volumes:
+      - sqlserver-test:/var/opt/mssql
+  contracts:
+    build:
+      context: ../..
+      dockerfile: tests/fixtures/sqlserver.Dockerfile
+    network_mode: "service:sqlserver"
+    environment:
+      STAG_SQLSERVER_TEST_PORT: "1433"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+volumes:
+  sqlserver-test:

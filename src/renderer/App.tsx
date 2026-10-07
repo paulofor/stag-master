@@ -9,6 +9,7 @@ import {
   CircleHelp,
   Code2,
   Copy,
+  Database,
   FileCode2,
   Folder,
   FolderOpen,
@@ -36,6 +37,7 @@ import { AboutDialog } from "./AboutDialog";
 import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
 import { ProjectBranchesDialog } from "./ProjectBranchesDialog";
+import { DatabaseConnectionsDialog } from "./DatabaseConnectionsDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
@@ -116,6 +118,7 @@ export function App() {
   const [windowsDialog, setWindowsDialog] = useState(false);
   const [sourcesDialog, setSourcesDialog] = useState(false);
   const [branchesDialog, setBranchesDialog] = useState(false);
+  const [databasesDialog, setDatabasesDialog] = useState(false);
   const [aboutDialog, setAboutDialog] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [browserFocused, setBrowserFocused] = useState(false);
@@ -130,6 +133,7 @@ export function App() {
   useEffect(clearImages, [clearImages, state.project?.path, state.account?.email]);
   useEffect(() => setSourcesDialog(false), [state.project?.path]);
   useEffect(() => setBranchesDialog(false), [state.project?.path]);
+  useEffect(() => setDatabasesDialog(false), [state.project?.path]);
   useEffect(() => {
     if (state.approvals.length) setBrowserFocused(false);
   }, [state.approvals.length]);
@@ -154,7 +158,10 @@ export function App() {
         return false;
       }
       setError(null);
-      const preparation = action.type === "selectVideo" || action.type === "removeVideo";
+      const preparation =
+        action.type === "selectVideo" ||
+        action.type === "removeVideo" ||
+        action.type === "cancelDatabaseTest";
       if (!preparation) setPending(true);
       try {
         const before = stateRef.current;
@@ -414,6 +421,21 @@ export function App() {
           >
             <GitBranch size={14} />
             <span>Branches</span>
+          </button>
+          <button
+            className="project-sources-button database-button"
+            aria-label="Conexões com banco de dados"
+            title="Configurar e testar conexões SQL Server deste projeto"
+            disabled={!state.project || disabledContext || !!analysisRunning}
+            onClick={() => {
+              setMenu(null);
+              setError(null);
+              setDatabasesDialog(true);
+              void run({ type: "listDatabases", projectPath: state.project!.path });
+            }}
+          >
+            <Database size={14} />
+            <span>Conexões</span>
           </button>
           <span className="connection" title={state.account?.email || "Codex App Server local"}>
             <span
@@ -1032,6 +1054,18 @@ export function App() {
           </div>
         )}
         {aboutDialog && <AboutDialog close={() => setAboutDialog(false)} />}
+        {databasesDialog && state.project && (
+          <DatabaseConnectionsDialog
+            key={state.project.path}
+            projectPath={state.project.path}
+            projectName={state.project.name}
+            data={state.projectDatabases}
+            pending={pending}
+            error={visibleError}
+            run={run}
+            close={() => setDatabasesDialog(false)}
+          />
+        )}
         {branchesDialog && state.project && (
           <ProjectBranchesDialog
             key={state.project.path}
@@ -1075,7 +1109,7 @@ export function App() {
           projectPath={state.project?.path}
           busy={state.busy}
           pending={pending}
-          obscured={sourcesDialog || branchesDialog || aboutDialog}
+          obscured={sourcesDialog || branchesDialog || databasesDialog || aboutDialog}
           run={run}
           backToChat={() => setBrowserFocused(false)}
         />
