@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.30
+# Matriz de homologação da versão 0.4.31
+
+## Atenção na barra de tarefas — versão 0.4.31
+
+Matriz definida antes dos testes. Perguntas e aprovações pendentes do serviço devem marcar o ícone do STAG com um círculo âmbar e exclamação, com descrição acessível e título “Aguardando sua resposta”. Em segundo plano/minimizado, solicitar também o destaque nativo da barra de tarefas, sem ativar a janela. Focar encerra o destaque, mas mantém o sinal até responder ou recusar. A indicação usa somente estado estruturado do main, sem interpretar texto da conversa ou conceder permissões.
+
+Lacuna observada: o harness cobre os cards, mas não o aviso de espera fora do painel. Ampliar os testes existentes com APIs Electron reais e snapshots/requests sintéticos, sem contas ou janelas do cliente. Reutilizar as aprovações e a recuperação do serviço; não criar outro executor ou IPC.
+
+| Área                         | Cenário e aceite                                                                                                                                       | Evidência prevista                        |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------- |
+| Caminho feliz                | Pergunta e aprovações de comando/arquivo/desktop/browser ativam o sinal em todos os modos; múltiplas pendências mantêm o aviso até a última resolução  | Unidade + serviço/Electron                |
+| Foco e minimização           | Segundo plano solicita destaque; foco encerra o destaque sem apagar a pendência; não restaura, ativa ou toma foco                                      | Doubles e Electron Windows                |
+| Validação e isolamento       | Trabalho comum, consentimento ocioso, fila de textos e respostas finais não ativam aviso; eventos antigos não criam pendências na conversa atual       | Estado e filtragem existentes do serviço  |
+| Recuperação                  | Resposta, recusa, parar, troca de conversa, desconexão e encerramento limpam o aviso; novo pedido funciona; snapshots repetidos não reiniciam destaque | Requests bidirecionais e Electron         |
+| Integração e observabilidade | Main é proprietário; ícone gerado no código e descrição fixa não incluem títulos/argumentos/dados; snapshot, fila e métricas preservados               | NativeImage e APIs de produção no harness |
+| Interface e segregação       | Painel único amplo/compacto/Pixel 7 preservado; somente dados e CODEX_HOME sintéticos; nenhuma inferência paga                                         | check e test:desktop                      |
+| Entrega                      | Revisão local, PR/main Linux e Windows, instalador 0.4.31; `--publish never` preservado                                                                | Desktop CI e artefato                     |
+
+O destaque e a sobreposição usam [flashFrame/setOverlayIcon do Electron](https://www.electronjs.org/docs/latest/api/browser-window); a aparência do destaque depende da configuração da barra de tarefas do Windows. Linux comprova a integração, sem comprovar a apresentação nativa Windows. As bordas azuis de controle já estão integradas pelo PR #37 e não aparecem durante espera por aprovação. Não há deploy web.
+
+Evidência local: `npm run check` passou com typecheck, 508 contratos (16 novos), build, decoder/ASR reais, handshake/schema Codex isolado e 94 cenários Chromium amplo/compacto/Pixel 7. `xvfb-run -a npm run test:desktop` passou com NativeImage real (pixels/alpha), chamadas nativas encaminhadas, ausência de ativação/foco, deduplicação, limpeza e requests ponta a ponta de pergunta, reload, resposta, aprovação, recusa, parada e conversa nova. Browser, fila, memória, reinícios e vídeos preservados. AppUserModelId Windows reutiliza o appId do instalador; typecheck/build revalidados após esse ajuste. Sintaxe JavaScript, formatação e diff conferidos; nenhum script shell alterado. O link Node padrão da sandbox apontava para um checkout removido; a execução usou a instalação estável em `/opt/stag-node/bin`. A limitação de namespaces bwrap Linux foi declarada pelo smoke; execução Windows, foco/minimização nativos, overlay e instalador continuam obrigatórios nos jobs PR/main. Sem conta/janela do cliente ou inferência paga; não se afirma aparência da barra Windows com base no Linux.
 
 ## Indicador visual do controle Windows — versão 0.4.30
 

@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-07 — Aviso de espera 0.4.31: TaskbarAttention recebe snapshots do main, cria ícone fixo no código e controla título/flashFrame/setOverlayIcon. Sem novo IPC, persistência ou executor. Usa perguntas e aprovações da conversa atual, limpa em resolução/recusa/interrupção/desconexão/troca/encerramento. Harness inclui NativeImage real, APIs Electron e fixture bidirecional isolada. Fonte: implementação e matriz desta solicitação; aparência nativa Windows depende do job correspondente.
+
 2026-10-07 — Indicador de controle Windows em 0.4.30: main cria bordas azuis por monitor durante ações nativas na fila compartilhada, sem foco/entrada ou dados do alvo na camada. Operações e inspeções do subprocesso agora recebem cancelamento; limpeza aguarda close. Falhas, mudança de monitor/DPI, parada e encerramento removem a camada. Fonte: solicitação do cliente e `desktop-indicator.ts`; validação com janelas sintéticas, sem desktop do cliente.
 
 2026-10-07 — Cópia formatada de respostas em 0.4.29: renderer reconstrói o Markdown exibido com elementos/estilos fixos e links HTTP(S) sem credenciais, entrega HTML e texto simples no evento nativo de cópia por clique/teclado. Sem leitura do clipboard ou nova ponte IPC; inclui atualizações em andamento e histórico. Harness verifica clipboard e colagem em documento sintético no Electron, sem conta Google ou turno pago. Fonte: solicitação do cliente, `copy-response.ts` e matriz de homologação.

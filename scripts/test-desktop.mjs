@@ -16,6 +16,12 @@ import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
 import {
+  buildTaskbarHarness,
+  installTaskbarProbe,
+  validateTaskbarAttention,
+  validateTaskbarService,
+} from "./test-taskbar-attention.mjs";
+import {
   buildDesktopIndicatorHarness,
   validateDesktopIndicator,
 } from "./test-desktop-indicator.mjs";
@@ -47,6 +53,7 @@ try {
   site = await startBrowserSite();
   await buildBrowserHarness(dir);
   await buildDesktopIndicatorHarness(dir);
+  await buildTaskbarHarness(dir);
   const gitTest = await gitFixture(dir);
   const nestedRepository = join(project, "equipe", "frontend ação");
   await gitTest.init(project);
@@ -83,7 +90,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -307,6 +314,7 @@ try {
   );
   await validateResponseCopy(application, page);
   await validateDesktopIndicator(application, page);
+  await validateTaskbarAttention(application, page);
   const imageInput = page.getByLabel("Mensagem para o assistente");
   await application.evaluate(async ({ clipboard }) =>
     clipboard.writeText("Tarefa sintética colada"),
@@ -832,6 +840,7 @@ try {
       false,
     );
   }
+  if (process.platform !== "win32") await validateTaskbarService(application, page);
   await validateBrowser(application, dir, site, page);
   // Check the renderer and its actual WebContentsView together with a wide local page.
   const originalSize = await application.evaluate(({ BrowserWindow }) => {
