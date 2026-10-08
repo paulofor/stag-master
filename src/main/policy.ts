@@ -6,8 +6,10 @@ import { projectSourcesInstructions } from "./project-sources";
 import { videoInstructions } from "../shared/request-video";
 import { browserSessionInstructions, browserCertificateInstructions } from "./browser-tools";
 import { apiInstructions } from "./http-tools";
+import { modelTrafficConfig, modelTrafficInstructions } from "./model-traffic";
 
 const baseInstructions = `${engineeringInstructions}
+${modelTrafficInstructions}
 ${apiInstructions}
 ${videoInstructions}
 ${cyberSafetyInstructions}
@@ -62,6 +64,7 @@ export function threadPolicy(mode: AccessMode, path: string): Record<string, unk
     sandbox:
       mode === "read" ? "read-only" : mode === "project" ? "workspace-write" : "danger-full-access",
     config: {
+      ...modelTrafficConfig,
       web_search: "live",
       sandbox_workspace_write: {
         network_access: true,
@@ -73,6 +76,7 @@ export function threadPolicy(mode: AccessMode, path: string): Record<string, unk
 
 export function turnPolicy(mode: AccessMode, path: string): Record<string, unknown> {
   return {
+    summary: "none",
     runtimeWorkspaceRoots: [path],
     approvalPolicy: "on-request",
     approvalsReviewer: "user",

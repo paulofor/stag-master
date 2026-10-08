@@ -25,6 +25,8 @@ import { createDesktopControl } from "./desktop-indicator";
 import { TaskbarAttention } from "./taskbar-attention";
 import { WaitingSound } from "./waiting-sound";
 import { codexEnvironment } from "./policy";
+import { modelTrafficArguments } from "./model-traffic";
+import { optimizeModelImage } from "./model-images";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
 import { BrowserPanel } from "./browser-panel";
@@ -123,6 +125,7 @@ async function start(): Promise<void> {
     decrypt: (value: Buffer) => safeStorage.decryptString(value),
   };
   service = new AssistantService({
+    optimizeImage: optimizeModelImage,
     createRpc: () =>
       new RpcClient({
         command: codexBinary,
@@ -132,6 +135,7 @@ async function start(): Promise<void> {
           "stdio://",
           "-c",
           "shell_environment_policy.ignore_default_excludes=false",
+          ...modelTrafficArguments,
           ...(process.platform === "win32" ? ["-c", 'windows.sandbox="unelevated"'] : []),
         ],
         env: {

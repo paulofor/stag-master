@@ -18,6 +18,9 @@ test("Sobre mostra crédito e versão sem login, contém o foco e pode ser reabe
   const dialog = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
   await expect(dialog).toContainText("Desenvolvido por: Paulo Forestieri");
   await expect(dialog).toContainText(`Versão ${appMetadata.version}`);
+  await expect(dialog).toContainText("Economia de dados ativa.");
+  await expect(dialog).toContainText("sem redimensionar");
+  await expect(dialog).toContainText("continua sendo enviado ao modelo");
   const close = dialog.getByRole("button", { name: "Fechar", exact: true });
   await expect(close).toBeFocused();
   await close.press("Tab");

@@ -33,9 +33,8 @@ try {
     platform: "node",
     format: "esm",
   });
-  const { prepareVideo, inspectVideo, prepareVideoSegment, validateVideoSource } = await import(
-    pathToFileURL(join(dir, "request-video.mjs")).href
-  );
+  const { prepareVideo, inspectVideo, prepareVideoSegment, validateVideoSource, videoImages } =
+    await import(pathToFileURL(join(dir, "request-video.mjs")).href);
   const file = join(dir, "projeto-sintetico.mp4");
   await run(ffmpeg, [
     "-v",
@@ -99,6 +98,16 @@ try {
   );
   assert.equal(video.summary.audio, "transcribed");
   assert.equal(video.frames.length, 3, "Vídeos curtos devem incluir início, meio e fim.");
+  const compact = videoImages(video);
+  assert.equal(compact.images.length, 1, "Quadros estáticos idênticos devem ser enviados uma vez");
+  assert.equal(compact.samples.length, video.frames.length);
+  assert.deepEqual(
+    compact.samples.map((sample) => sample.seconds),
+    video.frames.map((frame) => frame.seconds),
+  );
+  console.log(
+    `Vídeo estático sintético: ${Buffer.byteLength(JSON.stringify(video.frames.map((frame) => frame.image)))} → ${Buffer.byteLength(JSON.stringify(compact))} bytes de imagens/referências, fala preservada.`,
+  );
   assert.equal(video.frames[0].seconds, 0);
   assert.ok(video.frames.at(-1).seconds >= 5.5);
   assert.ok(

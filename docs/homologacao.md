@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.36
+# Matriz de homologação da versão 0.4.37
+
+## Redução de dados enviados ao modelo — versão 0.4.37
+
+Matriz definida antes dos testes. Lacunas observadas: imagens PNG seguem sem compressão adaptativa, vídeos reenviam quadros idênticos, o contrato completo de fontes é repetido em cada turno e o subprocesso do STAG não fixa controles de telemetria/resposta. O harness confere conteúdo, mas não compara bytes. Reduzir esses dados sem mudar modelo/esforço, transcrição, dimensões das imagens, coordenadas, políticas, consentimentos, histórico ou fila. A compressão JPEG pode alterar pixels; conservar PNG quando mais compacto ou transparente. Não prometer percentual fixo nem confundir bytes locais com tráfego TLS total, tokens ou treinamento.
+
+| Área                   | Cenário e aceite                                                                                                                                                                     | Evidência prevista                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Configuração           | Telemetria/exportadores desligados somente no App Server do STAG; respostas concisas e sem resumo de raciocínio em start/resume/turn; não editar config/auth do usuário              | Política de produção e Codex real com provedor loopback        |
+| Imagens                | PNG/JPEG otimizados apenas quando menores, dimensões e transparência preservadas; decoder nativo e limites antes da conversão; falha sanitizada, rascunho recuperável                | Electron NativeImage, pixels sintéticos, paste e captura reais |
+| Vídeos                 | Quadros exatamente idênticos enviados uma vez por trecho; cada tempo mantém referência à imagem correta; transcrição integral limitada preservada, sem cache entre conversas/trechos | Decoder real, contratos e envio pelo serviço/Codex             |
+| Contexto e ferramentas | Fontes atuais e capacidade em todo turno, contrato abreviado mantém limites e recuperação; texto do cliente e resultados não truncados silenciosamente                               | Fixtures de fontes, start/resume, fila e aprovações            |
+| Observabilidade        | Medir bytes dos payloads sintéticos antes/depois; explicar economia automática e compressão na interface, sem exportar métricas nem conteúdo                                         | Harness local e interface                                      |
+| Isolamento e falhas    | Leitura, projeto/conta/conversa, recusa, cancelamento, interrupção e reconexão preservados; nenhuma conta ou inferência paga                                                         | Harness determinístico + Electron                              |
+| Interface e entrega    | Painel único amplo/compacto/Pixel 7; check, test:desktop, format:check e diff local; Windows e instalador no PR/main                                                                 | Playwright, jobs e artefato 0.4.37                             |
+
+Linux não comprova Windows nativo. O provedor loopback mede o corpo recebido do Codex real, sem interceptar TLS nem acessar credenciais do cliente. O App Server continua responsável pelo histórico e transporte com o provedor; reduzir os anexos não elimina o envio necessário para inferência.
+
+A rodada local de `check` passou com 625 contratos, build, decoder/ASR, handshake/schema do Codex real e 126 cenários Chromium amplo/compacto/Pixel 7. O vídeo estático sintético reduziu imagens/referências de 22.615 para 7.639 bytes (aproximadamente 66%); fala e tempos foram preservados. No NativeImage/Electron, o PNG sintético 1280×720 passou de 1.122.606 para 158.975 bytes de data URL (aproximadamente 86%), com dimensões, transparência, erro médio de pixels, recusa e recuperação verificados. Esses casos não medem todo o tráfego de rede nem garantem legibilidade semântica.
+
+A colagem nativa pelo renderer/preload/serviço reproduziu duplicação da mensagem: a prévia guardava PNG, mas o evento autoritativo devolvia JPEG. Corrigida a prévia para usar a mesma codificação do envio, mantendo o rascunho original em falha. Nova regressão confere mensagem única, retomada sem nova compressão e ausência de turno em falha; 241 contratos relacionados, typecheck e build revalidados. O conjunto passa a 626 contratos. `xvfb-run -a npm run test:desktop` passou após a correção, incluindo compressão pelo IPC/serviço, colagem e retomada reais, falhas/recusas, fila e reinícios. Screenshots amplo/mobile, sintaxe JavaScript, formatação e diff conferidos; nenhum script shell alterado. Node 22 instalado somente no workspace; executáveis compartilhados preservados. Limitações de namespaces bwrap/Linux e Windows nativo mantidas; os jobs Windows do PR/main verificam o driver e o instalador antes da conclusão.
 
 ## Estado visível da análise e vídeo direto do disco — versão 0.4.36
 

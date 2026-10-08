@@ -32,6 +32,7 @@ try {
       "src/main/project-branches.ts",
       "src/main/project-sources.ts",
       "src/main/request-video.ts",
+      "src/main/model-traffic.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -46,11 +47,14 @@ try {
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
   );
-  const { videoContext, videoMessage } = await import(
+  const { videoContext, videoMessage, videoImages } = await import(
     pathToFileURL(join(dir, "request-video.mjs")).href
   );
   const { assistantInstructions, threadPolicy, turnPolicy, codexEnvironment } = await import(
     pathToFileURL(join(dir, "policy.mjs")).href
+  );
+  const { modelTrafficArguments } = await import(
+    pathToFileURL(join(dir, "model-traffic.mjs")).href
   );
   const binary = resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex");
   const { prepareProjectGit, createGitRunner, projectGitInstructions } = await import(
@@ -106,6 +110,7 @@ try {
       "app-server",
       "--listen",
       "stdio://",
+      ...modelTrafficArguments,
       "-c",
       'model_provider="stag_image_fixture"',
       "-c",
@@ -124,6 +129,12 @@ try {
     env: smokeEnvironment,
   });
   await rpc.start();
+  const trafficSettings = (await rpc.call("config/read", { includeLayers: false })).config;
+  assert.equal(trafficSettings.analytics.enabled, false);
+  assert.equal(trafficSettings.feedback.enabled, false);
+  for (const key of ["exporter", "trace_exporter", "metrics_exporter"])
+    assert.equal(trafficSettings.otel[key], "none");
+  assert.equal(trafficSettings.otel.log_user_prompt, false);
   const account = await rpc.call("account/read", { refreshToken: false });
   assert.equal(account.account, null);
   const models = await rpc.call("model/list", { limit: 20, includeHidden: false });
@@ -205,6 +216,14 @@ try {
     { type: "text", text: "Analise a imagem sintética do sistema." },
     { type: "image", url: imageFixture.dataUrl },
   ]);
+  function verifyTrafficSettings() {
+    const traffic = provider.traffic.at(-1);
+    assert.ok(traffic.bytes > 0);
+    assert.ok(!traffic.reasoning?.summary || traffic.reasoning.summary === "none");
+    // Some models do not support a verbosity override; the selected model still comes from model/list.
+    if (traffic.text?.verbosity) assert.equal(traffic.text.verbosity, "low");
+  }
+  verifyTrafficSettings();
   assert.ok(
     JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
       sources[0].url,
@@ -243,16 +262,16 @@ try {
       id: "22222222-2222-4222-8222-222222222222",
       name: "video-sintetico.mp4",
       seconds: 10,
-      frames: 1,
+      frames: 3,
       audio: "transcribed",
     },
-    frames: [{ seconds: 5, image: { dataUrl: imageFixture.dataUrl } }],
+    frames: [0, 5, 9].map((seconds) => ({ seconds, image: { dataUrl: imageFixture.dataUrl } })),
     transcript: [{ start: 0, end: 5, text: "Regra sintética: pedidos requerem aprovação." }],
   };
   await syntheticTurn(
     [
       { type: "text", text: videoMessage(syntheticVideo) },
-      { type: "image", url: imageFixture.dataUrl },
+      ...videoImages(syntheticVideo).images.map((image) => ({ type: "image", url: image.dataUrl })),
     ],
     sources,
     false,
@@ -265,15 +284,24 @@ try {
   assert.ok(videoDelivered.includes(syntheticVideo.transcript[0].text));
   assert.ok(videoDelivered.includes("Só afirme memorização após gravar e reler"));
   assert.ok(videoDelivered.includes(syntheticVideo.summary.id));
+  const latestImages = provider.inputs
+    .at(-1)
+    .filter((item) => item.role === "user")
+    .at(-1)
+    .content.filter((item) => item.type === "input_image");
+  assert.equal(latestImages.length, 1, "Codex real recebe um único quadro idêntico por envio");
+  verifyTrafficSettings();
   syntheticVideo.summary.seconds = 601;
   syntheticVideo.summary.segment = { index: 1, total: 3, start: 300, end: 600 };
-  syntheticVideo.frames[0].seconds = 305;
+  syntheticVideo.frames.forEach((frame) => {
+    frame.seconds += 300;
+  });
   syntheticVideo.transcript[0].start = 300;
   syntheticVideo.transcript[0].end = 305;
   await syntheticTurn(
     [
       { type: "text", text: videoMessage(syntheticVideo) },
-      { type: "image", url: imageFixture.dataUrl },
+      ...videoImages(syntheticVideo).images.map((image) => ({ type: "image", url: image.dataUrl })),
     ],
     sources,
     false,
@@ -371,6 +399,7 @@ try {
     updatedSources,
     true,
   );
+  verifyTrafficSettings();
   assert.ok(
     JSON.stringify({
       input: provider.inputs.at(-1),
