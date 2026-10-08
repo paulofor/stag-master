@@ -57,6 +57,65 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         request: async (action: Action) => {
           state.error = null;
           switch (action.type) {
+            case "listApis":
+              state.projectApis ||= {
+                revision: crypto.randomUUID(),
+                connections: [],
+                canRemember: true,
+                authorized: false,
+                operation: null,
+                metrics: { requests: 0, failures: 0, elapsedMs: 0, lastStatus: null },
+              };
+              break;
+            case "saveApi": {
+              const apis = state.projectApis!;
+              const entry = {
+                id: action.connectionId || crypto.randomUUID(),
+                config: action.config,
+                remember: action.remember,
+                credentialAvailable:
+                  !!action.secret ||
+                  !!apis.connections.find((entry) => entry.id === action.connectionId)
+                    ?.credentialAvailable,
+                authenticated: action.config.auth.type !== "oauth2",
+              };
+              apis.connections = action.connectionId
+                ? apis.connections.map((old) => (old.id === action.connectionId ? entry : old))
+                : [...apis.connections, entry];
+              apis.revision = crypto.randomUUID();
+              apis.authorized = false;
+              apis.operation = null;
+              break;
+            }
+            case "deleteApi":
+              state.projectApis!.connections = state.projectApis!.connections.filter(
+                (entry) => entry.id !== action.connectionId,
+              );
+              state.projectApis!.revision = crypto.randomUUID();
+              state.projectApis!.authorized = false;
+              break;
+            case "apiConsent":
+              state.projectApis!.authorized = action.allow;
+              break;
+            case "authenticateApi":
+              state.projectApis!.operation = {
+                id: crypto.randomUUID(),
+                connectionId: action.connectionId,
+                status: "success",
+                message: "API autenticada. As credenciais permanecem no STAG.",
+              };
+              state.projectApis!.connections.find(
+                (entry) => entry.id === action.connectionId,
+              )!.authenticated = true;
+              break;
+            case "cancelApiLogin":
+              state.projectApis!.operation = {
+                id: action.operationId,
+                connectionId: state.projectApis!.operation!.connectionId,
+                status: "canceled",
+                message: "Login da API cancelado.",
+              };
+              break;
             case "listDatabases":
               state.projectDatabases ||= {
                 revision: crypto.randomUUID(),

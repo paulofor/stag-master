@@ -18,6 +18,8 @@ import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
 import { DatabaseConnections } from "./database-connections";
 import { testSqlServer } from "./sqlserver";
+import { ApiConnections } from "./api-connections";
+import { HttpTools } from "./http-tools";
 import { DesktopTools } from "./desktop-tools";
 import { createDesktopControl } from "./desktop-indicator";
 import { TaskbarAttention } from "./taskbar-attention";
@@ -113,6 +115,13 @@ async function start(): Promise<void> {
     ),
   );
   desktopControl = desktop;
+  const secretStorage = {
+    available: () =>
+      safeStorage.isEncryptionAvailable() &&
+      (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
+    encrypt: (value: string) => safeStorage.encryptString(value),
+    decrypt: (value: Buffer) => safeStorage.decryptString(value),
+  };
   service = new AssistantService({
     createRpc: () =>
       new RpcClient({
@@ -131,15 +140,17 @@ async function start(): Promise<void> {
         },
       }),
     store: new SettingsStore(join(dataRoot, "settings.json")),
+    apis: new HttpTools(
+      new ApiConnections(join(dataRoot, "api-connections.json"), secretStorage),
+      async (url) => {
+        await shell.openExternal(url);
+      },
+    ),
     databases: {
-      connections: new DatabaseConnections(join(dataRoot, "database-connections.json"), {
-        available: () =>
-          safeStorage.isEncryptionAvailable() &&
-          (process.platform !== "linux" ||
-            safeStorage.getSelectedStorageBackend() !== "basic_text"),
-        encrypt: (value) => safeStorage.encryptString(value),
-        decrypt: (value) => safeStorage.decryptString(value),
-      }),
+      connections: new DatabaseConnections(
+        join(dataRoot, "database-connections.json"),
+        secretStorage,
+      ),
       test: testSqlServer,
     },
     confirmBranchDeletion: async (project, branch) => {
@@ -263,6 +274,9 @@ async function start(): Promise<void> {
         "browserConsent",
         "browserVisibility",
         "browserSession",
+        "apiConsent",
+        "saveApi",
+        "deleteApi",
         "analyzeVideo",
         "videoAnalysis",
         "mouseMovement",
@@ -301,6 +315,29 @@ async function start(): Promise<void> {
         throw new Error(
           "A conversa ou autorização mudou durante a confirmação. Ative novamente na conversa atual.",
         );
+    }
+    if (action.type === "apiConsent" && action.allow) {
+      const snapshot = service!.snapshot();
+      if (
+        snapshot.project?.path !== action.projectPath ||
+        snapshot.projectApis?.revision !== action.revision ||
+        snapshot.busy
+      )
+        throw new Error("Confira o projeto e pare a execução antes de autorizar APIs.");
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "question",
+        title: "Autorizar APIs",
+        message: "Permitir consultas autenticadas a estas APIs nesta conversa?",
+        detail: `${snapshot.projectApis.connections.map((entry) => `${entry.config.name}: ${entry.config.baseUrl}`).join("\n")}\n\nO STAG usará as credenciais cadastradas, sem entregá-las ao assistente. As respostas das APIs serão enviadas ao ChatGPT. Requisições com efeitos exigem confirmação específica. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra esta autorização.`,
+        buttons: ["Cancelar", "Autorizar APIs"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error("O contexto mudou durante a confirmação. Confira e autorize novamente.");
     }
     if (action.type === "videoAnalysis" && action.control === "retry") {
       const summary = service!.snapshot().videoAnalysis;

@@ -15,6 +15,7 @@ import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
+import { validateApiConnections } from "./test-apis.mjs";
 import { validateDatabaseConnections } from "./test-databases.mjs";
 import {
   buildTaskbarHarness,
@@ -36,6 +37,7 @@ let application;
 let site;
 let backgroundSaved;
 let savedDatabases;
+let savedApis;
 async function stagWindow(application) {
   // Playwright also reports WebContentsView pages as windows. During profile restore,
   // the initial temporary page is replaced; firstWindow() can return that closing page.
@@ -234,6 +236,7 @@ try {
   assert.equal(repeatedGit.verified, 2);
   await validateProjectBranches(application, page, project, nestedRepository, gitTest);
   savedDatabases = await validateDatabaseConnections(application, page, project, data, site.url);
+  savedApis = await validateApiConnections(application, page, project, data);
   // Real main/preload persistence works without an account or browser consent on both platforms.
   const source = { name: "Documentação sintética", url: site.url };
   await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();
@@ -996,6 +999,8 @@ try {
   const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
   assert.deepEqual(restarted.projectSources, [source]);
   assert.deepEqual(restarted.projectDatabases.connections, savedDatabases);
+  assert.deepEqual(restarted.projectApis.connections, savedApis);
+  assert.equal(restarted.projectApis.authorized, false);
   assert.equal(restarted.browser.authorized, false);
   if (backgroundSaved) {
     assert.equal(restarted.videoAnalysis.id, backgroundSaved.id);

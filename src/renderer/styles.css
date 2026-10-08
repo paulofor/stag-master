@@ -1839,3 +1839,17 @@ summary::-webkit-details-marker {
     gap: 0;
   }
 }
+
+.api-consent {
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.api-consent p {
+  margin-top: 0;
+  font-size: 13px;
+}
+.api-dialog code {
+  overflow-wrap: anywhere;
+}

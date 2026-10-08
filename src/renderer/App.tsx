@@ -10,6 +10,7 @@ import {
   Code2,
   Copy,
   Database,
+  Network,
   FileCode2,
   Folder,
   FolderOpen,
@@ -38,6 +39,7 @@ import { ProjectGitStatus } from "./ProjectGitStatus";
 import { ProjectSourcesDialog } from "./ProjectSourcesDialog";
 import { ProjectBranchesDialog } from "./ProjectBranchesDialog";
 import { DatabaseConnectionsDialog } from "./DatabaseConnectionsDialog";
+import { ApiConnectionsDialog } from "./ApiConnectionsDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
 import { readPastedImage } from "./request-images";
@@ -119,6 +121,7 @@ export function App() {
   const [sourcesDialog, setSourcesDialog] = useState(false);
   const [branchesDialog, setBranchesDialog] = useState(false);
   const [databasesDialog, setDatabasesDialog] = useState(false);
+  const [apisDialog, setApisDialog] = useState(false);
   const [aboutDialog, setAboutDialog] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [browserFocused, setBrowserFocused] = useState(false);
@@ -134,6 +137,7 @@ export function App() {
   useEffect(() => setSourcesDialog(false), [state.project?.path]);
   useEffect(() => setBranchesDialog(false), [state.project?.path]);
   useEffect(() => setDatabasesDialog(false), [state.project?.path]);
+  useEffect(() => setApisDialog(false), [state.project?.path]);
   useEffect(() => {
     if (state.approvals.length) setBrowserFocused(false);
   }, [state.approvals.length]);
@@ -161,7 +165,9 @@ export function App() {
       const preparation =
         action.type === "selectVideo" ||
         action.type === "removeVideo" ||
-        action.type === "cancelDatabaseTest";
+        action.type === "cancelDatabaseTest" ||
+        action.type === "cancelApiLogin" ||
+        (action.type === "apiConsent" && !action.allow);
       if (!preparation) setPending(true);
       try {
         const before = stateRef.current;
@@ -289,6 +295,8 @@ export function App() {
           !pending &&
           !sourcesDialog &&
           !branchesDialog &&
+          !databasesDialog &&
+          !apisDialog &&
           !windowsDialog &&
           !aboutDialog
         ) {
@@ -302,7 +310,17 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [run, state.busy, pending, sourcesDialog, branchesDialog, windowsDialog, aboutDialog]);
+  }, [
+    run,
+    state.busy,
+    pending,
+    sourcesDialog,
+    branchesDialog,
+    databasesDialog,
+    apisDialog,
+    windowsDialog,
+    aboutDialog,
+  ]);
   const chosenModel = state.models.find((m) => m.model === state.model);
   const disabledContext = state.busy || pending;
   const visibleError = error || state.error;
@@ -436,6 +454,24 @@ export function App() {
           >
             <Database size={14} />
             <span>Conexões</span>
+          </button>
+          <button
+            className="project-sources-button api-button"
+            aria-label="APIs HTTP e HTTPS"
+            title="Configurar autenticação e autorizar APIs neste projeto"
+            disabled={!state.project || pending}
+            onClick={() => {
+              setMenu(null);
+              setError(null);
+              setApisDialog(true);
+              void run({ type: "listApis", projectPath: state.project!.path });
+            }}
+          >
+            <Network size={14} />
+            <span>APIs</span>
+            {state.projectApis?.authorized && (
+              <span className="status-dot online" aria-label="APIs autorizadas" />
+            )}
           </button>
           <span className="connection" title={state.account?.email || "Codex App Server local"}>
             <span
@@ -1054,6 +1090,19 @@ export function App() {
           </div>
         )}
         {aboutDialog && <AboutDialog close={() => setAboutDialog(false)} />}
+        {apisDialog && state.project && (
+          <ApiConnectionsDialog
+            key={state.project.path}
+            projectPath={state.project.path}
+            projectName={state.project.name}
+            data={state.projectApis}
+            pending={pending}
+            busy={state.busy}
+            error={visibleError}
+            run={run}
+            close={() => setApisDialog(false)}
+          />
+        )}
         {databasesDialog && state.project && (
           <DatabaseConnectionsDialog
             key={state.project.path}
@@ -1109,7 +1158,7 @@ export function App() {
           projectPath={state.project?.path}
           busy={state.busy}
           pending={pending}
-          obscured={sourcesDialog || branchesDialog || databasesDialog || aboutDialog}
+          obscured={sourcesDialog || branchesDialog || databasesDialog || apisDialog || aboutDialog}
           run={run}
           backToChat={() => setBrowserFocused(false)}
         />

@@ -1,6 +1,7 @@
 import type { PendingVideo, VideoAnalysisSummary } from "./request-video";
 import type { BranchOperation, ProjectBranches } from "./project-branches";
 import type { ProjectDatabases, SqlServerConfig } from "./database-connections";
+import type { ApiAction, ProjectApis } from "./api-connections";
 export type AccessMode = "read" | "project" | "windows";
 export type RpcId = number | string;
 export interface Model {
@@ -63,7 +64,7 @@ export interface Question {
 }
 export interface Approval {
   id: string;
-  kind: "command" | "file" | "desktop" | "browser" | "questions";
+  kind: "command" | "file" | "desktop" | "browser" | "http" | "questions";
   title: string;
   detail: string;
   questions?: Question[];
@@ -77,6 +78,7 @@ export interface Snapshot {
   projectSources: DocumentationSource[];
   projectBranches: ProjectBranches | null;
   projectDatabases: ProjectDatabases | null;
+  projectApis: ProjectApis | null;
   models: Model[];
   model: string;
   effort: string;
@@ -119,6 +121,7 @@ export const emptySnapshot: Snapshot = {
   projectSources: [],
   projectBranches: null,
   projectDatabases: null,
+  projectApis: null,
   models: [],
   model: "",
   effort: "",
@@ -151,6 +154,7 @@ export const emptySnapshot: Snapshot = {
   },
 };
 export type Action =
+  | ApiAction
   | { type: "connect" }
   | { type: "login" }
   | { type: "cancelLogin" }
