@@ -111,6 +111,8 @@ export class VideoAnalysisManager {
   private controller: AbortController | null = null;
   private work: Promise<void> = Promise.resolve();
   private phase = "";
+  private stage: VideoAnalysisSummary["stage"] = "idle";
+  private phaseStartedAt: number | null = null;
   private errors = new Map<string, string>();
   private disposed = false;
   private initialized = false;
@@ -150,6 +152,8 @@ export class VideoAnalysisManager {
       total: Math.ceil(job.source.seconds / videoSegmentSeconds),
       status: job.status,
       working: this.active === job,
+      stage: this.active === job ? this.stage : "idle",
+      phaseStartedAt: this.active === job ? this.phaseStartedAt : null,
       phase:
         this.active === job
           ? this.phase
@@ -159,9 +163,17 @@ export class VideoAnalysisManager {
               ? "Análise cancelada. As anotações já verificadas são preservadas."
               : job.status === "uncertain"
                 ? "Envio não confirmado. Confira o histórico antes de retomar ou reprocessar este trecho."
-                : "Progresso salvo. Retome com o arquivo original disponível.",
+                : job.status === "failed"
+                  ? "Análise interrompida por falha. Confira o erro antes de retomar."
+                  : "Análise pausada. Use Retomar análise com o arquivo original disponível.",
       error: this.errors.get(job.id) || null,
     };
+  }
+  private setPhase(stage: VideoAnalysisSummary["stage"], phase: string): void {
+    if (this.stage !== stage || this.phase !== phase) this.phaseStartedAt = Date.now();
+    this.stage = stage;
+    this.phase = phase;
+    this.hooks.changed();
   }
   private owns(job: VideoAnalysisJob): boolean {
     const context = this.hooks.context();
@@ -220,7 +232,7 @@ export class VideoAnalysisManager {
       }
       job.status = "cancelled";
       this.controller?.abort();
-      this.phase = "Cancelando e limpando o trecho atual…";
+      this.setPhase("stopping", "Cancelando e limpando o trecho atual…");
       await this.save();
       this.hooks.changed();
       if (this.active === job || job.pending) await this.hooks.interrupt(job);
@@ -240,9 +252,12 @@ export class VideoAnalysisManager {
     if (!job || job.status === "cancelled") return;
     job.status = "paused";
     this.controller?.abort();
-    this.phase = job.pending
-      ? "Pausa solicitada; concluindo o trecho atual…"
-      : "Pausando e limpando o trecho atual…";
+    this.setPhase(
+      "stopping",
+      job.pending
+        ? "Pausa solicitada; concluindo o trecho atual…"
+        : "Pausando e limpando o trecho atual…",
+    );
     void this.save().catch((error) => {
       this.errors.set(job.id, (error as Error).message);
       this.hooks.failure((error as Error).message);
@@ -252,8 +267,7 @@ export class VideoAnalysisManager {
   private launch(job: VideoAnalysisJob, retry: boolean): void {
     this.active = job;
     job.status = "running";
-    this.phase = "Conferindo o arquivo original e o progresso salvo…";
-    this.hooks.changed();
+    this.setPhase("checking", "Conferindo o arquivo original e o progresso salvo…");
     this.work = this.work.then(() => this.run(job, retry)).catch(() => {});
   }
   private async advance(job: VideoAnalysisJob, turn: AnalysisTurn): Promise<void> {
@@ -281,7 +295,7 @@ export class VideoAnalysisManager {
     }
     if (job.pending) job.pending.turnId = turn.id;
     if (job.status !== "cancelled") job.status = turn.status === "failed" ? "failed" : "paused";
-    this.phase = "O trecho não foi concluído. Confira a conversa antes de retomar.";
+    this.setPhase("stopping", "O trecho não foi concluído. Confira a conversa antes de retomar.");
     await this.save();
     this.hooks.changed();
     return false;
@@ -292,11 +306,13 @@ export class VideoAnalysisManager {
       await this.processor.validate(job.source, this.controller.signal);
       if (!this.owns(job) || job.status !== "running") return;
       if (job.pending) {
+        this.setPhase("recovering", "Conferindo o trecho enviado no histórico…");
         const previous = await this.hooks.recover(job);
         if (previous?.status === "inProgress") {
-          this.phase =
-            "Aguardando o trecho em andamento no histórico. Use Parar execução se ele não avançar.";
-          this.hooks.changed();
+          this.setPhase(
+            "recovering",
+            "Aguardando o trecho em andamento no histórico. Use Parar execução se ele não avançar.",
+          );
           if (!(await this.finish(job, await this.hooks.waitTurn(job, previous)))) return;
         } else if (previous?.status === "completed") await this.advance(job, previous);
         else if (previous || retry) {
@@ -317,6 +333,7 @@ export class VideoAnalysisManager {
         job.next < Math.ceil(job.source.seconds / videoSegmentSeconds)
       ) {
         this.controller = new AbortController();
+        this.setPhase("preparing", `Preparando trecho ${job.next + 1}…`);
         const prepared = await this.processor.prepare(
           job.source,
           job.next,
@@ -324,18 +341,20 @@ export class VideoAnalysisManager {
           this.controller.signal,
           (phase) => {
             if (this.owns(job) && job.status === "running") {
-              this.phase = phase;
-              this.hooks.changed();
+              this.setPhase("preparing", phase);
             }
           },
         );
         if (!this.owns(job) || job.status !== "running") return;
+        this.setPhase("waiting", "Trecho preparado. Aguardando a fila de ferramentas…");
         await this.hooks.ready(job);
         if (!this.owns(job) || job.status !== "running") return;
         job.pending = { index: job.next };
         await this.save(); // Before dispatch, including a lost turn/start response or a crash.
-        this.phase = `Assistente analisando trecho ${job.next + 1} de ${Math.ceil(job.source.seconds / videoSegmentSeconds)}…`;
-        this.hooks.changed();
+        this.setPhase(
+          "analyzing",
+          `Assistente analisando trecho ${job.next + 1} de ${Math.ceil(job.source.seconds / videoSegmentSeconds)}…`,
+        );
         if (!this.owns(job) || job.status !== "running") {
           job.pending = null;
           await this.save();

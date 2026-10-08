@@ -24,6 +24,11 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         },
       ];
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
+      // Test-only delivery of main snapshots for states that require native/server activity.
+      window.addEventListener("stag-fixture-snapshot", (event) => {
+        Object.assign(state, (event as CustomEvent<Partial<Snapshot>>).detail);
+        publish();
+      });
       const queueIds = new Set<string>();
       const clearQueue = () => {
         fortiStage = null;
@@ -239,6 +244,8 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 status: "running",
                 working: true,
                 phase: "Extraindo imagens do primeiro trecho…",
+                stage: "preparing",
+                phaseStartedAt: Date.now(),
                 error: null,
               };
               break;
@@ -249,6 +256,8 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
                 state.videoAnalysis.status = "paused";
                 state.videoAnalysis.working = false;
+                state.videoAnalysis.stage = "idle";
+                state.videoAnalysis.phaseStartedAt = null;
                 state.videoAnalysis.completed = 1;
                 state.videoAnalysis.phase =
                   "Progresso salvo. Retome com o arquivo original disponível.";
@@ -256,11 +265,15 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
                 state.videoAnalysis.status = "cancelled";
                 state.videoAnalysis.working = false;
+                state.videoAnalysis.stage = "idle";
+                state.videoAnalysis.phaseStartedAt = null;
                 state.videoAnalysis.phase =
                   "Análise cancelada. As anotações já verificadas são preservadas.";
               } else {
                 state.videoAnalysis.status = "running";
                 state.videoAnalysis.working = true;
+                state.videoAnalysis.stage = "preparing";
+                state.videoAnalysis.phaseStartedAt = Date.now();
                 state.videoAnalysis.phase = "Extraindo imagens do próximo trecho…";
                 state.threadId = state.videoAnalysis.threadId;
                 state.mode = state.videoAnalysis.mode;

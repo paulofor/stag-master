@@ -338,6 +338,7 @@ export async function prepareVideo(
     runMedia(executable(name), args, signal, timeout);
   try {
     progress("Verificando o vídeo…");
+    let source: Pick<VideoSource, "path" | "size" | "mtimeMs" | "dev" | "ino" | "fingerprint">;
     if (segment) {
       videoSourceSchema.parse(segment.source);
       if (
@@ -347,44 +348,21 @@ export async function prepareVideo(
       )
         throw new Error("Vídeo inválido: trecho fora da duração do arquivo.");
       await validateVideoSource(segment.source, signal);
+      if ((await realpath(path)) !== segment.source.path)
+        throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
+      source = segment.source;
     } else {
-      // The short-attachment copy is also bounded: never allocate the original file size.
-      const source = await open(path, "r");
-      try {
-        const target = await open(join(dir, "input"), "wx", 0o600);
-        try {
-          const current = await source.stat();
-          if (
-            current.size !== info.size ||
-            current.ino !== info.ino ||
-            current.dev !== info.dev ||
-            current.mtimeMs !== info.mtimeMs
-          )
-            throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
-          const bytes = Buffer.alloc(Math.min(current.size, 1024 * 1024));
-          let offset = 0;
-          while (offset < current.size) {
-            signal.throwIfAborted();
-            const { bytesRead } = await source.read(
-              bytes,
-              0,
-              Math.min(bytes.length, current.size - offset),
-              offset,
-            );
-            if (!bytesRead) throw new Error("O arquivo de vídeo está incompleto.");
-            let written = 0;
-            while (written < bytesRead)
-              written += (await target.write(bytes, written, bytesRead - written)).bytesWritten;
-            offset += bytesRead;
-          }
-        } finally {
-          await target.close();
-        }
-      } finally {
-        await source.close();
-      }
+      source = await sourceIdentity(path, signal);
+      if (
+        ["size", "mtimeMs", "dev", "ino"].some(
+          (key) => source[key as keyof typeof source] !== info[key as keyof typeof info],
+        )
+      )
+        throw new Error("O arquivo mudou. Selecione o vídeo novamente.");
     }
-    const input = segment ? path : join(dir, "input");
+    // Decode directly from disk in both flows. The main keeps only fixed identity samples
+    // and bounded outputs, never a copy or a buffer of the complete original.
+    const input = source.path;
     const raw = await run("ffprobe", [
       "-v",
       "error",
@@ -540,7 +518,7 @@ export async function prepareVideo(
       );
     }
     signal.throwIfAborted();
-    if (segment) await validateVideoSource(segment.source, signal);
+    await validateVideoSource({ ...source, name: videoName(path), seconds, audio: false }, signal);
     return {
       summary: {
         id: segment?.id || randomUUID(),

@@ -945,6 +945,9 @@ try {
       .getByLabel("Mensagem para o assistente")
       .fill("Rascunho preservado durante vídeo longo");
     await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+    const activePanel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
+    await expect(activePanel).toContainText("Vídeo em processamento");
+    await expect(activePanel.locator(".video-analysis-spinner")).toHaveCount(1);
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].minimize());
     await expect
       .poll(
@@ -965,6 +968,9 @@ try {
       .toBe(false);
     const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
     await expect(panel).toContainText("1 de 3 trechos");
+    await expect(panel).toContainText("Análise pausada");
+    await expect(panel.locator(".video-analysis-spinner")).toHaveCount(0);
+    await expect(panel).toContainText("Próximo trecho 2 de 3 · 05:00–10:00");
     await expect(page.getByLabel("Mensagem para o assistente")).toHaveValue(
       "Rascunho preservado durante vídeo longo",
     );
@@ -1007,6 +1013,9 @@ try {
     assert.equal(restarted.videoAnalysis.completed, 1);
     assert.equal(restarted.videoAnalysis.status, "paused");
     assert.equal(restarted.busy, false);
+    await expect(
+      restartedPage.getByRole("region", { name: "Análise de vídeo em segundo plano" }),
+    ).toContainText("Análise pausada");
     await restartedPage.getByRole("button", { name: "Retomar análise", exact: true }).click();
     await expect
       .poll(
@@ -1020,6 +1029,9 @@ try {
     const final = await restartedPage.evaluate(async () => window.stag.getSnapshot());
     assert.equal(final.threadId, backgroundSaved.threadId);
     assert.equal(final.videoAnalysis.completed, 3);
+    await expect(
+      restartedPage.getByRole("region", { name: "Análise de vídeo em segundo plano" }),
+    ).toContainText("Análise concluída");
     const stored = JSON.parse(await readFile(join(data, "video-analysis.json"), "utf8"))[0];
     assert.equal(stored.next, 3);
     assert.equal(stored.pending, null);

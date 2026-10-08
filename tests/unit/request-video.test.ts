@@ -1,6 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { mkdir, mkdtemp, open, rm, writeFile, readdir } from "node:fs/promises";
 import { resolve, join } from "node:path";
+import { writeFileSync } from "node:fs";
 import { actionSchema } from "../../src/shared/validation";
 import { normalizeVideoTranscript, prepareVideo, runMedia } from "../../src/main/request-video";
 import { assistantInstructions } from "../../src/main/policy";
@@ -99,6 +100,17 @@ it("falha no armazenamento temporário não expõe caminhos e permite recuperaç
     prepareVideo(file, "missing", blocked, new AbortController().signal, () => {}),
   ).rejects.toThrow("Não foi possível preparar");
   expect(await readdir(blocked)).toEqual([]);
+});
+it("anexo curto recusa troca do original antes do decoder e limpa sem cópia integral", async () => {
+  const dir = await temp();
+  const file = join(dir, "synthetic.mp4");
+  await writeFile(file, "synthetic original");
+  await expect(
+    prepareVideo(file, "missing", join(dir, "tmp"), new AbortController().signal, () => {
+      writeFileSync(file, "different synthetic original");
+    }),
+  ).rejects.toThrow("O arquivo mudou");
+  expect(await readdir(join(dir, "tmp"))).toEqual([]);
 });
 it("cancelamento aguarda o subprocesso e não entrega saída parcial", async () => {
   const dir = await temp();

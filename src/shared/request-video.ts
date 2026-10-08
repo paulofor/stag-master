@@ -25,6 +25,8 @@ export interface VideoAnalysisSummary {
   total: number;
   status: "running" | "paused" | "failed" | "uncertain" | "completed" | "cancelled";
   phase: string;
+  stage: "checking" | "preparing" | "waiting" | "analyzing" | "recovering" | "stopping" | "idle";
+  phaseStartedAt: number | null;
   working: boolean;
   error: string | null;
 }
