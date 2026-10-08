@@ -63,11 +63,19 @@ test("vídeo longo tem progresso, pausa, retomada e cancelamento sem perder o ra
   await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
   const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
   await expect(panel).toContainText("0 de 19 trechos");
+  await expect(panel).toContainText("Vídeo em processamento");
+  await expect(panel).toContainText("Trecho atual 1 de 19 · 00:00–05:00");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCount(1);
+  await expect(panel).toContainText("Nesta etapa há");
   await expect(panel).toContainText("Continua minimizado");
   await expect(page.getByRole("button", { name: "Enviar mensagem" })).toBeDisabled();
   await expect(input).toHaveValue("Pergunta para depois da análise");
   await page.getByRole("button", { name: "Pausar análise", exact: true }).click();
   await expect(panel).toContainText("1 de 19 trechos");
+  await expect(panel).toContainText("Análise pausada");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCount(0);
+  await expect(panel).toContainText("5%");
+  await expect(panel).toContainText("Próximo trecho 2 de 19 · 05:00–10:00");
   await expect(
     page.getByRole("progressbar", { name: "Progresso da análise de vídeo" }),
   ).toHaveAttribute("value", "1");
@@ -78,6 +86,111 @@ test("vídeo longo tem progresso, pausa, retomada e cancelamento sem perder o ra
   await page.getByRole("button", { name: "Cancelar análise", exact: true }).click();
   await expect(panel).toContainText("Análise cancelada");
   await expect(input).toHaveValue("Pergunta para depois da análise");
+});
+test("vídeo distingue decisão, pausa em limpeza, falha e conclusão sem progresso inventado", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
+  const update = async (
+    status: "question" | "approval" | "stopping" | "failed" | "completed" | "uncertain",
+  ) =>
+    page.evaluate(async (status) => {
+      const state = await window.stag!.getSnapshot();
+      const job = state.videoAnalysis!;
+      if (status === "question" || status === "approval") {
+        state.approvals = [
+          {
+            id: "synthetic-wait",
+            kind: status === "question" ? "questions" : "file",
+            title: "Decisão sintética",
+            detail: "Somente teste",
+            ...(status === "question"
+              ? { questions: [{ id: "stack", question: "Qual stack?", options: [] }] }
+              : {}),
+          },
+        ];
+        job.stage = "analyzing";
+      } else {
+        state.approvals = [];
+        job.status = status === "stopping" ? "paused" : status;
+        job.working = status === "stopping";
+        job.stage = status === "stopping" ? "stopping" : "idle";
+        job.phaseStartedAt = status === "stopping" ? Date.now() : null;
+        job.phase =
+          status === "stopping"
+            ? "Pausa solicitada; concluindo o trecho atual…"
+            : "Confira as respostas na conversa.";
+        job.completed = status === "completed" ? job.total : 2;
+        job.error = status === "failed" ? "Não foi possível preparar o vídeo." : null;
+      }
+      window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+    }, status);
+  await update("question");
+  await expect(panel).toContainText("Aguardando sua resposta");
+  await expect(panel).toContainText("Responda à pergunta na conversa");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCount(0);
+  await expect(panel).not.toContainText("Nesta etapa há");
+  await expect(panel).toContainText("0%");
+  await update("approval");
+  await expect(panel).toContainText("Aguardando autorização");
+  await expect(panel).toContainText("Confira a aprovação na conversa");
+  await update("stopping");
+  await expect(panel).toContainText("Pausando análise");
+  await expect(page.getByRole("button", { name: "Retomar análise", exact: true })).toBeDisabled();
+  await update("failed");
+  await expect(panel).toContainText("Falha na análise");
+  await expect(panel.getByRole("alert")).toContainText("Não foi possível preparar");
+  await expect(panel).toContainText("10%");
+  await update("uncertain");
+  await expect(panel).toContainText("Envio não confirmado");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Reprocessar trecho", exact: true })).toBeEnabled();
+  await update("completed");
+  await expect(panel).toContainText("Análise concluída");
+  await expect(panel).toContainText("100%");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retomar análise", exact: true })).toHaveCount(0);
+});
+
+test("retomada explica conexão e autorização Windows, mantendo o modo original", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+  await page.getByRole("button", { name: "Pausar análise", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
+  await page.evaluate(async () => {
+    const state = await window.stag!.getSnapshot();
+    state.videoAnalysis!.mode = "windows";
+    window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+  });
+  await expect(panel).toContainText("Autorize o desktop no modo Windows");
+  await expect(page.getByRole("button", { name: "Retomar análise", exact: true })).toBeDisabled();
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("stag-fixture-snapshot", { detail: { connection: "disconnected" } }),
+    ),
+  );
+  await expect(panel).toContainText("Entre com sua conta e conecte o STAG");
+  await expect(panel).not.toContainText("Vídeo em processamento");
+});
+
+test("tempo de etapa é visível, não altera percentual e respeita movimento reduzido", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Análise de vídeo em segundo plano" });
+  await page.evaluate(async () => {
+    const state = await window.stag!.getSnapshot();
+    state.videoAnalysis!.phaseStartedAt = Date.now() - 65000;
+    window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+  });
+  await expect(panel).toContainText(/Nesta etapa há 01:0[5-9]/);
+  await expect(panel.getByRole("progressbar")).toHaveAttribute("value", "0");
+  await expect(panel.locator(".video-analysis-spinner")).toHaveCSS("animation-name", "none");
+  await page.getByRole("button", { name: "Pausar análise", exact: true }).click();
+  await expect(panel).not.toContainText("Nesta etapa há");
 });
 test("vídeo longo em Leitura mantém aviso e falha de início preserva texto", async ({ page }) => {
   await page.getByLabel("Acesso", { exact: true }).selectOption("read");

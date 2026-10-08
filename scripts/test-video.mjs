@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync, statSync, utimesSync } from "node:fs";
 import { build } from "esbuild";
 import { mkdtemp, mkdir, rm, readdir, writeFile, readFile, open, stat } from "node:fs/promises";
 import { resolve, join } from "node:path";
@@ -57,13 +58,44 @@ try {
     "2",
     file,
   ]);
+  // A valid short MP4 with sparse padding exercises disk reads without allocating its size.
+  const shortOriginalSize = (await stat(file)).size;
+  const shortPaddingSize = 64 * 1024 * 1024;
+  const shortHeader = Buffer.alloc(8);
+  shortHeader.writeUInt32BE(shortPaddingSize, 0);
+  shortHeader.write("free", 4);
+  const shortHandle = await open(file, "r+");
+  await shortHandle.write(shortHeader, 0, shortHeader.length, shortOriginalSize);
+  await shortHandle.truncate(shortOriginalSize + shortPaddingSize);
+  await shortHandle.close();
+  const shortMemoryBefore = process.resourceUsage().maxRSS;
   const phases = [];
   const video = await prepareVideo(
     file,
     resources,
     join(dir, "tmp"),
     new AbortController().signal,
-    (phase) => phases.push(phase),
+    (phase) => {
+      phases.push(phase);
+      let temporaryBytes = 0;
+      for (const folder of readdirSync(join(dir, "tmp")))
+        for (const output of readdirSync(join(dir, "tmp", folder)))
+          temporaryBytes += statSync(join(dir, "tmp", folder, output)).size;
+      // Independent of output names: bounded frames, PCM audio and JSON fit this budget,
+      // whereas a copy of the sparse 64-MiB original cannot.
+      assert.ok(
+        temporaryBytes < 4 * 1024 * 1024 + 600 * 16000 * 2 + 1024 * 1024,
+        "Temporary outputs must stay bounded without a copy of the original video",
+      );
+    },
+  );
+  const shortRssGrowthKiB = process.resourceUsage().maxRSS - shortMemoryBefore;
+  assert.ok(
+    shortRssGrowthKiB < 48 * 1024,
+    `Short video heap/RSS unexpectedly grew: ${shortRssGrowthKiB} KiB`,
+  );
+  console.log(
+    `Anexo curto sintético >64 MB: decoder/ASR direto do disco, sem cópia integral, crescimento de pico RSS ${shortRssGrowthKiB} KiB.`,
   );
   assert.equal(video.summary.audio, "transcribed");
   assert.equal(video.frames.length, 3, "Vídeos curtos devem incluir início, meio e fim.");
@@ -159,6 +191,15 @@ try {
   assert.equal(silentResult.summary.audio, "silent");
   assert.equal(silentResult.frames.length, 5);
   assert.ok(silentResult.frames.at(-1).seconds > 40);
+  const beforeChange = await stat(silent);
+  await assert.rejects(
+    prepareVideo(silent, resources, join(dir, "tmp"), new AbortController().signal, (phase) => {
+      if (phase.includes("imagem 5 de 5"))
+        utimesSync(silent, beforeChange.atime, new Date(beforeChange.mtimeMs + 5000));
+    }),
+    /O arquivo mudou/,
+  );
+  assert.deepEqual(await readdir(join(dir, "tmp")), []);
   const invalid = join(dir, "invalido.mp4");
   await writeFile(invalid, "#EXTM3U\nhttps://fixture.invalid/never-request\n");
   await assert.rejects(

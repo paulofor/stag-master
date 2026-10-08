@@ -1698,6 +1698,69 @@ summary::-webkit-details-marker {
 .video-analysis progress {
   width: 100%;
   accent-color: #2c5143;
+  height: 8px;
+}
+.video-analysis-state,
+.video-analysis-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.video-analysis-state {
+  font-size: 12px;
+  color: #725113;
+}
+.video-analysis-progress {
+  justify-content: space-between;
+}
+.video-analysis[data-state="running"] {
+  border-color: #83aa9a;
+  background: #f0f7f3;
+}
+.video-analysis[data-state="running"] .video-analysis-state,
+.video-analysis[data-state="completed"] .video-analysis-state {
+  color: #2c6149;
+}
+.video-analysis[data-state="paused"],
+.video-analysis[data-state="waiting"],
+.video-analysis[data-state="stopping"] {
+  border-color: #d8bb7d;
+  background: #fff9ed;
+}
+.video-analysis[data-state="failed"],
+.video-analysis[data-state="uncertain"] {
+  border-color: #cb9385;
+  background: #fff3ef;
+}
+.video-analysis[data-state="failed"] .video-analysis-state,
+.video-analysis[data-state="uncertain"] .video-analysis-state {
+  color: #9a4232;
+}
+.video-analysis-time {
+  color: #646e62;
+  font-variant-numeric: tabular-nums;
+}
+.video-analysis-blocker {
+  color: #795716;
+}
+.video-analysis-spinner {
+  flex-shrink: 0;
+  animation: video-analysis-spin 1.5s linear infinite;
+}
+@keyframes video-analysis-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-height: 680px) {
+  .bottom-area:has(.video-analysis) .video-controls {
+    display: none;
+  }
+  .video-analysis {
+    padding: 6px 10px;
+    gap: 3px;
+    margin-bottom: 6px;
+  }
 }
 .video-analysis-actions {
   display: flex;

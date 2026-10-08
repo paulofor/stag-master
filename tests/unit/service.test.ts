@@ -746,13 +746,24 @@ describe("vídeo em segundo plano na conversa", () => {
     await rpc.call("_fixture/videoBehavior", { mode: "approval" });
     await service.request({ type: "analyzeVideo" });
     await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().videoAnalysis).toMatchObject({
+      stage: "analyzing",
+      working: true,
+      completed: 0,
+    });
     await service.request({
       type: "answer",
       id: service.snapshot().approvals[0].id,
       accept: false,
     });
     await service.mediaSettled();
-    expect(service.snapshot().videoAnalysis).toMatchObject({ status: "paused", completed: 1 });
+    expect(service.snapshot().videoAnalysis).toMatchObject({
+      status: "paused",
+      completed: 1,
+      stage: "idle",
+      phaseStartedAt: null,
+      working: false,
+    });
     expect(service.snapshot().busy).toBe(false);
     expect((await calls()).filter((call) => call.method === "turn/start")).toHaveLength(1);
   });

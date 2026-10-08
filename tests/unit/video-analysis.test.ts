@@ -121,6 +121,75 @@ it("envia trechos em sequência e salva só checkpoints, sem mídia/transcriçã
   expect(saved).not.toContain("consent");
   expect(JSON.stringify(manager.summary())).not.toContain(job.source.path);
 });
+it("expõe etapa e tempo reais na preparação, fila, análise e pausa; não avança pelo relógio", async () => {
+  let time = 10000;
+  vi.spyOn(Date, "now").mockImplementation(() => time);
+  let releasePreparation!: () => void;
+  let releaseQueue!: () => void;
+  let releaseTurn!: () => void;
+  const preparation = new Promise<void>((resolve) => {
+    releasePreparation = resolve;
+  });
+  const queue = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  const turn = new Promise<void>((resolve) => {
+    releaseTurn = resolve;
+  });
+  vi.mocked(processor.prepare).mockImplementationOnce(
+    async (_source, _index, _id, _signal, progress) => {
+      progress("Extraindo imagem 1 de 12…");
+      await preparation;
+      return segment(0);
+    },
+  );
+  hooks.ready.mockImplementationOnce(() => queue);
+  hooks.submit.mockImplementationOnce(async () => {
+    await turn;
+    return { id: "turn-0", status: "completed" };
+  });
+  try {
+    await manager.start(job);
+    await vi.waitFor(() => expect(manager.summary()?.stage).toBe("preparing"));
+    expect(manager.summary()).toMatchObject({ working: true, completed: 0, phaseStartedAt: 10000 });
+    time = 30000;
+    expect(manager.summary()?.phaseStartedAt).toBe(10000);
+    releasePreparation();
+    await vi.waitFor(() => expect(manager.summary()?.stage).toBe("waiting"));
+    expect(manager.summary()?.phase).toContain("fila de ferramentas");
+    expect(manager.summary()?.completed).toBe(0);
+    expect(hooks.submit).not.toHaveBeenCalled();
+    time = 40000;
+    releaseQueue();
+    await vi.waitFor(() => expect(hooks.submit).toHaveBeenCalledTimes(1));
+    expect(manager.summary()).toMatchObject({
+      stage: "analyzing",
+      phaseStartedAt: 40000,
+      completed: 0,
+    });
+    await manager.control(job.id, "pause");
+    expect(manager.summary()).toMatchObject({
+      stage: "stopping",
+      working: true,
+      status: "paused",
+      completed: 0,
+    });
+    releaseTurn();
+    await manager.settled();
+    expect(manager.summary()).toMatchObject({
+      stage: "idle",
+      working: false,
+      phaseStartedAt: null,
+      completed: 1,
+      status: "paused",
+    });
+    expect(await readFile(resolve(dir, "jobs.json"), "utf8")).not.toContain("phaseStartedAt");
+  } finally {
+    releasePreparation();
+    releaseQueue();
+    releaseTurn();
+  }
+});
 it("pausar análise espera o trecho atual e retoma sem reenviar o trecho concluído", async () => {
   let finish!: () => void;
   hooks.submit.mockImplementationOnce(async () => {
@@ -275,6 +344,32 @@ it("arquivo alterado/ausente pausa sem encaminhar mídia", async () => {
   expect(manager.summary()).toMatchObject({ status: "failed", completed: 0 });
   expect(processor.prepare).not.toHaveBeenCalled();
   expect(hooks.failure).toHaveBeenCalledTimes(1);
+});
+it("retomar após falha de validação reinicia o tempo da etapa, sem incluir a pausa", async () => {
+  const time = vi.spyOn(Date, "now").mockReturnValue(10000);
+  vi.mocked(processor.validate).mockRejectedValueOnce(new Error("O arquivo mudou."));
+  await manager.start(job);
+  await manager.settled();
+  expect(manager.summary()).toMatchObject({ status: "failed", phaseStartedAt: null });
+  let release!: () => void;
+  const validation = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.mocked(processor.validate).mockImplementationOnce(() => validation);
+  time.mockReturnValue(70000);
+  try {
+    await manager.control(job.id, "resume");
+    expect(manager.summary()).toMatchObject({
+      stage: "checking",
+      working: true,
+      phaseStartedAt: 70000,
+      completed: 0,
+    });
+  } finally {
+    release();
+  }
+  await manager.settled();
+  expect(manager.summary()?.status).toBe("completed");
 });
 it("checkpoint inválido não autoriza sobrescrever progresso nem vaza conteúdo", async () => {
   await writeFile(resolve(dir, "jobs.json"), '{"private-synthetic-path":');
