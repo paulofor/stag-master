@@ -258,3 +258,38 @@ test("vídeo longo e movimento ativo cabem juntos na janela mínima Windows", as
     page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true }),
   ).toHaveAttribute("aria-pressed", "false");
 });
+
+for (const status of ["completed", "cancelled"] as const) {
+  test(`janela mínima permite outro vídeo após análise ${status}`, async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 600 });
+    await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+    if (status === "cancelled") {
+      await page.getByRole("button", { name: "Cancelar análise", exact: true }).click();
+    } else {
+      await page.evaluate(async () => {
+        const state = await window.stag!.getSnapshot();
+        Object.assign(state.videoAnalysis!, {
+          status: "completed",
+          working: false,
+          completed: 19,
+          stage: "idle",
+          phaseStartedAt: null,
+          phase:
+            "Análise concluída. Confira as respostas e as anotações verificadas pelo assistente.",
+        });
+        window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+      });
+    }
+    await expect(
+      page.getByRole("button", { name: "Analisar em segundo plano", exact: true }),
+    ).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Anexar vídeo", exact: true })).toBeInViewport();
+    await expect(page.getByLabel("Mensagem para o assistente")).toBeInViewport();
+    const box = await page.locator(".composer-controls").boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(600);
+    await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
+    await expect(
+      page.getByRole("region", { name: "Análise de vídeo em segundo plano" }),
+    ).toContainText("Vídeo em processamento");
+  });
+}

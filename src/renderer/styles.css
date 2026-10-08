@@ -1753,7 +1753,11 @@ summary::-webkit-details-marker {
   }
 }
 @media (max-height: 680px) {
-  .bottom-area:has(.video-analysis) .video-controls {
+  .bottom-area:has(.video-analysis:not([data-state="completed"], [data-state="cancelled"]))
+    .video-controls {
+    display: none;
+  }
+  .video-analysis:is([data-state="completed"], [data-state="cancelled"]) > span[role="status"] {
     display: none;
   }
   .video-analysis {
