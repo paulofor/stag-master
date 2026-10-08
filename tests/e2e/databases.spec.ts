@@ -79,6 +79,34 @@ test("senha somente na sessão permite testar e lembrar sem redigitar", async ({
   await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 });
+test("consulta em andamento permite abrir Conexões e revogar, mantendo edição bloqueada", async ({
+  page,
+}) => {
+  let dialog = await form(page);
+  await fill(dialog);
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await dialog
+    .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent("stag-fixture-snapshot", {
+        detail: { busy: true, threadId: "sql-active-fixture" },
+      }),
+    );
+  });
+  await expect(page.getByRole("button", { name: "Conexões com banco de dados" })).toBeEnabled();
+  dialog = await form(page);
+  await expect(dialog.getByRole("button", { name: "Salvar conexão", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Testar conexão", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true }),
+  ).toBeVisible();
+  expect((await page.evaluate(() => window.stag!.getSnapshot())).busy).toBe(false);
+});
 test("diálogo de conexão oculta o navegador lateral e restaura seus bounds ao fechar", async ({
   page,
 }) => {

@@ -122,11 +122,34 @@ export async function validateDatabaseConnections(application, page, project, da
     await page.reload();
     await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+    // The surrounding registration tests deliberately run without an account.
+    // This fixture login is intercepted by the existing external-URL probe.
+    await page.evaluate(() => window.stag.request({ type: "login" }));
+    await expect
+      .poll(() =>
+        page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
+      )
+      .toBe(true);
+    // Await turn/start's response before testing interruption; busy alone is not a handshake.
+    await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
+    assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
+    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+    await expect(
+      dialog.getByRole("button", { name: "Salvar conexão", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      dialog.getByRole("button", { name: "Testar conexão", exact: true }),
+    ).toBeDisabled();
     await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
+      .toBe(false);
     assert.equal(
       (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
       false,
     );
+    await page.evaluate(() => window.stag.request({ type: "logout" }));
     await dialog
       .getByLabel("Conexão salva", { exact: true })
       .selectOption({ label: "SQL Server sintético" });
@@ -149,6 +172,7 @@ export async function validateDatabaseConnections(application, page, project, da
     }
   });
   assert.match(wrongProject, /projeto mudou/i);
+  const probeBaseline = await page.evaluate(() => window.stag.getSnapshot());
   // The production driver sends PRELOGIN to a loopback TCP double; cancel only after that handshake.
   let accept;
   const handshake = new Promise((resolve) => {
@@ -181,8 +205,8 @@ export async function validateDatabaseConnections(application, page, project, da
     await expect(dialog.getByRole("alert")).toContainText("Não foi possível conectar");
     const after = await page.evaluate(async () => window.stag.getSnapshot());
     assert.equal(JSON.stringify(after).includes(password), false);
-    assert.equal(after.metrics.requests, before.metrics.requests);
-    assert.equal(after.metrics.totalTokens, before.metrics.totalTokens);
+    assert.equal(after.metrics.requests, probeBaseline.metrics.requests);
+    assert.equal(after.metrics.totalTokens, probeBaseline.metrics.totalTokens);
     await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
   } finally {
     for (const socket of sockets) socket.destroy();

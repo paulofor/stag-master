@@ -444,8 +444,8 @@ export function App() {
           <button
             className="project-sources-button database-button"
             aria-label="Conexões com banco de dados"
-            title="Configurar e testar conexões SQL Server deste projeto"
-            disabled={!state.project || disabledContext || !!analysisRunning}
+            title="Configurar e autorizar conexões SQL Server deste projeto"
+            disabled={!state.project || pending}
             onClick={() => {
               setMenu(null);
               setError(null);
@@ -1111,7 +1111,7 @@ export function App() {
             projectName={state.project.name}
             data={state.projectDatabases}
             pending={pending}
-            busy={state.busy}
+            busy={state.busy || !!analysisRunning}
             error={visibleError}
             run={run}
             close={() => setDatabasesDialog(false)}

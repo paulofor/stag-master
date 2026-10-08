@@ -263,6 +263,16 @@ it.each(["revogar", "parar", "desconectar"])(
     });
     await send();
     await handshake;
+    if (action === "revogar") {
+      try {
+        const catalog = await service.request({ type: "listDatabases", projectPath: dir });
+        expect(catalog.busy).toBe(true);
+        expect(catalog.projectDatabases?.authorized).toBe(true);
+      } catch (error) {
+        closed();
+        throw error;
+      }
+    }
     await service.request({
       type: "enqueue",
       threadId: service.snapshot().threadId!,

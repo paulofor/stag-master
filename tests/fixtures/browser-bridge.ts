@@ -161,7 +161,11 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               break;
             case "databaseConsent":
               state.projectDatabases!.authorized = action.allow;
-              if (!action.allow) state.queuePaused = true;
+              if (!action.allow) {
+                state.busy = false;
+                state.approvals = [];
+                state.queuePaused = true;
+              }
               break;
             case "testDatabase":
               state.projectDatabases!.test = {

@@ -480,7 +480,6 @@ export class AssistantService extends EventEmitter {
         "logout",
         "selectProject",
         "projectSources",
-        "listDatabases",
         "saveDatabase",
         "deleteDatabase",
         "testDatabase",
