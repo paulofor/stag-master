@@ -1,4 +1,26 @@
-# Matriz de homologação da versão 0.4.39
+# Matriz de homologação da versão 0.4.40
+
+## Movimento do mouse visível e verificável — versão 0.4.40
+
+Matriz definida antes dos testes. O cliente relatou que o botão desapareceu e precisa do movimento funcionando. O controle atual é ocultado fora de Windows e fica desabilitado sem explicar que ainda falta iniciar a conversa. O status Ativo não distingue o temporizador da espera pela fila. Manter o botão visível no Windows, explicar os requisitos e mostrar a próxima tentativa, espera da fila, movimento e resultado. A ativação continua explícita, por conversa Windows autorizada, com confirmação nativa; o gesto privado de até dois pixels e retorno permanece na mesma fila, sem cliques, teclas ou foco.
+
+Lacuna concreta do harness: os testes exigem que o controle desapareça antes da autorização e depois da revogação, e não verificam a informação visual enquanto a fila está ocupada. Corrigir essas expectativas e ampliar os testes existentes de interface e serviço, usando relógio controlado somente depois do handshake. Não usar janelas, contas ou políticas do cliente.
+
+| Área                   | Cenário e aceite                                                                                                                                                                         | Evidência prevista                                                         |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Disponibilidade        | Controle visível antes de autorizar, em Projeto/Leitura e após revogar/parar; requisitos de conexão, conta, projeto e conversa explícitos; Linux não oferece controle                    | Chromium desktop/Pixel 7 e Electron                                        |
+| Caminho feliz          | Ativar com confirmação; primeira tentativa após cinco minutos; gesto fixo de até dois pixels e retorno sobre STAG/navegador integrado ou aplicativo permitido; sem turno do modelo       | Serviço com relógio após handshake, driver de produção e Windows sintético |
+| Observabilidade        | Contagem regressiva baseada no prazo do main; fila ocupada e gesto em curso visíveis; resultado, motivo de omissão e contadores corretos; reload recupera o estado sem reiniciar o prazo | Serviço e interface com snapshots sintéticos                               |
+| Fila e recuperação     | Nenhuma sobreposição/acúmulo; omissão recupera no próximo intervalo; falha desliga e permite reativar; resultado antigo após cancelamento não altera estado                              | Contratos existentes ampliados                                             |
+| Isolamento e aprovação | Consentimento e id da conversa obrigatórios; recusa não ativa; desligar/parar/revogar/trocar/desconectar/fechar limpa prazo e cancela subprocesso; Leitura preservada                    | Serviço, IPC de produção e Electron                                        |
+| Interface              | Controle e compositor acessíveis em 640×900, 360×600, Pixel 7 e com vídeo/navegador; sem overflow ou perda do rascunho                                                                   | Chromium/Electron e screenshots                                            |
+| Entrega                | check, test:desktop, format:check e diff locais antes do PR; todos os jobs do PR/main, Windows nativo e instalador aprovados                                                             | Workflow versionado e artefato 0.4.40                                      |
+
+Linux não comprova entrada nativa no Windows. O driver e as janelas sintéticas serão conferidos no job Windows; a posição do cursor e a instalação do cliente não são acessadas por estes testes. Não há promessa de impedir bloqueio, suspensão ou expiração de sessões. Não há deploy web; a entrega é o instalador gerado pelo workflow.
+
+Evidência local: `npm run check` aprovado com typecheck, 679 contratos, build, decoder/ASR reais, Codex fixado com provedor loopback e 140 cenários Chromium, incluindo Pixel 7, reload do prazo, estados da fila e vídeo/movimento em 360×600. `xvfb-run -a npm run test:desktop` aprovado com Electron de produção, fila, cancelamento, indicador, áudio, navegador de duas abas, APIs/SQL sintéticos e vídeo após reinício. Formatação, sintaxe JavaScript, screenshots e diff conferidos. Node 22.22.0 instalado somente no workspace; executáveis compartilhados preservados. Nenhum script shell ou driver nativo alterado.
+
+A primeira rodada focalizada aprovou 331 contratos e excedeu o hook de inicialização de um cenário antes de executar seu corpo. Os 23 cenários do movimento passaram na recuperação focalizada; a validação completa posterior aprovou os 679 contratos. A causa do atraso de inicialização não foi comprovada; não foram ampliados prazos, introduzidos retries ou alterada a política de produção. O smoke declara o bloqueio de namespaces bwrap da sandbox Linux; Windows nativo e instalador ainda exigem os jobs do PR/main.
 
 ## Duas abas no navegador — versão 0.4.39
 

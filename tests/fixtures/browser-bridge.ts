@@ -50,7 +50,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       const queueIds = new Set<string>();
       const clearQueue = () => {
         fortiStage = null;
-        state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
+        state.mouseMovement = {
+          enabled: false,
+          moves: 0,
+          skipped: 0,
+          status: "Desligado",
+          nextAttemptAt: null,
+        };
         state.pendingVideo = null;
         state.queuedMessages = [];
         state.queuePaused = false;
@@ -263,6 +269,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 moves: 0,
                 skipped: 0,
                 status: action.enabled ? "Ativo · a cada 5 min" : "Desligado",
+                nextAttemptAt: action.enabled ? Date.now() + 300000 : null,
               };
               break;
             case "analyzeVideo":
@@ -287,7 +294,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               if (!state.videoAnalysis || state.videoAnalysis.id !== action.id)
                 throw new Error("Análise indisponível");
               if (action.control === "pause") {
-                state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
+                state.mouseMovement = {
+                  enabled: false,
+                  moves: 0,
+                  skipped: 0,
+                  status: "Desligado",
+                  nextAttemptAt: null,
+                };
                 state.videoAnalysis.status = "paused";
                 state.videoAnalysis.working = false;
                 state.videoAnalysis.stage = "idle";
@@ -296,7 +309,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 state.videoAnalysis.phase =
                   "Progresso salvo. Retome com o arquivo original disponível.";
               } else if (action.control === "cancel") {
-                state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
+                state.mouseMovement = {
+                  enabled: false,
+                  moves: 0,
+                  skipped: 0,
+                  status: "Desligado",
+                  nextAttemptAt: null,
+                };
                 state.videoAnalysis.status = "cancelled";
                 state.videoAnalysis.working = false;
                 state.videoAnalysis.stage = "idle";
@@ -329,7 +348,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.pendingVideo = null;
               break;
             case "connect":
-              state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
+              state.mouseMovement = {
+                enabled: false,
+                moves: 0,
+                skipped: 0,
+                status: "Desligado",
+                nextAttemptAt: null,
+              };
               state.connection = "ready";
               break;
             case "login":
@@ -618,7 +643,13 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
             }
             case "stop":
               fortiStage = null;
-              state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status: "Desligado" };
+              state.mouseMovement = {
+                enabled: false,
+                moves: 0,
+                skipped: 0,
+                status: "Desligado",
+                nextAttemptAt: null,
+              };
               state.queuePaused = true;
               state.approvals = [];
               state.items.push({

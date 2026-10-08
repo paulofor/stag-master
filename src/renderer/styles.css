@@ -479,14 +479,17 @@ h1 {
   flex-wrap: wrap;
   gap: 4px 10px;
   margin: 0 3px 9px;
-  font-size: 10px;
-  color: #89917f;
+  font-size: 11px;
+  color: #68755b;
 }
 .mouse-movement .text-button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 11px;
+}
+.mouse-movement-timer {
+  font-variant-numeric: tabular-nums;
 }
 .mouse-movement [aria-pressed="true"] {
   color: #587448;

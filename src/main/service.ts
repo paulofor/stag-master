@@ -281,7 +281,13 @@ export class AssistantService extends EventEmitter {
     this.mouseAbort = null;
     if (this.mouseTimer) clearTimeout(this.mouseTimer);
     this.mouseTimer = null;
-    this.state.mouseMovement = { enabled: false, moves: 0, skipped: 0, status };
+    this.state.mouseMovement = {
+      enabled: false,
+      moves: 0,
+      skipped: 0,
+      status,
+      nextAttemptAt: null,
+    };
   }
   private ownsMouseMovement(threadId: string, epoch: number): boolean {
     return (
@@ -323,18 +329,25 @@ export class AssistantService extends EventEmitter {
       moves: 0,
       skipped: 0,
       status: "Ativo · a cada 5 min",
+      nextAttemptAt: null,
     };
     this.scheduleMouseMovement(action.threadId, ++this.mouseEpoch);
   }
   private scheduleMouseMovement(threadId: string, epoch: number): void {
+    this.state.mouseMovement.nextAttemptAt = Date.now() + 5 * 60 * 1000;
     this.mouseTimer = setTimeout(
       () => {
         this.mouseTimer = null;
+        if (!this.ownsMouseMovement(threadId, epoch)) return;
+        this.state.mouseMovement.nextAttemptAt = null;
+        this.state.mouseMovement.status = "Aguardando a fila de ferramentas";
+        this.publish();
         void this.moveMouse(threadId, epoch);
       },
       5 * 60 * 1000,
     );
     this.mouseTimer.unref();
+    this.publish();
   }
   private async moveMouse(threadId: string, epoch: number): Promise<void> {
     const toolEpoch = this.toolEpoch;
@@ -349,6 +362,8 @@ export class AssistantService extends EventEmitter {
       if (!blocked) {
         const controller = new AbortController();
         this.mouseAbort = controller;
+        this.state.mouseMovement.status = "Movendo o mouse";
+        this.publish();
         try {
           result = await this.options.pulseCursor!(controller.signal);
         } finally {
