@@ -142,7 +142,14 @@ describe("configuração e credenciais SQL Server", () => {
     expect(await readFile(join(dir, "connections.json"), "utf8")).not.toContain(
       "encryptedPassword",
     );
-    expect(() => store.password(dir, state.revision, id, config, "")).toThrow("Informe a senha");
+    expect(store.password(dir, state.revision, id, config, "")).toBe(password);
+    expect(state.connections[0].passwordAvailable).toBe(true);
+    const restarted = new DatabaseConnections(join(dir, "connections.json"), secrets);
+    await restarted.init();
+    expect(restarted.snapshot(dir).connections[0].passwordAvailable).toBe(false);
+    expect(() => restarted.password(dir, restarted.snapshot(dir).revision, id, config, "")).toThrow(
+      "Informe a senha",
+    );
   });
   it("isola projetos, recusa ids/revisões antigos e impede reutilização de senha após mudar destino", async () => {
     const old = store.snapshot(dir).revision;

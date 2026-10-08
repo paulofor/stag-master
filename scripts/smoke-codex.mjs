@@ -27,6 +27,8 @@ try {
       "src/main/desktop-tools.ts",
       "src/main/browser-tools.ts",
       "src/main/http-tools.ts",
+      "src/main/sql-tools.ts",
+      "src/main/database-connections.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
       "src/main/project-branches.ts",
@@ -43,6 +45,12 @@ try {
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
   const { httpTool } = await import(pathToFileURL(join(dir, "http-tools.mjs")).href);
+  const { sqlTool, SqlTools, databaseContext } = await import(
+    pathToFileURL(join(dir, "sql-tools.mjs")).href
+  );
+  const { DatabaseConnections } = await import(
+    pathToFileURL(join(dir, "database-connections.mjs")).href
+  );
   const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
@@ -174,7 +182,7 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [desktopTool, browserTool, httpTool],
+    dynamicTools: [desktopTool, browserTool, httpTool, sqlTool],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");
@@ -216,6 +224,88 @@ try {
     { type: "text", text: "Analise a imagem sintética do sistema." },
     { type: "image", url: imageFixture.dataUrl },
   ]);
+  const sqlSecret = "synthetic-smoke-sql-password";
+  const connections = new DatabaseConnections(join(dir, "sql-connections.json"), {
+    available: () => false,
+    encrypt: () => {
+      throw new Error();
+    },
+    decrypt: () => {
+      throw new Error();
+    },
+  });
+  await connections.init();
+  await connections.save(
+    project,
+    connections.snapshot(project).revision,
+    null,
+    {
+      name: "SQL sintético",
+      driver: "sqlserver",
+      authentication: "sql",
+      server: "127.0.0.1",
+      endpoint: { kind: "port", port: 1433 },
+      database: "stag_synthetic",
+      user: "synthetic",
+      encrypt: true,
+      trustServerCertificate: false,
+      certificateHost: "",
+      timeoutSeconds: 15,
+    },
+    sqlSecret,
+    false,
+  );
+  let sqlCalls = 0;
+  const sql = new SqlTools(connections, async (_config, password, args) => {
+    assert.equal(password, sqlSecret);
+    assert.equal(args.parameters[0].value, 10039);
+    sqlCalls++;
+    return { columns: ["id"], rows: [[10039]], affectedRows: 0, truncated: false };
+  });
+  const sqlData = { ...connections.snapshot(project), authorized: true };
+  const requested = {
+    connectionId: sqlData.connections[0].id,
+    revision: sqlData.revision,
+    operation: "query",
+    sql: "SELECT @id AS id",
+    parameters: [{ name: "id", type: "int", value: 10039 }],
+    risk: "routine",
+    intent: "Consultar remessa sintética autorizada",
+  };
+  const sqlRequest = async (message) => {
+    if (message.method !== "item/tool/call" || message.params.tool !== "stag_sql") {
+      rpc.rejectRequest(message.id, "Somente a ferramenta SQL sintética está ativa nesta sonda.");
+      return;
+    }
+    const result = await sql.execute(project, message.params.arguments, "project");
+    rpc.respond(message.id, result);
+  };
+  rpc.on("request", sqlRequest);
+  try {
+    provider.queueToolCall({ name: "stag_sql", arguments: requested });
+    await syntheticTurn(
+      [{ type: "text", text: "Consulte a remessa sintética usando stag_sql." }],
+      sources,
+      false,
+      databaseContext(sqlData, true),
+    );
+    assert.equal(
+      sqlCalls,
+      1,
+      "O Codex real deve despachar o schema de produção e receber o resultado SQL.",
+    );
+    assert.ok(JSON.stringify(provider.inputs.at(-1)).includes("10039"));
+    assert.ok(
+      !JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
+        sqlSecret,
+      ),
+    );
+    console.log(
+      "Codex real/provedor loopback: stag_sql parametrizado, contexto vigente e resultado sem senha aprovados.",
+    );
+  } finally {
+    rpc.off("request", sqlRequest);
+  }
   function verifyTrafficSettings() {
     const traffic = provider.traffic.at(-1);
     assert.ok(traffic.bytes > 0);

@@ -6,11 +6,13 @@ import { projectSourcesInstructions } from "./project-sources";
 import { videoInstructions } from "../shared/request-video";
 import { browserSessionInstructions, browserCertificateInstructions } from "./browser-tools";
 import { apiInstructions } from "./http-tools";
+import { sqlInstructions } from "./sql-tools";
 import { modelTrafficConfig, modelTrafficInstructions } from "./model-traffic";
 
 const baseInstructions = `${engineeringInstructions}
 ${modelTrafficInstructions}
 ${apiInstructions}
+${sqlInstructions}
 ${videoInstructions}
 ${cyberSafetyInstructions}
 ${browserSessionInstructions}

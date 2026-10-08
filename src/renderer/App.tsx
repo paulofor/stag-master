@@ -167,7 +167,8 @@ export function App() {
         action.type === "removeVideo" ||
         action.type === "cancelDatabaseTest" ||
         action.type === "cancelApiLogin" ||
-        (action.type === "apiConsent" && !action.allow);
+        (action.type === "apiConsent" && !action.allow) ||
+        (action.type === "databaseConsent" && !action.allow);
       if (!preparation) setPending(true);
       try {
         const before = stateRef.current;
@@ -1110,6 +1111,7 @@ export function App() {
             projectName={state.project.name}
             data={state.projectDatabases}
             pending={pending}
+            busy={state.busy}
             error={visibleError}
             run={run}
             close={() => setDatabasesDialog(false)}

@@ -8,6 +8,14 @@ import { apiActionSchemas } from "./api-connections";
 export const actionSchema = z.discriminatedUnion("type", [
   ...apiActionSchemas,
   z
+    .object({
+      type: z.literal("databaseConsent"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      allow: z.boolean(),
+    })
+    .strict(),
+  z
     .object({ type: z.literal("listDatabases"), projectPath: z.string().min(1).max(32768) })
     .strict(),
   z

@@ -66,6 +66,7 @@ export async function validateDatabaseConnections(application, page, project, da
   assert.equal(JSON.stringify(persisted).includes(password), false);
   const state = await page.evaluate(async () => window.stag.getSnapshot());
   assert.equal(state.projectDatabases.connections[0].passwordSaved, protectedStorage);
+  assert.equal(state.projectDatabases.connections[0].passwordAvailable, true);
   assert.equal(JSON.stringify(state).includes(password), false);
   assert.equal(JSON.stringify(state).includes("encryptedPassword"), false);
   assert.equal(state.metrics.requests, before.metrics.requests);
@@ -94,6 +95,46 @@ export async function validateDatabaseConnections(application, page, project, da
     .getByLabel("Conexão salva", { exact: true })
     .selectOption({ label: "SQL Server sintético" });
   await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
+  // Exercise the production native consent gate, including cancellation, reload and revocation.
+  await application.evaluate(({ dialog }) => {
+    global.databasePreviousDialog = dialog.showMessageBox;
+    global.databaseConsentResponse = 0;
+    dialog.showMessageBox = async (...args) =>
+      args.some((arg) => arg?.title === "Autorizar bancos")
+        ? { response: global.databaseConsentResponse }
+        : global.databasePreviousDialog(...args);
+  });
+  try {
+    await dialog
+      .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+      .click();
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
+      false,
+    );
+    await application.evaluate(() => {
+      global.databaseConsentResponse = 1;
+    });
+    await dialog
+      .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+      .click();
+    await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
+      false,
+    );
+    await dialog
+      .getByLabel("Conexão salva", { exact: true })
+      .selectOption({ label: "SQL Server sintético" });
+  } finally {
+    await application.evaluate(({ dialog }) => {
+      dialog.showMessageBox = global.databasePreviousDialog;
+    });
+  }
   const wrongProject = await page.evaluate(async () => {
     const state = await window.stag.getSnapshot();
     try {

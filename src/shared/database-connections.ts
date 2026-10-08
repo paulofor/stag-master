@@ -60,6 +60,7 @@ export interface DatabaseConnectionProfile {
   id: string;
   config: SqlServerConfig;
   passwordSaved: boolean;
+  passwordAvailable: boolean;
 }
 export interface DatabaseConnectionTest {
   id: string;
@@ -71,6 +72,8 @@ export interface ProjectDatabases {
   revision: string;
   connections: DatabaseConnectionProfile[];
   canRememberPassword: boolean;
+  authorized: boolean;
+  metrics: { requests: number; failures: number; elapsedMs: number; lastRows: number | null };
   test: DatabaseConnectionTest | null;
 }
 export const emptySqlServerConfig: SqlServerConfig = {

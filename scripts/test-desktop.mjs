@@ -1031,7 +1031,11 @@ try {
   ).toContainText("1");
   const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
   assert.deepEqual(restarted.projectSources, [source]);
-  assert.deepEqual(restarted.projectDatabases.connections, savedDatabases);
+  assert.deepEqual(
+    restarted.projectDatabases.connections,
+    savedDatabases.map((entry) => ({ ...entry, passwordAvailable: entry.passwordSaved })),
+  );
+  assert.equal(restarted.projectDatabases.authorized, false);
   assert.deepEqual(restarted.projectApis.connections, savedApis);
   assert.equal(restarted.projectApis.authorized, false);
   assert.equal(restarted.browser.authorized, false);

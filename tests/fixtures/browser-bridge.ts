@@ -126,6 +126,8 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 revision: crypto.randomUUID(),
                 connections: [],
                 canRememberPassword: true,
+                authorized: false,
+                metrics: { requests: 0, failures: 0, elapsedMs: 0, lastRows: null },
                 test: null,
               };
               break;
@@ -135,6 +137,10 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 id: action.connectionId || crypto.randomUUID(),
                 config: action.config,
                 passwordSaved: action.rememberPassword,
+                passwordAvailable:
+                  !!action.password ||
+                  !!databases.connections.find((entry) => entry.id === action.connectionId)
+                    ?.passwordAvailable,
               };
               databases.connections = action.connectionId
                 ? databases.connections.map((previous) =>
@@ -143,6 +149,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 : [...databases.connections, entry];
               databases.revision = crypto.randomUUID();
               databases.test = null;
+              databases.authorized = false;
               break;
             }
             case "deleteDatabase":
@@ -150,6 +157,11 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 (entry) => entry.id !== action.connectionId,
               );
               state.projectDatabases!.revision = crypto.randomUUID();
+              state.projectDatabases!.authorized = false;
+              break;
+            case "databaseConsent":
+              state.projectDatabases!.authorized = action.allow;
+              if (!action.allow) state.queuePaused = true;
               break;
             case "testDatabase":
               state.projectDatabases!.test = {

@@ -44,12 +44,14 @@ export class DatabaseConnections {
   private data: Stored = { version: 1, projects: {} };
   private revisions = new Map<string, string>();
   private queue: Promise<void> = Promise.resolve();
+  private sessionPasswords = new Map<string, { binding: string; password: string }>();
   constructor(
     private file: string,
     private secrets: DatabaseSecretStorage,
   ) {}
 
   async init(): Promise<void> {
+    this.sessionPasswords.clear();
     try {
       if ((await stat(this.file)).size > 2 * 1024 * 1024) throw new Error();
       this.data = storageSchema.parse(JSON.parse(await readFile(this.file, "utf8")));
@@ -69,13 +71,18 @@ export class DatabaseConnections {
         id,
         config: structuredClone(config),
         passwordSaved: !!encryptedPassword,
+        passwordAvailable:
+          this.sessionPasswords.has(this.key(path, id)) ||
+          (!!encryptedPassword && this.secrets.available()),
       })),
       canRememberPassword: this.secrets.available(),
+      authorized: false,
+      metrics: { requests: 0, failures: 0, elapsedMs: 0, lastRows: null },
       test: null,
     };
   }
 
-  private check(path: string, revision: string): void {
+  check(path: string, revision: string): void {
     if (this.snapshot(path).revision !== revision)
       throw new Error("As conexões mudaram. Reabra Conexões antes de continuar.");
   }
@@ -84,6 +91,13 @@ export class DatabaseConnections {
     const record = this.data.projects[path]?.find((entry) => entry.id === id);
     if (!record) throw new Error("Conexão não encontrada neste projeto. Reabra Conexões.");
     return record;
+  }
+  private key(path: string, id: string): string {
+    return JSON.stringify([path, id]);
+  }
+  get(path: string, revision: string, id: string): { config: SqlServerConfig } {
+    this.check(path, revision);
+    return { config: structuredClone(this.record(path, id).config) };
   }
 
   password(
@@ -97,10 +111,12 @@ export class DatabaseConnections {
     const previous = id ? this.record(path, id) : null;
     const password = databasePasswordSchema.parse(supplied);
     if (password) return password;
-    if (!previous?.encryptedPassword)
-      throw new Error("Informe a senha do usuário para testar ou lembrá-la.");
-    if (binding(previous.config) !== binding(config))
+    if (previous && binding(previous.config) !== binding(config))
       throw new Error("O destino, usuário ou segurança mudou. Digite a senha novamente.");
+    const session = id ? this.sessionPasswords.get(this.key(path, id)) : null;
+    if (session && session.binding === binding(config)) return session.password;
+    if (!previous?.encryptedPassword)
+      throw new Error("Informe a senha do usuário na tela Conexões e salve antes de continuar.");
     try {
       if (!this.secrets.available()) throw new Error();
       const secret = JSON.parse(
@@ -147,6 +163,14 @@ export class DatabaseConnections {
         throw new Error("Já existe uma conexão com esse nome neste projeto.");
       const nextId = id || randomUUID();
       let encryptedPassword: string | undefined;
+      const previous = id ? this.record(path, id) : null;
+      const sameDestination = !!previous && binding(previous.config) === binding(config);
+      // Reuse only a session credential bound to this exact destination. Unchecking
+      // persistence removes the saved credential; it does not silently decrypt it again.
+      const sessionPassword =
+        password ||
+        (sameDestination ? this.sessionPasswords.get(this.key(path, nextId))?.password : "") ||
+        "";
       if (remember) {
         if (!this.secrets.available())
           throw new Error(
@@ -175,6 +199,12 @@ export class DatabaseConnections {
         ? list.map((entry) => (entry.id === id ? next : entry))
         : [...list, next];
       await this.persist(path, connections);
+      this.sessionPasswords.delete(this.key(path, nextId));
+      if (!remember && sessionPassword)
+        this.sessionPasswords.set(this.key(path, nextId), {
+          binding: binding(config),
+          password: sessionPassword,
+        });
     });
   }
 
@@ -186,6 +216,7 @@ export class DatabaseConnections {
         path,
         this.data.projects[path].filter((entry) => entry.id !== id),
       );
+      this.sessionPasswords.delete(this.key(path, id));
     });
   }
 
