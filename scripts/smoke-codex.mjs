@@ -26,6 +26,7 @@ try {
       "src/main/rpc.ts",
       "src/main/desktop-tools.ts",
       "src/main/browser-tools.ts",
+      "src/main/http-tools.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
       "src/main/project-branches.ts",
@@ -40,6 +41,7 @@ try {
   });
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
+  const { httpTool } = await import(pathToFileURL(join(dir, "http-tools.mjs")).href);
   const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
@@ -161,7 +163,7 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [desktopTool, browserTool],
+    dynamicTools: [desktopTool, browserTool, httpTool],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");

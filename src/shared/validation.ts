@@ -3,8 +3,10 @@ import { requestImagesSchema } from "./request-images";
 import { projectSourcesSchema } from "./project-sources";
 import { branchOperationSchema } from "./project-branches";
 import { databasePasswordSchema, sqlServerConfigSchema } from "./database-connections";
+import { apiActionSchemas } from "./api-connections";
 
 export const actionSchema = z.discriminatedUnion("type", [
+  ...apiActionSchemas,
   z
     .object({ type: z.literal("listDatabases"), projectPath: z.string().min(1).max(32768) })
     .strict(),

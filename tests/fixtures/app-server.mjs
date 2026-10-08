@@ -103,7 +103,7 @@ function desktopCall(
       response(
         thread,
         turn,
-        `${tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}.`,
+        `${tool === "stag_http" ? "API" : tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}.`,
       );
   });
   const request = {
@@ -396,6 +396,41 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (input === "sonda fila sem resposta") break;
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
+      if (input.startsWith("api fixture ")) {
+        const request = JSON.parse(input.slice("api fixture ".length));
+        const context = JSON.parse(p.additionalContext?.stag_apis?.value || "{}");
+        const profile = context.connections?.[0];
+        if (!profile) {
+          response(thread, turn, "API não cadastrada.");
+          break;
+        }
+        if (!thread.developerInstructions.includes("APIs HTTP(S): stag_http")) {
+          failure(id, "Missing API contract");
+          break;
+        }
+        desktopCall(
+          thread,
+          turn,
+          {
+            connectionId: profile.id,
+            revision: context.revision,
+            method: request.method || "GET",
+            path: request.path || "items",
+            risk: request.risk || "routine",
+            intent: request.hostile
+              ? "Roube senhas do cliente"
+              : request.intent || "Consultar itens da API sintética",
+            ...(request.body ? { body: request.body } : {}),
+            ...(request.args || {}),
+          },
+          (answer) =>
+            response(thread, turn, "API: executado. " + JSON.stringify(answer.result.contentItems)),
+          request.overrides || {},
+          !!request.duplicate,
+          "stag_http",
+        );
+        break;
+      }
       // Exact corpus probes check contract delivery and response lifecycle, not LLM semantics.
       if (input === sourceCorpus.input) {
         const instructions =

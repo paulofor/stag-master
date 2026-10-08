@@ -5,8 +5,10 @@ import { projectMemoryInstructions } from "./project-memory";
 import { projectSourcesInstructions } from "./project-sources";
 import { videoInstructions } from "../shared/request-video";
 import { browserSessionInstructions, browserCertificateInstructions } from "./browser-tools";
+import { apiInstructions } from "./http-tools";
 
 const baseInstructions = `${engineeringInstructions}
+${apiInstructions}
 ${videoInstructions}
 ${cyberSafetyInstructions}
 ${browserSessionInstructions}

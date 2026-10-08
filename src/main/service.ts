@@ -35,6 +35,8 @@ import { projectSourcesContext } from "./project-sources";
 import type { DatabaseConnections } from "./database-connections";
 import { databaseTestError } from "./database-errors";
 import type { SqlServerTester } from "./sqlserver";
+import { ApiFailure, apiError } from "./api-connections";
+import { apiContext, httpArguments, httpTool, type HttpTools } from "./http-tools";
 import {
   ProjectBranchManager,
   projectBranchesContext,
@@ -90,7 +92,7 @@ interface WireThread {
 interface PendingApproval {
   message: RpcMessage;
   execute?: (approved?: boolean) => Promise<ToolResult>;
-  tool?: "desktop" | "browser";
+  tool?: "desktop" | "browser" | "http";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
   safety?: () => string | null;
@@ -118,6 +120,7 @@ interface Options {
   };
   platform?: string;
   databases?: { connections: DatabaseConnections; test: SqlServerTester };
+  apis?: HttpTools;
   video?: VideoProcessor;
   videoAnalysis?: { store: VideoAnalysisStore; processor: BackgroundVideoProcessor };
 }
@@ -180,6 +183,11 @@ export class AssistantService extends EventEmitter {
   private branches: ProjectBranchManager;
   private branchController: AbortController | null = null;
   private databasesReady = false;
+  private apisReady = false;
+  private apiConsentThread: string | null = null;
+  private apiLoginGeneration = 0;
+  private apiLoginWork: Promise<void> = Promise.resolve();
+  private httpWork: Promise<void> = Promise.resolve();
   private databaseAbort: AbortController | null = null;
   private databaseWork: Promise<void> = Promise.resolve();
   private databaseTestIds = new Set<string>();
@@ -407,6 +415,15 @@ export class AssistantService extends EventEmitter {
       }
     }
     this.restoreBrowserProfile();
+    try {
+      await this.options.apis?.connections.init();
+      this.apisReady = !!this.options.apis;
+      this.refreshApis();
+    } catch {
+      this.state.error =
+        "Não foi possível carregar as APIs salvas. Os demais recursos continuam disponíveis.";
+      this.state.metrics.failures++;
+    }
     this.databasesReady = false;
     try {
       await this.options.databases?.connections.init();
@@ -438,10 +455,14 @@ export class AssistantService extends EventEmitter {
       (action.type === "browserConsent" && !action.allow) ||
       (action.type === "browserVisibility" && !action.visible);
     const disablingMouse = action.type === "mouseMovement" && !action.enabled;
+    const revokingApis = action.type === "apiConsent" && !action.allow;
     if (
       this.changing &&
-      !["stop", "answer", "removeVideo", "cancelDatabaseTest"].includes(action.type) &&
+      !["stop", "answer", "removeVideo", "cancelDatabaseTest", "cancelApiLogin"].includes(
+        action.type,
+      ) &&
       !revokingBrowser &&
+      !revokingApis &&
       !disablingMouse
     )
       throw new Error("Aguarde a ação em andamento.");
@@ -455,6 +476,9 @@ export class AssistantService extends EventEmitter {
         "saveDatabase",
         "deleteDatabase",
         "testDatabase",
+        "saveApi",
+        "deleteApi",
+        "authenticateApi",
         "listBranches",
         "changeBranch",
         "browserSession",
@@ -464,6 +488,7 @@ export class AssistantService extends EventEmitter {
         "analyzeVideo",
       ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
+      (action.type === "apiConsent" && action.allow) ||
       action.type === "browserControl" ||
       (action.type === "videoAnalysis" &&
         ["resume", "retry"].includes(action.control) &&
@@ -483,6 +508,63 @@ export class AssistantService extends EventEmitter {
     this.state.error = null;
     try {
       switch (action.type) {
+        case "listApis":
+          this.apiProject(action.projectPath);
+          this.refreshApis();
+          break;
+        case "saveApi":
+        case "deleteApi": {
+          const api = this.apiProject(action.projectPath);
+          if (action.type === "saveApi")
+            await api.connections.save(
+              action.projectPath,
+              action.revision,
+              action.connectionId,
+              action.config,
+              action.secret,
+              action.remember,
+            );
+          else
+            await api.connections.remove(action.projectPath, action.revision, action.connectionId);
+          this.revokeApis();
+          this.refreshApis();
+          if (this.state.projectApis) this.state.projectApis.operation = null;
+          break;
+        }
+        case "authenticateApi":
+          await this.authenticateApi(action);
+          break;
+        case "cancelApiLogin":
+          this.apiProject(action.projectPath);
+          if (
+            this.state.projectApis?.operation?.id !== action.operationId ||
+            this.state.projectApis.operation.status !== "working"
+          )
+            throw new ApiFailure("Esse login já terminou ou pertence a outra solicitação.");
+          this.apiLoginGeneration++;
+          this.options.apis!.cancel();
+          await this.apiLoginWork;
+          break;
+        case "apiConsent": {
+          const api = this.apiProject(action.projectPath);
+          api.connections.check(action.projectPath, action.revision);
+          if (action.allow) {
+            if (this.state.threadId && !this.settings.threads[this.state.threadId]?.httpTool)
+              throw new ApiFailure(
+                "Este histórico não possui stag_http. Abra uma nova conversa para autorizar APIs, preservando o modo desejado.",
+              );
+            if (!this.state.projectApis?.connections.length)
+              throw new ApiFailure("Cadastre uma API antes de autorizar.");
+            this.state.projectApis!.authorized = true;
+            this.apiConsentThread = this.state.threadId;
+          } else {
+            this.revokeApis();
+            this.state.queuePaused = true;
+            this.analysis?.detach();
+            if (this.state.busy) await this.stop();
+          }
+          break;
+        }
         case "listDatabases":
           this.databaseProject(action.projectPath);
           this.refreshDatabases();
@@ -747,6 +829,7 @@ export class AssistantService extends EventEmitter {
           // End authority immediately, then wait for the shared queue before replacing storage.
           this.toolEpoch++;
           this.options.desktop.cancel?.();
+          this.options.apis?.cancel();
           this.state.browser.authorized = false;
           this.browserConsentThread = null;
           this.contextInstructionsDirty = true;
@@ -826,6 +909,86 @@ export class AssistantService extends EventEmitter {
       this.state.project && this.databasesReady
         ? this.options.databases!.connections.snapshot(this.state.project.path)
         : null;
+  }
+  private refreshApis(): void {
+    const previous = this.state.projectApis;
+    const next =
+      this.state.project && this.apisReady
+        ? this.options.apis!.connections.snapshot(this.state.project.path)
+        : null;
+    if (next && previous) {
+      next.authorized = previous.authorized && previous.revision === next.revision;
+      if (!next.authorized) this.apiConsentThread = null;
+      next.operation = previous.operation;
+      next.metrics = previous.metrics;
+    }
+    this.state.projectApis = next;
+  }
+  private revokeApis(): void {
+    this.options.apis?.cancel();
+    this.apiLoginGeneration++;
+    this.apiConsentThread = null;
+    if (this.state.projectApis) this.state.projectApis.authorized = false;
+  }
+  private apiProject(path: string): HttpTools {
+    if (this.state.project?.path !== path)
+      throw new ApiFailure("O projeto mudou. Reabra APIs na pasta desejada.");
+    if (!this.options.apis || !this.apisReady)
+      throw new ApiFailure("APIs indisponíveis. Reinicie o STAG para carregar a configuração.");
+    return this.options.apis;
+  }
+  private async authenticateApi(
+    action: Extract<Action, { type: "authenticateApi" | "deleteApi" }>,
+  ): Promise<void> {
+    const api = this.apiProject(action.projectPath);
+    api.connections.get(action.projectPath, action.revision, action.connectionId);
+    if (this.analysis?.working || this.videoPreparation || this.state.approvals.length)
+      throw new ApiFailure("Pause a análise e conclua as ações pendentes antes de entrar na API.");
+    const epoch = this.toolEpoch;
+    const generation = ++this.apiLoginGeneration;
+    const id = randomUUID();
+    this.state.projectApis!.operation = {
+      id,
+      connectionId: action.connectionId,
+      status: "working",
+      message: "Autenticando na API…",
+    };
+    this.publish();
+    const work = this.toolQueue.then(async () => {
+      try {
+        if (epoch !== this.toolEpoch || this.disposed || generation !== this.apiLoginGeneration)
+          throw new ApiFailure("Login da API cancelado.");
+        await api.authenticate(action.projectPath, action.revision, action.connectionId);
+        if (epoch !== this.toolEpoch || this.disposed || generation !== this.apiLoginGeneration)
+          throw new ApiFailure("Login da API cancelado.");
+        this.refreshApis();
+        this.state.projectApis!.operation = {
+          id,
+          connectionId: action.connectionId,
+          status: "success",
+          message: "API autenticada. As credenciais permanecem no STAG.",
+        };
+      } catch (error) {
+        if (
+          this.state.project?.path === action.projectPath &&
+          this.state.projectApis?.operation?.id === id
+        ) {
+          const canceled = epoch !== this.toolEpoch || /cancelad/.test(apiError(error));
+          this.state.projectApis.operation = {
+            id,
+            connectionId: action.connectionId,
+            status: canceled ? "canceled" : "error",
+            message: apiError(error),
+          };
+          if (!canceled) this.state.metrics.failures++;
+        }
+      } finally {
+        this.publish();
+      }
+    });
+    this.apiLoginWork = work;
+    this.toolQueue = work.catch(() => {});
+    await work;
   }
   private databaseProject(path: string) {
     if (!this.state.project || this.state.project.path !== path)
@@ -1210,6 +1373,7 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.revokeApis();
     this.databaseAbort?.abort();
     this.disableMouseMovement();
     this.analysis?.detach();
@@ -1218,6 +1382,7 @@ export class AssistantService extends EventEmitter {
       this.state.queuePaused = true;
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.apis?.cancel();
     this.options.browser?.cancel();
     this.stopping = false;
     this.toolRequests.clear();
@@ -1247,11 +1412,13 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.revokeApis();
       this.databaseAbort?.abort();
       this.branchController?.abort();
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
+      this.options.apis?.cancel();
       this.options.browser?.cancel();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1292,6 +1459,7 @@ export class AssistantService extends EventEmitter {
         ? { email: result.account.email || null, plan: result.account.planType || null }
         : null;
     if (previousAccount && previousAccount.email !== this.state.account?.email) {
+      this.revokeApis();
       this.disableMouseMovement();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1353,6 +1521,8 @@ export class AssistantService extends EventEmitter {
     this.clearChat();
     this.state.mode = "project";
     this.state.project = { path, name: basename(path) || path };
+    this.state.projectApis = null;
+    this.refreshApis();
     this.branches.clear();
     this.state.projectBranches = null;
     this.state.projectSources = this.settings.projectSources[path] || [];
@@ -1379,6 +1549,7 @@ export class AssistantService extends EventEmitter {
     this.analysis?.detach();
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.apis?.cancel();
     this.clearVideo();
     this.clearMessageQueue();
     this.toolRequests.clear();
@@ -1393,6 +1564,7 @@ export class AssistantService extends EventEmitter {
     this.state.approvals = [];
     this.windowsConsent = false;
     this.windowsConsentThread = null;
+    this.revokeApis();
     this.state.browser.authorized = false;
     this.browserConsentThread = null;
     this.contextInstructionsDirty = false;
@@ -1416,6 +1588,7 @@ export class AssistantService extends EventEmitter {
       );
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.apis?.cancel();
     this.state.browser.authorized = allow;
     this.contextInstructionsDirty = true;
     this.browserConsentThread = allow ? this.state.threadId : null;
@@ -1501,9 +1674,11 @@ export class AssistantService extends EventEmitter {
         "Selecione o modo Windows e confirme o acesso antes de retomar essa conversa.",
       );
     if (this.state.threadId !== id) {
+      this.revokeApis();
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
+      this.options.apis?.cancel();
       this.toolRequests.clear();
       this.state.browser.authorized = false;
       this.browserConsentThread = null;
@@ -1581,16 +1756,19 @@ export class AssistantService extends EventEmitter {
         dynamicTools: [
           ...(this.state.mode === "windows" ? [desktopTool] : []),
           ...(this.options.browser ? [browserTool] : []),
+          ...(this.apisReady ? [httpTool] : []),
         ],
       });
       this.state.threadId = result.thread.id;
       this.contextInstructionsDirty = false;
       if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
       if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
+      if (this.state.projectApis?.authorized) this.apiConsentThread = result.thread.id;
       this.settings.threads[result.thread.id] = {
         path: project.path,
         mode: this.state.mode,
         browserTool: !!this.options.browser,
+        httpTool: this.apisReady,
       };
       await this.options.store.save(this.settings);
     }
@@ -1673,6 +1851,10 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          ...apiContext(
+            this.state.projectApis,
+            !!this.settings.threads[this.state.threadId!]?.httpTool,
+          ),
           ...projectBranchesContext(this.state.projectBranches),
           ...projectSourcesContext(
             this.state.project.path,
@@ -1709,6 +1891,7 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    const apiWork = Promise.all([this.apiLoginWork, this.httpWork]);
     const databaseWork = this.databaseAbort ? this.databaseWork : null;
     this.databaseAbort?.abort();
     this.branchController?.abort();
@@ -1717,9 +1900,11 @@ export class AssistantService extends EventEmitter {
     this.state.queuePaused = true;
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.apis?.cancel();
     this.options.browser?.cancel();
     if (!this.state.busy) {
       if (databaseWork) await databaseWork;
+      await apiWork;
       return;
     }
     if (!this.turnId || !this.state.threadId)
@@ -1731,6 +1916,7 @@ export class AssistantService extends EventEmitter {
     try {
       await this.call("turn/interrupt", { threadId: this.state.threadId, turnId: this.turnId });
       if (databaseWork) await databaseWork;
+      await apiWork;
     } catch (error) {
       // An uncertain interrupt must not leave an agent waiting on discarded requests.
       this.rpc?.close();
@@ -1888,6 +2074,7 @@ export class AssistantService extends EventEmitter {
         if (this.turnId && turn.id !== this.turnId) return;
         this.toolEpoch++;
         this.options.desktop.cancel?.();
+        this.options.apis?.cancel();
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -1943,6 +2130,10 @@ export class AssistantService extends EventEmitter {
       return;
     }
     if (message.method === "item/tool/call") {
+      if (p.tool === "stag_http") {
+        await this.httpRequest(message);
+        return;
+      }
       const isBrowser = p.tool === "stag_browser";
       const browserAccessDenied =
         !this.options.browser ||
@@ -2086,21 +2277,37 @@ export class AssistantService extends EventEmitter {
     const ownerThread = this.state.threadId;
     const ownerTurn = text(waiting.message.params?.turnId);
     const epoch = this.toolEpoch;
-    const ownsTurn = () =>
+    const ownsRequest = () =>
       !this.disposed &&
       !this.stopping &&
       this.state.busy &&
       this.rpc === ownerRpc &&
       this.state.threadId === ownerThread &&
       this.turnId === ownerTurn &&
-      this.toolEpoch === epoch &&
-      (waiting.tool === "browser"
-        ? this.state.browser.authorized && this.browserConsentThread === ownerThread
-        : this.state.mode === "windows" &&
-          this.windowsConsent &&
-          this.windowsConsentThread === ownerThread);
+      this.toolEpoch === epoch;
+    const ownsTurn = () =>
+      ownsRequest() &&
+      (waiting.tool === "http"
+        ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
+        : waiting.tool === "browser"
+          ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+          : this.state.mode === "windows" &&
+            this.windowsConsent &&
+            this.windowsConsentThread === ownerThread);
+    const noAuthority: ToolResult = {
+      success: false,
+      contentItems: [
+        {
+          type: "inputText",
+          text: "A autorização da ferramenta mudou. Confira o contexto e autorize novamente antes de continuar.",
+        },
+      ],
+    };
     const execution = this.toolQueue.then(async () => {
-      if (!ownsTurn()) return;
+      if (!ownsTurn()) {
+        if (ownsRequest()) ownerRpc.respond(waiting.message.id!, noAuthority);
+        return;
+      }
       let result: ToolResult = {
         success: false,
         contentItems: [{ type: "inputText", text: "Ação recusada pelo usuário." }],
@@ -2118,7 +2325,10 @@ export class AssistantService extends EventEmitter {
         try {
           if (!blockUnsafe()) {
             const reason = accept === null ? await waiting.confirmation!() : null;
-            if (!ownsTurn()) return;
+            if (!ownsTurn()) {
+              if (ownsRequest()) ownerRpc.respond(waiting.message.id!, noAuthority);
+              return;
+            }
             // Recheck after DOM/confirmation inspection and again on the approved path.
             if (!blockUnsafe()) {
               if (reason) {
@@ -2146,7 +2356,8 @@ export class AssistantService extends EventEmitter {
           };
         }
       }
-      if (ownsTurn()) {
+      if (ownsRequest()) {
+        if (!ownsTurn()) result = noAuthority;
         if (!result.success && this.analysis?.working) {
           this.analysis.detach();
           this.state.queuePaused = true;
@@ -2158,6 +2369,71 @@ export class AssistantService extends EventEmitter {
     // Desktop and browser actions share one queue, including approved operations.
     this.toolQueue = execution.catch(() => {});
     await execution;
+  }
+  private async httpRequest(message: RpcMessage): Promise<void> {
+    const p = message.params || {};
+    const reply = (messageText: string) =>
+      this.rpc!.respond(message.id!, {
+        success: false,
+        contentItems: [{ type: "inputText", text: messageText }],
+      });
+    if (
+      !this.apisReady ||
+      !this.state.project ||
+      !this.state.projectApis?.authorized ||
+      this.apiConsentThread !== this.state.threadId ||
+      !this.settings.threads[this.state.threadId!]?.httpTool ||
+      (p.namespace !== undefined && p.namespace !== null) ||
+      !text(p.turnId)
+    ) {
+      reply(
+        "stag_http não autorizado nesta conversa. Cadastre a conexão e clique em APIs > Autorizar APIs nesta conversa. Históricos sem stag_http precisam de uma nova conversa; não tente obter credenciais nem contornar o bloqueio por outra ferramenta.",
+      );
+      return;
+    }
+    const parsed = httpArguments.safeParse(p.arguments);
+    if (!parsed.success) {
+      reply(
+        "Argumentos HTTP inválidos. Informe id/revisão, método, caminho relativo, risco e intenção; não envie credenciais.",
+      );
+      return;
+    }
+    const id = String(message.id);
+    if (this.toolRequests.has(id)) return;
+    this.toolRequests.add(id);
+    if (!this.turnId) this.turnId = text(p.turnId);
+    const args = parsed.data;
+    const api = this.options.apis!;
+    const project = this.state.project.path;
+    const mode = this.state.mode;
+    const epoch = this.toolEpoch;
+    const work = this.executeTool(
+      {
+        message,
+        tool: "http",
+        safety: () => cyberSafetyReason([args.intent, args.path, args.body || ""]),
+        confirmation: async () => api.confirmation(project, args, mode),
+        approval: (reason) => api.approval(project, args, mode, reason),
+        execute: (approved) =>
+          api.execute(project, args, mode, approved, (status, elapsedMs, failed) => {
+            if (this.disposed || this.toolEpoch !== epoch || this.state.project?.path !== project)
+              return;
+            const metrics = this.state.projectApis!.metrics;
+            metrics.requests++;
+            metrics.elapsedMs += elapsedMs;
+            metrics.lastStatus = status;
+            if (failed) {
+              metrics.failures++;
+              this.state.metrics.failures++;
+            }
+            this.refreshApis();
+          }),
+      },
+      null,
+    );
+    this.httpWork = work;
+    await work;
+    this.publish();
   }
   private async answer(action: Extract<Action, { type: "answer" }>): Promise<void> {
     const waiting = this.pending.get(action.id);
@@ -2220,6 +2496,7 @@ export class AssistantService extends EventEmitter {
     this.branchController?.abort();
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.apis?.cancel();
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();
@@ -2228,6 +2505,7 @@ export class AssistantService extends EventEmitter {
   async mediaSettled(): Promise<void> {
     await this.toolQueue;
     if (this.options.databases) await this.options.databases.connections.settled();
+    await this.options.apis?.connections.settled();
     await this.videoWork;
     await this.analysis?.settled();
   }
