@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.39: navegador com abas **Documentação** e **Sistema do projeto**. Mantém conexões SQL Server pela ferramenta `stag_sql`, economia de dados enviados ao modelo, APIs autenticadas, análise de vídeos longos com estado visível e leitura do disco, memória em `.stag`, branches, controle dos aplicativos Windows permitidos, movimento periódico e avisos visuais/sonoros. Preserva a proteção contra abuso, engenharia de sistemas, painel único, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.40: botão de movimento do mouse sempre visível no Windows, com requisitos de ativação, contagem regressiva e estados da fila e do gesto. Mantém navegador com abas **Documentação** e **Sistema do projeto**, conexões SQL Server pela ferramenta `stag_sql`, economia de dados enviados ao modelo, APIs autenticadas, análise de vídeos longos com estado visível e leitura do disco, memória em `.stag`, branches, controle dos aplicativos Windows permitidos e avisos visuais/sonoros. Preserva a proteção contra abuso, engenharia de sistemas, painel único, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 ## Economia de dados
 
@@ -66,7 +66,9 @@ Trocas exigem ausência de alterações pendentes, sem descarte automático. Exc
 
 ## Movimento periódico do mouse
 
-No Windows, autorize o desktop, inicie a conversa e clique em **Mover mouse a cada 5 min**. Confirme a ativação. A cada cinco minutos, o main tenta deslocar o cursor até dois pixels e retornar, sem cliques, teclas ou troca de foco; não consome turnos do assistente.
+No Windows, o botão **Mover mouse a cada 5 min** permanece visível abaixo do controle do desktop, inclusive em Projeto e Leitura. O painel explica o que falta para ativar: conexão, login, projeto, autorização do desktop ou primeira mensagem da conversa Windows. Autorize o desktop, envie uma mensagem para iniciar a conversa, clique no botão e confirme a ativação. A cada cinco minutos, o main tenta deslocar o cursor até dois pixels e retornar, sem cliques, teclas ou troca de foco; não consome turnos do assistente.
+
+Uma contagem regressiva mostra a **próxima tentativa**. Ao vencer o prazo, o painel informa quando aguarda a fila de ferramentas e quando está movendo o mouse; depois mostra o resultado ou motivo da omissão. Recarregar a interface conserva o prazo do main. O prazo seguinte começa depois de concluir a tentativa, sem acumular movimentos quando outra ferramenta ocupa a fila.
 
 O cursor precisa estar sobre **a janela principal do STAG (inclusive o navegador integrado), Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano**, sem botões do mouse pressionados. O STAG identifica sua própria janela; os aplicativos externos continuam exigindo executável/produto/assinatura reconhecidos. FortiClient, outros aplicativos, sobreposições e alvos alterados são omitidos. O painel informa o motivo da omissão e as contagens; uma falha desliga a opção e permite ativar novamente. Esse gesto não autoriza cliques, teclas, capturas ou navegação no STAG.
 

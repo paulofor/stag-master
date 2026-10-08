@@ -291,10 +291,16 @@ test("movimento periódico exige conversa Windows e desliga sem perder rascunho"
 }, info) => {
   await ready(page);
   const enable = page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true });
-  await expect(enable).toHaveCount(0);
+  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
+  await expect(enable).toBeVisible();
+  await expect(enable).toBeDisabled();
+  await expect(region.getByRole("status")).toHaveText("Autorize o desktop para ativar");
   await page.getByRole("button", { name: "Autorizar desktop", exact: true }).click();
   await page.getByRole("button", { name: "Continuar", exact: true }).click();
   await expect(enable).toBeDisabled();
+  await expect(region.getByRole("status")).toHaveText(
+    "Envie uma mensagem para iniciar a conversa Windows",
+  );
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("Explique a arquitetura");
   await page.getByRole("button", { name: "Enviar mensagem" }).click();
@@ -303,8 +309,8 @@ test("movimento periódico exige conversa Windows e desliga sem perder rascunho"
   await enable.click();
   const disable = page.getByRole("button", { name: "Desligar movimento do mouse", exact: true });
   await expect(disable).toHaveAttribute("aria-pressed", "true");
-  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
   await expect(region.getByRole("status")).toContainText("Ativo · a cada 5 min");
+  await expect(region.getByRole("timer")).toContainText("Próxima tentativa em");
   await expect(input).toHaveValue("Rascunho preservado");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -314,8 +320,101 @@ test("movimento periódico exige conversa Windows e desliga sem perder rascunho"
   await expect(region.getByRole("status")).toContainText("Desligado");
   await enable.click();
   await page.getByRole("button", { name: "Revogar acesso", exact: true }).click();
-  await expect(enable).toHaveCount(0);
-  await expect(region).toHaveCount(0);
+  await expect(enable).toBeVisible();
+  await expect(enable).toBeDisabled();
+  await expect(region.getByRole("status")).toHaveText("Autorize o desktop para ativar");
+  await expect(region.getByRole("timer")).toHaveCount(0);
+  await expect(input).toHaveValue("Rascunho preservado");
+});
+test("controle do mouse permanece visível e explica conexão, conta, projeto e Leitura", async ({
+  page,
+}) => {
+  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
+  const enable = region.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true });
+  await expect(enable).toBeVisible();
+  await expect(enable).toBeDisabled();
+  await expect(region.getByRole("status")).toHaveText("Entre com ChatGPT para ativar");
+  await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
+  await expect(region.getByRole("status")).toHaveText("Selecione um projeto para ativar");
+  await page.getByRole("button", { name: "Escolher meu projeto" }).click();
+  await page.getByLabel("Acesso", { exact: true }).selectOption("read");
+  await expect(region.getByRole("status")).toHaveText("Autorize o desktop para ativar");
+  await expect(enable).toBeDisabled();
+  await expect(page.getByLabel("Acesso", { exact: true })).toHaveValue("read");
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent("stag-fixture-snapshot", { detail: { connection: "connecting" } }),
+    );
+  });
+  await expect(enable).toBeVisible();
+  await expect(enable).toBeDisabled();
+  await expect(region.getByRole("status")).toHaveText("Conecte o Codex para ativar");
+});
+test("prazo do main sobrevive ao reload e distingue temporizador, fila e movimento", async ({
+  page,
+}) => {
+  await ready(page);
+  const now = new Date("2026-10-08T12:00:00.000Z");
+  await page.clock.install({ time: now });
+  // Only explicit clock advances should affect assertions, including during reload.
+  await page.clock.pauseAt(now);
+  await installBridge(page, {
+    account: { email: "fixture@example.invalid", plan: "teste" },
+    project: { path: "C:/Projetos/exemplo", name: "exemplo" },
+    mode: "windows",
+    threadId: "synthetic-mouse-thread",
+    mouseMovement: {
+      enabled: true,
+      moves: 0,
+      skipped: 0,
+      status: "Ativo · a cada 5 min",
+      nextAttemptAt: now.getTime() + 300000,
+    },
+  });
+  await page.reload();
+  expect(await page.evaluate(() => Date.now())).toBe(now.getTime());
+  const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
+  await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 05:00");
+  await page.clock.runFor(61000);
+  await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 03:59");
+  await page.reload();
+  expect(await page.evaluate(() => Date.now())).toBe(now.getTime() + 61000);
+  await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 03:59");
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("Rascunho preservado");
+  for (const status of ["Aguardando a fila de ferramentas", "Movendo o mouse"]) {
+    await page.evaluate(async (status) => {
+      const state = await window.stag!.getSnapshot();
+      window.dispatchEvent(
+        new CustomEvent("stag-fixture-snapshot", {
+          detail: { mouseMovement: { ...state.mouseMovement, status, nextAttemptAt: null } },
+        }),
+      );
+    }, status);
+    await expect(region.getByRole("status")).toContainText(status);
+    await expect(region.getByRole("timer")).toHaveCount(0);
+    await expect(input).toHaveValue("Rascunho preservado");
+  }
+  await page.evaluate(async () => {
+    const state = await window.stag!.getSnapshot();
+    window.dispatchEvent(
+      new CustomEvent("stag-fixture-snapshot", {
+        detail: {
+          mouseMovement: {
+            ...state.mouseMovement,
+            status: "Mouse movido · próximo em 5 min",
+            moves: 1,
+            nextAttemptAt: Date.now() + 300000,
+          },
+        },
+      }),
+    );
+  });
+  await expect(region.getByRole("status")).toContainText("Mouse movido");
+  await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 05:00");
+  await region.getByRole("button", { name: "Desligar movimento do mouse" }).click();
+  await expect(region.getByRole("status")).toHaveText("Desligado");
+  await expect(region.getByRole("timer")).toHaveCount(0);
   await expect(input).toHaveValue("Rascunho preservado");
 });
 test("omissão explica onde posicionar o mouse sem perder rascunho ou causar overflow", async ({
@@ -332,6 +431,7 @@ test("omissão explica onde posicionar o mouse sem perder rascunho ou causar ove
       skipped: 2,
       status:
         "Intervalo omitido · janela não permitida ou não verificada; use STAG, Postman, IntelliJ, VS Code ou DBeaver",
+      nextAttemptAt: Date.now() + 300000,
     },
   });
   await page.reload();

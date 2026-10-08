@@ -242,7 +242,7 @@ describe("movimento periódico do mouse", () => {
     await send("Explique a arquitetura");
     await complete();
     // The process handshake and thread creation use their normal startup deadlines.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const threadId = service.snapshot().threadId!;
     await service.request({ type: "mouseMovement", threadId, enabled: true });
     return threadId;
@@ -271,13 +271,17 @@ describe("movimento periódico do mouse", () => {
   it("aguarda cinco minutos, habilita uma vez e preserva métricas do modelo", async () => {
     const threadId = await enable();
     const metrics = service.snapshot().metrics;
+    const firstAttempt = Date.now() + 300000;
+    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(firstAttempt);
     await service.request({ type: "mouseMovement", threadId, enabled: true });
+    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(firstAttempt);
     expect(pulseCursor).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(299999);
     expect(pulseCursor).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(pulseCursor).toHaveBeenCalledOnce();
     expect(service.snapshot().mouseMovement.moves).toBe(1);
+    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(Date.now() + 300000);
     await vi.advanceTimersByTimeAsync(300000);
     expect(pulseCursor).toHaveBeenCalledTimes(2);
     expect(service.snapshot().metrics).toEqual(metrics);
@@ -325,6 +329,7 @@ describe("movimento periódico do mouse", () => {
         moves: 1,
         skipped: 1,
         status: "Mouse movido · próximo em 5 min",
+        nextAttemptAt: Date.now() + 300000,
       });
       expect(service.snapshot().metrics).toEqual(metrics);
     },
@@ -344,6 +349,7 @@ describe("movimento periódico do mouse", () => {
       await vi.advanceTimersByTimeAsync(900000);
       expect(pulseCursor).not.toHaveBeenCalled();
       expect(service.snapshot().mouseMovement.enabled).toBe(false);
+      expect(service.snapshot().mouseMovement.nextAttemptAt).toBeNull();
     },
   );
   it("cancela o subprocesso em curso e ignora resultado antigo após reativar", async () => {
@@ -402,6 +408,12 @@ describe("movimento periódico do mouse", () => {
       await vi.advanceTimersByTimeAsync(900000);
       expect(browser.control).toHaveBeenCalledOnce();
       expect(pulseCursor).not.toHaveBeenCalled();
+      expect(service.snapshot().mouseMovement).toMatchObject({
+        status: "Aguardando a fila de ferramentas",
+        nextAttemptAt: null,
+        moves: 0,
+        skipped: 0,
+      });
       await service.request({ type: "mouseMovement", threadId, enabled: false });
     } finally {
       release();
@@ -420,6 +432,10 @@ describe("movimento periódico do mouse", () => {
         }),
     );
     await vi.advanceTimersByTimeAsync(300000);
+    expect(service.snapshot().mouseMovement).toMatchObject({
+      status: "Movendo o mouse",
+      nextAttemptAt: null,
+    });
     const navigation = service.request({ type: "browserControl", control: { action: "reload" } });
     await vi.advanceTimersByTimeAsync(0);
     expect(browser.control).not.toHaveBeenCalled();

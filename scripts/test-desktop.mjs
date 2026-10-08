@@ -172,10 +172,16 @@ try {
     moves: 0,
     skipped: 0,
     status: "Desligado",
+    nextAttemptAt: null,
   });
-  await expect(
-    page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true }),
-  ).toHaveCount(0);
+  const mouseControl = page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true });
+  if (process.platform === "win32") {
+    await expect(mouseControl).toBeVisible();
+    await expect(mouseControl).toBeDisabled();
+    await expect(
+      page.getByRole("region", { name: "Movimento periódico do mouse" }).getByRole("status"),
+    ).toHaveText("Entre com ChatGPT para ativar");
+  } else await expect(mouseControl).toHaveCount(0);
   const movementRejected = await page.evaluate(async () => {
     try {
       await window.stag.request({

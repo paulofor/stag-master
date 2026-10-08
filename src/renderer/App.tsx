@@ -21,7 +21,6 @@ import {
   LogOut,
   ListPlus,
   Monitor,
-  MousePointer2,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -42,6 +41,7 @@ import { DatabaseConnectionsDialog } from "./DatabaseConnectionsDialog";
 import { ApiConnectionsDialog } from "./ApiConnectionsDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
+import { MouseMovementPanel } from "./MouseMovementPanel";
 import { readPastedImage } from "./request-images";
 import { copyResponse } from "./copy-response";
 import { videoTime } from "../shared/request-video";
@@ -766,44 +766,7 @@ export function App() {
                   {state.mode === "windows" ? "Revogar acesso" : "Autorizar desktop"}
                 </button>
               </section>
-              {state.mode === "windows" && (
-                <section className="mouse-movement" aria-label="Movimento periódico do mouse">
-                  <button
-                    className="text-button"
-                    aria-pressed={state.mouseMovement.enabled}
-                    disabled={
-                      pending ||
-                      (!state.mouseMovement.enabled &&
-                        (state.mode !== "windows" ||
-                          !state.threadId ||
-                          !state.account ||
-                          state.connection !== "ready"))
-                    }
-                    title="Ative numa conversa Windows autorizada. Move até 2 pixels e retorna com o cursor sobre STAG (inclusive navegador integrado), Postman, IntelliJ, VS Code ou DBeaver em primeiro plano, sem clicar."
-                    onClick={() =>
-                      state.threadId &&
-                      void run({
-                        type: "mouseMovement",
-                        threadId: state.threadId,
-                        enabled: !state.mouseMovement.enabled,
-                      })
-                    }
-                  >
-                    <MousePointer2 size={13} />
-                    {state.mouseMovement.enabled
-                      ? "Desligar movimento do mouse"
-                      : "Mover mouse a cada 5 min"}
-                  </button>
-                  <span role="status">
-                    {state.mouseMovement.status}
-                    {state.mouseMovement.enabled && (
-                      <span className="mouse-movement-counts">
-                        {` · ${state.mouseMovement.moves} movimento(s) · ${state.mouseMovement.skipped} intervalo(s) omitido(s)`}
-                      </span>
-                    )}
-                  </span>
-                </section>
-              )}
+              <MouseMovementPanel state={state} pending={pending} run={run} />
             </>
           )}
           <VideoAnalysisPanel state={state} pending={pending} run={run} />
