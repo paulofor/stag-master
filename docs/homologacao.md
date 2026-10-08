@@ -21,6 +21,8 @@ Após reforçar o teste de ausência de cópia para conferir o tamanho total dos
 
 Limitação local: a sandbox Linux bloqueia namespaces bwrap no smoke existente, sem comprovar operações nativas de arquivo ou negação de acesso no Windows. Linux não comprova execução Windows; `test:windows`, `dist:win`, vídeo e Electron devem passar nos jobs Windows do PR e da main antes de concluir a entrega. Sem contas, mídia ou janelas do cliente e sem inferência paga; buffers de decoder/ASR e saídas limitadas continuam necessários, sem promessa de zero RAM.
 
+A revisão reproduziu uma regressão nova: após falha na validação, a retomada reutilizava o início antigo da etapa e contava a pausa como processamento. O teste falhou antes da correção; limpar estágio/tempo no encerramento corrigiu o caso. Typecheck, 233 contratos do manager/serviço, build e os 18 cenários de vídeo passaram novamente. O conjunto final contém 618 contratos. O ajuste mantém os mesmos checkpoints e não altera o transporte de mídia.
+
 ## APIs HTTP(S) autenticadas — versão 0.4.35
 
 Matriz definida antes dos testes. Cadastro opcional APIs por raiz canônica, com URL base, autenticação sem credenciais, Basic (usuário/senha), Bearer e OAuth2 (Authorization Code com PKCE ou Client Credentials). OAuth interativo abre o navegador do usuário por ação explícita, recebe retorno loopback e renova tokens no main; não dá controle desse navegador ao modelo. Credenciais podem durar apenas a sessão ou ser protegidas pelo safeStorage do sistema. A ferramenta stag_http recebe somente id do cadastro, método, caminho relativo, cabeçalhos não secretos, corpo e intenção/risco. Consentimento por conversa permite consultas; mutações/efeitos críticos exigem aprovação específica e são bloqueados em Leitura.

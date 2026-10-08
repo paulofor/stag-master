@@ -392,6 +392,8 @@ export class VideoAnalysisManager {
       if (job.status === "running") job.status = "paused";
       this.controller = null;
       if (this.active === job) this.active = null;
+      this.stage = "idle";
+      this.phaseStartedAt = null;
       this.hooks.changed();
     }
   }

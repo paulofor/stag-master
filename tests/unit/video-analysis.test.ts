@@ -345,6 +345,32 @@ it("arquivo alterado/ausente pausa sem encaminhar mídia", async () => {
   expect(processor.prepare).not.toHaveBeenCalled();
   expect(hooks.failure).toHaveBeenCalledTimes(1);
 });
+it("retomar após falha de validação reinicia o tempo da etapa, sem incluir a pausa", async () => {
+  const time = vi.spyOn(Date, "now").mockReturnValue(10000);
+  vi.mocked(processor.validate).mockRejectedValueOnce(new Error("O arquivo mudou."));
+  await manager.start(job);
+  await manager.settled();
+  expect(manager.summary()).toMatchObject({ status: "failed", phaseStartedAt: null });
+  let release!: () => void;
+  const validation = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  vi.mocked(processor.validate).mockImplementationOnce(() => validation);
+  time.mockReturnValue(70000);
+  try {
+    await manager.control(job.id, "resume");
+    expect(manager.summary()).toMatchObject({
+      stage: "checking",
+      working: true,
+      phaseStartedAt: 70000,
+      completed: 0,
+    });
+  } finally {
+    release();
+  }
+  await manager.settled();
+  expect(manager.summary()?.status).toBe("completed");
+});
 it("checkpoint inválido não autoriza sobrescrever progresso nem vaza conteúdo", async () => {
   await writeFile(resolve(dir, "jobs.json"), '{"private-synthetic-path":');
   manager = new VideoAnalysisManager(store, processor, hooks);
