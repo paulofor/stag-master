@@ -356,6 +356,8 @@ test("prazo do main sobrevive ao reload e distingue temporizador, fila e movimen
   await ready(page);
   const now = new Date("2026-10-08T12:00:00.000Z");
   await page.clock.install({ time: now });
+  // Only explicit clock advances should affect assertions, including during reload.
+  await page.clock.pauseAt(now);
   await installBridge(page, {
     account: { email: "fixture@example.invalid", plan: "teste" },
     project: { path: "C:/Projetos/exemplo", name: "exemplo" },
@@ -370,11 +372,13 @@ test("prazo do main sobrevive ao reload e distingue temporizador, fila e movimen
     },
   });
   await page.reload();
+  expect(await page.evaluate(() => Date.now())).toBe(now.getTime());
   const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
   await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 05:00");
   await page.clock.runFor(61000);
   await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 03:59");
   await page.reload();
+  expect(await page.evaluate(() => Date.now())).toBe(now.getTime() + 61000);
   await expect(region.getByRole("timer")).toHaveText("Próxima tentativa em 03:59");
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("Rascunho preservado");
