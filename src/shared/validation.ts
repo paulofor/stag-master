@@ -2,8 +2,49 @@ import { z } from "zod";
 import { requestImagesSchema } from "./request-images";
 import { projectSourcesSchema } from "./project-sources";
 import { branchOperationSchema } from "./project-branches";
+import { databasePasswordSchema, sqlServerConfigSchema } from "./database-connections";
 
 export const actionSchema = z.discriminatedUnion("type", [
+  z
+    .object({ type: z.literal("listDatabases"), projectPath: z.string().min(1).max(32768) })
+    .strict(),
+  z
+    .object({
+      type: z.literal("saveDatabase"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      connectionId: z.uuid().nullable(),
+      config: sqlServerConfigSchema,
+      password: databasePasswordSchema,
+      rememberPassword: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("deleteDatabase"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      connectionId: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("testDatabase"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      connectionId: z.uuid().nullable(),
+      testId: z.uuid(),
+      config: sqlServerConfigSchema,
+      password: databasePasswordSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("cancelDatabaseTest"),
+      projectPath: z.string().min(1).max(32768),
+      testId: z.uuid(),
+    })
+    .strict(),
   z.object({ type: z.literal("listBranches"), projectPath: z.string().min(1).max(32768) }).strict(),
   z
     .object({

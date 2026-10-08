@@ -15,6 +15,7 @@ import appMetadata from "../package.json" with { type: "json" };
 import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
+import { validateDatabaseConnections } from "./test-databases.mjs";
 import {
   buildTaskbarHarness,
   validateWaitingAudio,
@@ -34,6 +35,7 @@ const data = join(dir, "data");
 let application;
 let site;
 let backgroundSaved;
+let savedDatabases;
 async function stagWindow(application) {
   // Playwright also reports WebContentsView pages as windows. During profile restore,
   // the initial temporary page is replaced; firstWindow() can return that closing page.
@@ -231,6 +233,7 @@ try {
   assert.equal(repeatedGit.added, 0);
   assert.equal(repeatedGit.verified, 2);
   await validateProjectBranches(application, page, project, nestedRepository, gitTest);
+  savedDatabases = await validateDatabaseConnections(application, page, project, data, site.url);
   // Real main/preload persistence works without an account or browser consent on both platforms.
   const source = { name: "Documentação sintética", url: site.url };
   await page.getByRole("button", { name: "Fontes do projeto", exact: true }).click();
@@ -621,6 +624,19 @@ try {
     await expect(
       page.getByText("Navegador: campo preenchido pelo modelo.", { exact: true }),
     ).toBeVisible();
+    // Final text can arrive before turn/completed and its history refresh. Snapshot comparisons
+    // must start after both, otherwise a valid completion looks like a dialog side effect.
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await expect
+      .poll(() =>
+        page.evaluate(async () => {
+          const state = await window.stag.getSnapshot();
+          return state.threads.find((entry) => entry.id === state.threadId)?.title;
+        }),
+      )
+      .toBe(`navegador fluxo real ${site.url}`);
     const contentsResult = await application.evaluate(async ({ BrowserWindow }) => {
       const parent = BrowserWindow.getAllWindows()[0];
       const view = parent.contentView.children.find(
@@ -979,6 +995,7 @@ try {
   ).toContainText("1");
   const restarted = await restartedPage.evaluate(async () => window.stag.getSnapshot());
   assert.deepEqual(restarted.projectSources, [source]);
+  assert.deepEqual(restarted.projectDatabases.connections, savedDatabases);
   assert.equal(restarted.browser.authorized, false);
   if (backgroundSaved) {
     assert.equal(restarted.videoAnalysis.id, backgroundSaved.id);

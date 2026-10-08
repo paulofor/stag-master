@@ -122,6 +122,7 @@ svg {
 }
 .context-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   padding: 13px 26px;
@@ -1225,6 +1226,95 @@ summary::-webkit-details-marker {
   letter-spacing: -0.5px;
   color: #426036;
 }
+.database-dialog {
+  width: min(620px, calc(100% - 24px));
+  max-width: 620px;
+  max-height: calc(100dvh - 24px);
+}
+.database-saved,
+.database-fields label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #626c61;
+}
+.database-dialog select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #dedfd3;
+  background: #fffefa;
+  color: #252a29;
+  border-radius: 6px;
+  padding: 9px;
+  font-size: 12px;
+}
+.database-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.database-fields .database-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.database-check input {
+  width: auto;
+  flex-shrink: 0;
+}
+.database-password {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.database-password input {
+  flex: 1;
+}
+.database-password button {
+  flex-shrink: 0;
+}
+.database-advanced {
+  margin-top: 14px;
+}
+.database-advanced summary {
+  margin-bottom: 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.database-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.database-result,
+.database-delete {
+  border-radius: 8px;
+  padding: 10px;
+  overflow-wrap: anywhere;
+}
+.database-result.success {
+  background: #e9f2e5;
+  color: #49673e;
+}
+.database-result.error,
+.database-delete {
+  background: #fbede5;
+  color: #965139;
+}
+@media (max-width: 480px) {
+  .database-dialog {
+    padding: 16px;
+  }
+  .database-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
 .modal p {
   font-size: 12px;
   line-height: 1.8;
@@ -1721,6 +1811,12 @@ summary::-webkit-details-marker {
   overflow-wrap: anywhere;
 }
 @media (max-width: 500px) {
+  .context-bar {
+    flex-wrap: nowrap;
+  }
+  .database-button span {
+    display: none;
+  }
   .connection {
     font-size: 0;
     gap: 0;

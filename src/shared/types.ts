@@ -1,5 +1,6 @@
 import type { PendingVideo, VideoAnalysisSummary } from "./request-video";
 import type { BranchOperation, ProjectBranches } from "./project-branches";
+import type { ProjectDatabases, SqlServerConfig } from "./database-connections";
 export type AccessMode = "read" | "project" | "windows";
 export type RpcId = number | string;
 export interface Model {
@@ -75,6 +76,7 @@ export interface Snapshot {
   project: Project | null;
   projectSources: DocumentationSource[];
   projectBranches: ProjectBranches | null;
+  projectDatabases: ProjectDatabases | null;
   models: Model[];
   model: string;
   effort: string;
@@ -116,6 +118,7 @@ export const emptySnapshot: Snapshot = {
   project: null,
   projectSources: [],
   projectBranches: null,
+  projectDatabases: null,
   models: [],
   model: "",
   effort: "",
@@ -155,6 +158,27 @@ export type Action =
   | { type: "selectProject" }
   | { type: "projectSources"; projectPath: string; sources: DocumentationSource[] }
   | { type: "listBranches"; projectPath: string }
+  | { type: "listDatabases"; projectPath: string }
+  | {
+      type: "saveDatabase";
+      projectPath: string;
+      revision: string;
+      connectionId: string | null;
+      config: SqlServerConfig;
+      password: string;
+      rememberPassword: boolean;
+    }
+  | { type: "deleteDatabase"; projectPath: string; revision: string; connectionId: string }
+  | {
+      type: "testDatabase";
+      projectPath: string;
+      revision: string;
+      connectionId: string | null;
+      testId: string;
+      config: SqlServerConfig;
+      password: string;
+    }
+  | { type: "cancelDatabaseTest"; projectPath: string; testId: string }
   | {
       type: "changeBranch";
       projectPath: string;

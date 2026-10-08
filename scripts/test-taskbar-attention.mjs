@@ -252,6 +252,10 @@ export async function validateTaskbarService(application, page) {
   await expect.poll(title).toBe("STAG — Aguardando sua resposta");
   await request({ type: "stop" });
   await expect.poll(title).toBe("STAG");
+  // The interruption RPC clears the waiting signal before turn/completed arrives.
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+    .toBe(false);
   await request({ type: "newChat" });
   await expect.poll(title).toBe("STAG");
   console.log(

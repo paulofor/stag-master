@@ -57,6 +57,47 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         request: async (action: Action) => {
           state.error = null;
           switch (action.type) {
+            case "listDatabases":
+              state.projectDatabases ||= {
+                revision: crypto.randomUUID(),
+                connections: [],
+                canRememberPassword: true,
+                test: null,
+              };
+              break;
+            case "saveDatabase": {
+              const databases = state.projectDatabases!;
+              const entry = {
+                id: action.connectionId || crypto.randomUUID(),
+                config: action.config,
+                passwordSaved: action.rememberPassword,
+              };
+              databases.connections = action.connectionId
+                ? databases.connections.map((previous) =>
+                    previous.id === entry.id ? entry : previous,
+                  )
+                : [...databases.connections, entry];
+              databases.revision = crypto.randomUUID();
+              databases.test = null;
+              break;
+            }
+            case "deleteDatabase":
+              state.projectDatabases!.connections = state.projectDatabases!.connections.filter(
+                (entry) => entry.id !== action.connectionId,
+              );
+              state.projectDatabases!.revision = crypto.randomUUID();
+              break;
+            case "testDatabase":
+              state.projectDatabases!.test = {
+                id: action.testId,
+                status: "success",
+                message: "Conexão validada. O teste não altera dados e a sessão foi fechada.",
+                elapsedMs: 80,
+              };
+              break;
+            case "cancelDatabaseTest":
+              if (state.projectDatabases?.test) state.projectDatabases.test.status = "canceled";
+              break;
             case "listBranches":
               state.projectBranches ||= {
                 projectPath: action.projectPath,
