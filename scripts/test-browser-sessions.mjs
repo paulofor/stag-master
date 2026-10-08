@@ -149,21 +149,30 @@ export async function validateSavedSession(application, page, site, phase) {
       projectPath,
       remember: value,
     });
-  const navigate = () =>
+  const navigate = (tab = "documentation") =>
     page.evaluate(
-      (url) =>
-        window.stag.request({ type: "browserControl", control: { action: "navigate", url } }),
-      `${site.url}session-login`,
+      ({ url, tab }) =>
+        window.stag.request({ type: "browserControl", control: { action: "navigate", url, tab } }),
+      { url: `${site.url}session-login`, tab },
     );
-  const dom = (expression) =>
-    application.evaluate(async ({ BrowserWindow }, code) => {
-      const parent = BrowserWindow.getAllWindows()[0];
-      const view = parent.contentView.children.find(
-        (child) => child.webContents && child.webContents !== parent.webContents,
-      );
-      return view.webContents.executeJavaScript(code);
-    }, expression);
-  const connected = () => dom("document.querySelector('h1')?.textContent");
+  const dom = (expression, tab = "documentation") =>
+    application.evaluate(
+      async ({ BrowserWindow }, { code, tab }) => {
+        const parent = BrowserWindow.getAllWindows()[0];
+        const views = parent.contentView.children.filter(
+          (child) => child.webContents && child.webContents !== parent.webContents,
+        );
+        return views[tab === "documentation" ? 0 : 1].webContents.executeJavaScript(code);
+      },
+      { code: expression, tab },
+    );
+  const connected = (tab = "documentation") =>
+    dom("document.querySelector('h1')?.textContent", tab);
+  const login = (tab) =>
+    dom(
+      "document.querySelector('#remember').checked=true;document.querySelector('form').requestSubmit()",
+      tab,
+    );
   const dialog = (response) =>
     application.evaluate(({ dialog }, response) => {
       dialog.showMessageBox = async () => ({ response });
@@ -194,12 +203,20 @@ export async function validateSavedSession(application, page, site, phase) {
     // The controlled checkbox changes only after the native dialog and durable save acknowledge.
     await page.getByRole("checkbox", { name: "Lembrar sessões neste projeto" }).click();
     await expect.poll(async () => (await state()).browser.remember).toBe(true);
-    await navigate();
-    await dom(
-      "document.querySelector('#remember').checked=true;document.querySelector('form').requestSubmit()",
-    );
-    await expect.poll(connected).toBe("Conectado sintético");
-    await dom("localStorage.setItem('synthetic_restart','SYNTHETIC_PRIVATE_STORAGE')");
+    for (const tab of ["documentation", "system"]) {
+      await navigate(tab);
+      assert.equal(
+        await connected(tab),
+        "Login necessário",
+        "Cada aba inicia com armazenamento próprio.",
+      );
+      await login(tab);
+      await expect.poll(() => connected(tab)).toBe("Conectado sintético");
+      await dom(
+        `localStorage.setItem('synthetic_restart','SYNTHETIC_PRIVATE_STORAGE_${tab}')`,
+        tab,
+      );
+    }
     for (const action of [
       { type: "browserVisibility", visible: false },
       { type: "newChat" },
@@ -208,25 +225,39 @@ export async function validateSavedSession(application, page, site, phase) {
       await page.evaluate((action) => window.stag.request(action), action);
       assert.equal((await state()).browser.authorized, false);
       assert.equal((await state()).browser.remember, true);
-      await navigate();
-      assert.equal(await connected(), "Conectado sintético");
+      for (const tab of ["documentation", "system"]) {
+        await navigate(tab);
+        assert.equal(await connected(tab), "Conectado sintético");
+      }
     }
     assert.doesNotMatch(JSON.stringify(await state()), /synthetic_login|SYNTHETIC_PRIVATE_STORAGE/);
     return;
   }
   assert.equal((await state()).browser.remember, true);
   assert.equal((await state()).browser.authorized, false);
+  for (const tab of ["documentation", "system"]) {
+    await navigate(tab);
+    assert.equal(
+      await connected(tab),
+      phase === "forgotten" ? "Login necessário" : "Conectado sintético",
+    );
+    assert.equal(
+      await dom("localStorage.getItem('synthetic_restart')", tab),
+      phase === "forgotten" ? null : `SYNTHETIC_PRIVATE_STORAGE_${tab}`,
+    );
+  }
   await navigate();
   if (phase === "forgotten") {
-    assert.equal(await connected(), "Login necessário");
-    assert.equal(await dom("localStorage.getItem('synthetic_restart')"), null);
     console.log(
       "Sessão Electron reiniciada: exclusão confirmada em disco, sem herdar consentimento.",
     );
     return;
   }
   assert.equal(await connected(), "Conectado sintético");
-  assert.equal(await dom("localStorage.getItem('synthetic_restart')"), "SYNTHETIC_PRIVATE_STORAGE");
+  assert.equal(
+    await dom("localStorage.getItem('synthetic_restart')"),
+    "SYNTHETIC_PRIVATE_STORAGE_documentation",
+  );
   await dialog(0);
   await remember(false);
   assert.equal((await state()).browser.remember, true);
@@ -234,12 +265,18 @@ export async function validateSavedSession(application, page, site, phase) {
   await dialog(1);
   await remember(false);
   assert.equal((await state()).browser.remember, false);
-  await navigate();
-  assert.equal(await connected(), "Login necessário");
+  for (const tab of ["documentation", "system"]) {
+    await navigate(tab);
+    assert.equal(await connected(tab), "Login necessário");
+    assert.equal(await dom("localStorage.getItem('synthetic_restart')", tab), null);
+  }
   await remember(true);
+  for (const tab of ["documentation", "system"]) {
+    await navigate(tab);
+    assert.equal(await connected(tab), "Login necessário");
+    assert.equal(await dom("localStorage.getItem('synthetic_restart')", tab), null);
+  }
   await navigate();
-  assert.equal(await connected(), "Login necessário");
-  assert.equal(await dom("localStorage.getItem('synthetic_restart')"), null);
   console.log(
     "Sessão Electron: cookie HttpOnly e preferência sobrevivem ao reinício; Esquecer logins limpa ambos.",
   );

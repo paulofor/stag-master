@@ -9,6 +9,60 @@ async function ready(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 }
+test("abas preservam endereço e rascunho, suportam teclado e descartam páginas ao revogar", async ({
+  page,
+}, info) => {
+  await ready(page);
+  await page.getByRole("button", { name: "Mostrar navegador" }).click();
+  const docs = page.getByRole("tab", { name: "Documentação", exact: true });
+  const system = page.getByRole("tab", { name: "Sistema do projeto", exact: true });
+  const address = page.getByLabel("Endereço do navegador");
+  await expect(docs).toHaveAttribute("aria-selected", "true");
+  await address.fill("https://fixture.invalid/docs");
+  await page.getByRole("button", { name: "Ir", exact: true }).click();
+  await system.click();
+  await expect(address).toHaveValue("");
+  await address.fill("http://localhost:4201/");
+  await docs.click();
+  await expect(address).toHaveValue("https://fixture.invalid/docs");
+  await docs.press("ArrowRight");
+  await expect(system).toBeFocused();
+  await expect(system).toHaveAttribute("aria-selected", "true");
+  await expect(address).toHaveValue("http://localhost:4201/");
+  await page.getByRole("button", { name: "Ir", exact: true }).click();
+  await system.press("Home");
+  await expect(docs).toHaveAttribute("aria-selected", "true");
+  await docs.press("End");
+  await expect(address).toHaveValue("http://localhost:4201/");
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-browser-tabs.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Autorizar navegador", exact: true }).click();
+  await page.getByRole("button", { name: "Revogar navegador", exact: true }).click();
+  await expect(address).toHaveValue("");
+  await system.click();
+  await expect(address).toHaveValue("");
+  await expect(page.getByText("Controle do modelo desativado")).toBeVisible();
+});
+
+test("duas abas permanecem dentro da janela mínima sem perder a conversa", async ({ page }) => {
+  await ready(page);
+  await page.setViewportSize({ width: 360, height: 600 });
+  await page.getByRole("button", { name: "Mostrar navegador" }).click();
+  for (const name of ["Documentação", "Sistema do projeto"]) {
+    const tab = page.getByRole("tab", { name, exact: true });
+    await tab.click();
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    const bounds = (await tab.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(361);
+    expect((await page.locator(".browser-viewport").boundingBox())!.height).toBeGreaterThan(150);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await page.getByRole("button", { name: "Voltar à conversa" }).click();
+  await expect(page.getByLabel("Mensagem para o assistente")).toBeVisible();
+});
 test("sessão por projeto é opcional e esquecer revoga o controle", async ({ page }, info) => {
   await ready(page);
   await page.getByRole("button", { name: "Mostrar navegador" }).click();

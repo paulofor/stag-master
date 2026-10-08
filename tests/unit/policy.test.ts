@@ -4,6 +4,7 @@ import {
   browserTool,
   browserSessionInstructions,
   browserCertificateInstructions,
+  browserTabsInstructions,
 } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
 import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/main/cyber-safety";
@@ -26,6 +27,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
           expect(instructions).toContain(engineeringInstructions);
           expect(instructions).toContain(browserSessionInstructions);
           expect(instructions).toContain(browserCertificateInstructions);
+          expect(instructions).toContain(browserTabsInstructions);
           expect(instructions).toContain("Mover mouse a cada 5 min");
           expect(instructions).toContain(
             "janela principal do próprio STAG, inclusive o navegador integrado",
@@ -42,6 +44,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
     expect(browserTool.description).toContain(engineeringToolDescription);
     expect(browserTool.description).toContain(browserSessionInstructions);
     expect(browserTool.description).toContain(browserCertificateInstructions);
+    expect(browserTool.description).toContain(browserTabsInstructions);
   });
 });
 

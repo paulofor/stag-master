@@ -681,7 +681,7 @@ try {
     const contentsResult = await application.evaluate(async ({ BrowserWindow }) => {
       const parent = BrowserWindow.getAllWindows()[0];
       const view = parent.contentView.children.find(
-        (view) => view.webContents && view.webContents !== parent.webContents,
+        (view) => view.webContents && view.webContents !== parent.webContents && view.getVisible(),
       );
       return {
         value: await view.webContents.executeJavaScript("document.querySelector('#local').value"),
@@ -701,9 +701,14 @@ try {
       .poll(() =>
         application.evaluate(({ BrowserWindow }) => {
           const parent = BrowserWindow.getAllWindows()[0];
-          return parent.contentView.children
-            .find((view) => view.webContents && view.webContents !== parent.webContents)
-            ?.getVisible();
+          return (
+            parent.contentView.children
+              .find(
+                (view) =>
+                  view.webContents && view.webContents !== parent.webContents && view.getVisible(),
+              )
+              ?.getVisible() ?? false
+          );
         }),
       )
       .toBe(false);
@@ -713,9 +718,14 @@ try {
       .poll(() =>
         application.evaluate(({ BrowserWindow }) => {
           const parent = BrowserWindow.getAllWindows()[0];
-          return parent.contentView.children
-            .find((view) => view.webContents && view.webContents !== parent.webContents)
-            ?.getVisible();
+          return (
+            parent.contentView.children
+              .find(
+                (view) =>
+                  view.webContents && view.webContents !== parent.webContents && view.getVisible(),
+              )
+              ?.getVisible() ?? false
+          );
         }),
       )
       .toBe(true);
@@ -732,9 +742,14 @@ try {
       .poll(() =>
         application.evaluate(({ BrowserWindow }) => {
           const parent = BrowserWindow.getAllWindows()[0];
-          return parent.contentView.children
-            .find((view) => view.webContents && view.webContents !== parent.webContents)
-            ?.getVisible();
+          return (
+            parent.contentView.children
+              .find(
+                (view) =>
+                  view.webContents && view.webContents !== parent.webContents && view.getVisible(),
+              )
+              ?.getVisible() ?? false
+          );
         }),
       )
       .toBe(false);
@@ -743,9 +758,14 @@ try {
       .poll(() =>
         application.evaluate(({ BrowserWindow }) => {
           const parent = BrowserWindow.getAllWindows()[0];
-          return parent.contentView.children
-            .find((view) => view.webContents && view.webContents !== parent.webContents)
-            ?.getVisible();
+          return (
+            parent.contentView.children
+              .find(
+                (view) =>
+                  view.webContents && view.webContents !== parent.webContents && view.getVisible(),
+              )
+              ?.getVisible() ?? false
+          );
         }),
       )
       .toBe(true);
@@ -781,7 +801,8 @@ try {
       application.evaluate(async ({ BrowserWindow }, expression) => {
         const parent = BrowserWindow.getAllWindows()[0];
         const view = parent.contentView.children.find(
-          (child) => child.webContents && child.webContents !== parent.webContents,
+          (child) =>
+            child.webContents && child.webContents !== parent.webContents && child.getVisible(),
         );
         return view.webContents.executeJavaScript(expression);
       }, code);
@@ -919,7 +940,8 @@ try {
       return application.evaluate(({ BrowserWindow }, bounds) => {
         const host = BrowserWindow.getAllWindows()[0];
         const view = host.contentView.children.find(
-          (child) => child.webContents && child.webContents !== host.webContents,
+          (child) =>
+            child.webContents && child.webContents !== host.webContents && child.getVisible(),
         );
         const native = view.getBounds();
         return Math.abs(native.x - bounds.x) <= 1 && Math.abs(native.width - bounds.width) <= 1;
@@ -929,7 +951,7 @@ try {
   const wideLayout = await application.evaluate(async ({ BrowserWindow }) => {
     const host = BrowserWindow.getAllWindows()[0];
     const view = host.contentView.children.find(
-      (child) => child.webContents && child.webContents !== host.webContents,
+      (child) => child.webContents && child.webContents !== host.webContents && child.getVisible(),
     );
     return {
       hostWidth: host.getContentSize()[0],
@@ -1062,12 +1084,17 @@ try {
     await expect
       .poll(
         () =>
-          restartedPage.evaluate(
-            async () => (await window.stag.getSnapshot()).videoAnalysis?.status,
-          ),
+          restartedPage.evaluate(async () => {
+            const state = await window.stag.getSnapshot();
+            return {
+              status: state.videoAnalysis?.status,
+              error: state.videoAnalysis?.error,
+              stage: state.videoAnalysis?.stage,
+            };
+          }),
         { timeout: 30000 },
       )
-      .toBe("completed");
+      .toMatchObject({ status: "completed" });
     const final = await restartedPage.evaluate(async () => window.stag.getSnapshot());
     assert.equal(final.threadId, backgroundSaved.threadId);
     assert.equal(final.videoAnalysis.completed, 3);

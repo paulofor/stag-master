@@ -24,6 +24,24 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
         },
       ];
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
+      const resetBrowser = () => {
+        state.browser.authorized = false;
+        state.browser.activeTab = "documentation";
+        for (const tab of ["documentation", "system"] as const)
+          state.browser.tabs[tab] = {
+            url: "",
+            title: "",
+            loading: false,
+            canGoBack: false,
+            canGoForward: false,
+            error: null,
+          };
+        Object.assign(state.browser, state.browser.tabs.documentation);
+      };
+      const selectBrowserTab = (tab: "documentation" | "system") => {
+        state.browser.activeTab = tab;
+        Object.assign(state.browser, state.browser.tabs[tab]);
+      };
       // Test-only delivery of main snapshots for states that require native/server activity.
       window.addEventListener("stag-fixture-snapshot", (event) => {
         Object.assign(state, (event as CustomEvent<Partial<Snapshot>>).detail);
@@ -349,8 +367,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.items = [];
               state.plan = [];
               state.diff = "";
-              state.browser.authorized = false;
-              state.browser.url = "";
+              resetBrowser();
               break;
             case "projectSources":
               if (state.busy || action.projectPath !== state.project?.path)
@@ -375,20 +392,18 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.diff = "";
               state.mode = "project";
               state.metrics.totalTokens = 0;
-              state.browser.authorized = false;
-              state.browser.url = "";
+              resetBrowser();
               break;
             case "browserVisibility":
               state.browser.visible = action.visible;
               if (!action.visible) {
-                state.browser.authorized = false;
-                state.browser.url = "";
+                resetBrowser();
               }
               break;
             case "browserConsent":
               state.browser.authorized = action.allow;
               if (!action.allow) {
-                state.browser.url = "";
+                resetBrowser();
                 state.busy = false;
                 state.approvals = [];
               }
@@ -397,15 +412,34 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               if (state.busy || action.projectPath !== state.project?.path)
                 throw new Error("O projeto mudou ou está em execução.");
               state.browser.remember = action.remember;
-              state.browser.authorized = false;
-              state.browser.url = "";
+              resetBrowser();
               state.queuePaused = true;
               break;
+            case "browserTab":
+              if (state.busy || state.approvals.length)
+                throw new Error("Pare o modelo antes de navegar manualmente.");
+              selectBrowserTab(action.tab);
+              break;
             case "browserControl":
+              if (state.busy || state.approvals.length)
+                throw new Error("Pare o modelo antes de navegar manualmente.");
+              selectBrowserTab(action.control.tab ?? state.browser.activeTab);
               if (action.control.action === "navigate") {
                 state.browser.url = action.control.url;
                 state.browser.title = "Documentação sintética";
                 state.browser.canGoBack = true;
+                state.browser.tabs[state.browser.activeTab] = {
+                  url: state.browser.url,
+                  title:
+                    state.browser.activeTab === "documentation"
+                      ? "Documentação sintética"
+                      : "Sistema sintético",
+                  loading: false,
+                  canGoBack: true,
+                  canGoForward: false,
+                  error: null,
+                };
+                selectBrowserTab(state.browser.activeTab);
               }
               break;
             case "browserBounds":
@@ -446,8 +480,17 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                     },
                   ];
                 else {
+                  selectBrowserTab("documentation");
                   state.browser.url = "https://fixture.invalid/docs";
                   state.browser.title = "Documentação sintética";
+                  state.browser.tabs.documentation = {
+                    url: state.browser.url,
+                    title: state.browser.title,
+                    loading: false,
+                    canGoBack: true,
+                    canGoForward: false,
+                    error: null,
+                  };
                   state.items.push({
                     id: `browser-${++count}`,
                     kind: "assistant",

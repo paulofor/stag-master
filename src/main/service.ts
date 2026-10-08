@@ -13,6 +13,7 @@ import {
   type Snapshot,
   type BrowserControl,
   type BrowserInfo,
+  type BrowserTab,
   type RequestImage,
 } from "../shared/types";
 import { actionSchema, safeLink } from "../shared/validation";
@@ -120,6 +121,7 @@ interface Options {
     clearProfile: () => Promise<void>;
     cancel: () => void;
     setVisible: (visible: boolean) => void;
+    selectTab: (tab: BrowserTab) => void;
   };
   platform?: string;
   databases?: { connections: DatabaseConnections; test: SqlServerTester; tools?: SqlTools };
@@ -498,6 +500,7 @@ export class AssistantService extends EventEmitter {
       (action.type === "apiConsent" && action.allow) ||
       (action.type === "databaseConsent" && action.allow) ||
       action.type === "browserControl" ||
+      action.type === "browserTab" ||
       (action.type === "videoAnalysis" &&
         ["resume", "retry"].includes(action.control) &&
         this.analysis?.summary()?.threadId !== this.state.threadId);
@@ -894,17 +897,23 @@ export class AssistantService extends EventEmitter {
           this.options.browser?.setVisible(action.visible);
           if (!action.visible) await this.browserConsent(false);
           break;
+        case "browserTab":
         case "browserControl": {
           if (!this.options.browser)
             throw new Error("Navegador disponível somente no STAG desktop.");
-          if (this.state.busy || this.sending)
+          if (this.state.busy || this.sending || this.state.approvals.length)
             throw new Error("Pare o modelo antes de navegar manualmente.");
           const ownerThread = this.state.threadId;
           const epoch = this.toolEpoch;
+          const tab =
+            action.type === "browserTab"
+              ? action.tab
+              : (action.control.tab ?? this.state.browser.activeTab);
           const execution = this.toolQueue.then(() => {
             if (this.disposed || this.toolEpoch !== epoch || this.state.threadId !== ownerThread)
               throw new Error("Navegação pendente cancelada: a conversa ou autorização mudou.");
-            return this.options.browser!.control(action.control);
+            if (action.type === "browserTab") return this.options.browser!.selectTab(tab);
+            return this.options.browser!.control({ ...action.control, tab });
           });
           this.toolQueue = execution.catch(() => {});
           await execution;
@@ -2270,7 +2279,12 @@ export class AssistantService extends EventEmitter {
       // A reverse request can precede turn/started or the turn/start response.
       // Its validated thread/turn establishes ownership just like turn/started.
       if (!this.turnId) this.turnId = text(p.turnId);
-      const args = parsed.data;
+      const args = isBrowser
+        ? {
+            ...parsed.data,
+            tab: (parsed.data as BrowserArguments).tab ?? this.state.browser.activeTab,
+          }
+        : parsed.data;
       const safety = () =>
         cyberSafetyReason(Object.values(args).filter((value) => typeof value === "string"));
       const waiting: PendingApproval = isBrowser

@@ -1,4 +1,27 @@
-# Matriz de homologação da versão 0.4.38
+# Matriz de homologação da versão 0.4.39
+
+## Duas abas no navegador — versão 0.4.39
+
+Matriz definida antes dos testes. O cliente solicitou uma aba para consultar documentação e outra para acessar o sistema do projeto. O navegador atual mantém somente uma página: navegar até uma fonte substitui o sistema aberto. Manter duas páginas com endereço, histórico, carga e erro próprios; alternar sem recarregar nem perder edição ou login. O consentimento continua por conversa para ambas, com a mesma fila e confirmações críticas. Sessões temporárias e persistentes continuam isoladas por projeto e também por aba; fechar, revogar ou trocar conversa destrói ambas as páginas. A preferência Lembrar sessões e Esquecer logins se aplica às duas.
+
+Lacuna concreta do harness: uma única página não exercita referências cruzadas nem confirmações dirigidas à aba correta. Ampliar o driver Electron e as fixtures existentes com duas páginas loopback, refs de abas diferentes, estado preservado, TLS/cancelamento, isolamento de armazenamento, recuperação, IPC e schema real no Codex. Não adicionar executor ou automação externa.
+
+| Área                    | Cenário e aceite                                                                                                                                              | Evidência prevista                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Caminho feliz           | Abrir documentação e sistema; alternar preserva URLs, histórico e formulário; modelo escolhe a aba e a torna visível                                          | Chromium, Electron de produção e App Server determinístico |
+| Validações              | Somente duas abas enumeradas; sem ids/caminhos arbitrários; pageId/ref de uma aba não funciona na outra; IPC manual bloqueado durante execução/aprovação      | Unidade, serviço e driver Electron                         |
+| Autorização             | Um consentimento por conversa; Leitura e efeitos críticos preservados; confirmação identifica a aba, revalida o alvo e recusa não executa                     | Serviço bidirecional + Electron                            |
+| Recuperação             | TLS/carga/falha em uma aba não corrompe a outra; parar cancela ambas; fechar/revogar/trocar destrói páginas e descarta eventos/resultados antigos             | Driver real e fixtures sintéticas                          |
+| Integrações             | stag_browser aceita tab em todas as operações; ausência de tab preserva compatibilidade com históricos; contratos em start/resume e fontes usam documentation | Schema real no Codex e testes de serviço                   |
+| Dados e observabilidade | Estado de ambas e aba ativa no snapshot, sem cookies/campos/segredos; partições distintas; Lembrar sessões e Esquecer logins cobrem ambas após reinício       | Electron real, cookies HttpOnly e projetos sintéticos      |
+| Interface               | Abas com teclado/labels/estado selecionado; 1584×1080, 1280×900, 640×900, 360×600 e Pixel 7 sem overflow ou perda da conversa                                 | Playwright Chromium, screenshots e Electron                |
+| Métricas e entrega      | Mesmo contador/fila; dependências locais, check, test:desktop, formatação e diff antes do PR; jobs Windows/instalador do PR e main aprovados                  | Harness existente e workflows                              |
+
+Somente projetos, páginas, contas e CODEX_HOME sintéticos. Linux não comprova Windows nativo: o job Windows continua obrigatório. Contratos determinísticos comprovam transmissão e recuperação, sem garantir obediência semântica absoluta do modelo. Não há deploy web; a entrega é o instalador gerado pelo workflow versionado.
+
+Evidência local: `npm run check` executou typecheck, 674 contratos, build, FFmpeg/Whisper reais e Codex fixado com provedor loopback, incluindo o schema de produção com tab, despacho/respostas das duas abas e fontes vigentes. A rodada de interface aprovou 134 de 136 cenários; os outros dois encerraram o Chromium em browserContext.newPage antes de carregar o aplicativo e passaram na revalidação focalizada sem mudanças de produto. A validação no Electron aprovou refs cruzadas, formulário/histórico, partições, TLS, cancelamento de aba oculta, eventos antigos, reload, recusa/aprovação e descarte. Sessões HttpOnly e preferências das duas abas sobreviveram ao reinício real e foram removidas por Esquecer logins; falha parcial na segunda partição foi informada e a nova tentativa limpou ambas.
+
+Uma rodada de `test:desktop` simultânea ao check falhou na retomada sintética de vídeo após reinício. O harness só mostrava o estado failed: a asserção agora inclui etapa/erro operacional, sem mídia ou transcrição. A execução serial posterior de `xvfb-run -a npm run test:desktop` passou, incluindo retomada e conclusão do vídeo e as duas sessões. A causa da falha transitória não foi comprovada; não foram introduzidos retries nem relaxados prazos/produção. Os contratos reforçados de fontes e instruções em todos os modos passaram nas revalidações focalizadas. Formatação, sintaxe JavaScript e diff conferidos; nenhum script shell alterado. A sandbox Linux bloqueia namespaces bwrap no smoke de arquivos; Windows continua obrigatório no PR/main, com política nativa de produção.
 
 ## Conexões SQL disponíveis ao assistente — versão 0.4.38
 

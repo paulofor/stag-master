@@ -1506,6 +1506,47 @@ summary::-webkit-details-marker {
   display: none;
   margin-left: auto;
 }
+.browser-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid #dedfd5;
+  flex-shrink: 0;
+}
+.browser-tabs [role="tab"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding: 11px 8px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: #788372;
+  font-size: 12px;
+  cursor: pointer;
+}
+.browser-tabs [aria-selected="true"] {
+  background: #f0f3e9;
+  border-bottom-color: #557b5e;
+  color: #425b48;
+  font-weight: 600;
+}
+.browser-tabs [role="tab"]:focus-visible {
+  outline: 2px solid #557b5e;
+  outline-offset: -3px;
+}
+.browser-tabs [role="tab"]:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+.browser-tab-error {
+  color: #8b7049;
+  font-weight: 700;
+}
 .browser-toolbar {
   display: flex;
   align-items: center;

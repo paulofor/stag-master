@@ -9,10 +9,17 @@ import {
 } from "./browser-tools";
 import { browserDocument } from "./browser-document";
 import { browserLoadError } from "./browser-errors";
-import type { BrowserControl, BrowserInfo } from "../shared/types";
+import {
+  browserTabs,
+  browserTabLabels,
+  type BrowserTab,
+  type BrowserControl,
+  type BrowserInfo,
+  type BrowserPageInfo,
+} from "../shared/types";
 import type { ToolResult } from "./desktop-tools";
 
-const blankInfo = (): BrowserInfo => ({
+const blankInfo = (): BrowserPageInfo => ({
   url: "",
   title: "",
   loading: false,
@@ -25,8 +32,8 @@ function fitsWindow(bounds: BrowserBounds, [width, height]: number[]): boolean {
   return bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= height + 1;
 }
 class BrowserTimeoutError extends Error {}
-export class BrowserPanel extends EventEmitter {
-  private view!: WebContentsView;
+class BrowserPage extends EventEmitter {
+  view!: WebContentsView;
   private info = blankInfo();
   private loadFailure: string | null = null;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
@@ -36,36 +43,18 @@ export class BrowserPanel extends EventEmitter {
   private disposed = false;
   private profileId: string | null = null;
   private configuredSessions = new WeakSet<Electron.Session>();
-  constructor(private window: BrowserWindow) {
+  constructor(
+    private window: BrowserWindow,
+    private tab: BrowserTab,
+  ) {
     super();
     this.reset();
   }
-  snapshot(): BrowserInfo {
+  snapshot(): BrowserPageInfo {
     return { ...this.info };
   }
   private publish(): void {
     if (!this.disposed) this.emit("state", this.snapshot());
-  }
-  setProfile(id: string | null): void {
-    if (id !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
-      throw new Error("Perfil do navegador inválido.");
-    if (id !== this.profileId) this.reset(id);
-  }
-  async clearProfile(): Promise<void> {
-    const previous = this.view.webContents.session;
-    const id = this.profileId;
-    // Close the page before deleting data; no old page can recreate cookies during cleanup.
-    this.reset(null);
-    try {
-      await previous.closeAllConnections();
-      await previous.clearData();
-      await previous.clearAuthCache();
-    } catch {
-      this.reset(id);
-      throw new Error(
-        "Não foi possível apagar todos os dados do navegador. Tente Esquecer logins novamente.",
-      );
-    }
   }
   reset(profileId = this.profileId): void {
     this.generation++;
@@ -87,7 +76,9 @@ export class BrowserPanel extends EventEmitter {
     this.info = blankInfo();
     this.loadFailure = null;
     const browserSession = session.fromPartition(
-      profileId ? `persist:stag-project-${profileId}` : `stag-browser-${randomUUID()}`,
+      profileId
+        ? `persist:stag-project-${profileId}${this.tab === "system" ? "-system" : ""}`
+        : `stag-browser-${randomUUID()}`,
       { cache: false },
     );
     browserSession.setPermissionRequestHandler((_contents, _permission, callback) =>
@@ -357,7 +348,7 @@ export class BrowserPanel extends EventEmitter {
         contentItems: [
           {
             type: "inputText",
-            text: `Navegador: ${size.width}×${size.height} pixels. Interações usam refs do snapshot, não coordenadas do desktop.`,
+            text: `Navegador · ${browserTabLabels[this.tab]}: ${size.width}×${size.height} pixels. Interações usam refs do snapshot, não coordenadas do desktop.`,
           },
           { type: "inputImage", imageUrl: image.toDataURL() },
         ],
@@ -383,7 +374,15 @@ export class BrowserPanel extends EventEmitter {
       }
     }
     if (generation !== this.generation) throw new Error("Operação do navegador cancelada.");
-    return { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(result) }] };
+    return {
+      success: true,
+      contentItems: [
+        {
+          type: "inputText",
+          text: JSON.stringify({ ...(result as Record<string, unknown>), tab: this.tab }),
+        },
+      ],
+    };
   }
   dispose(): void {
     this.disposed = true;
@@ -396,5 +395,114 @@ export class BrowserPanel extends EventEmitter {
       if (!this.window.isDestroyed()) this.window.contentView.removeChildView(this.view);
       this.view.webContents.close();
     }
+  }
+}
+
+// Both pages reuse the production driver. The service owns the single shared action queue.
+export class BrowserPanel extends EventEmitter {
+  private pages: Record<BrowserTab, BrowserPage>;
+  private activeTab: BrowserTab = "documentation";
+  private visible = true;
+  private profileId: string | null = null;
+  private resetting = false;
+  private disposed = false;
+  constructor(window: BrowserWindow) {
+    super();
+    this.pages = {
+      documentation: new BrowserPage(window, "documentation"),
+      system: new BrowserPage(window, "system"),
+    };
+    for (const tab of browserTabs) this.pages[tab].on("state", () => this.publish());
+    this.syncVisibility();
+  }
+  // The selected view is also used by the real Electron harness.
+  get view(): WebContentsView {
+    return this.pages[this.activeTab].view;
+  }
+  snapshot(): BrowserInfo {
+    const tabs = {
+      documentation: this.pages.documentation.snapshot(),
+      system: this.pages.system.snapshot(),
+    };
+    return { ...tabs[this.activeTab], activeTab: this.activeTab, tabs };
+  }
+  private publish(): void {
+    if (!this.resetting && !this.disposed) this.emit("state", this.snapshot());
+  }
+  selectTab(tab: BrowserTab): void {
+    if (!browserTabs.includes(tab)) throw new Error("Aba do navegador inválida.");
+    if (this.disposed) throw new Error("Navegador encerrado.");
+    this.activeTab = tab;
+    this.syncVisibility();
+    this.publish();
+  }
+  private syncVisibility(): void {
+    for (const tab of browserTabs)
+      this.pages[tab].setVisible(this.visible && tab === this.activeTab);
+  }
+  setVisible(visible: boolean): void {
+    this.visible = visible;
+    this.syncVisibility();
+  }
+  setBounds(bounds: BrowserBounds): void {
+    for (const tab of browserTabs) this.pages[tab].setBounds(bounds);
+  }
+  setProfile(id: string | null): void {
+    if (id !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+      throw new Error("Perfil do navegador inválido.");
+    if (id !== this.profileId) this.reset(id);
+  }
+  reset(profileId = this.profileId): void {
+    this.resetting = true;
+    try {
+      this.activeTab = "documentation";
+      this.profileId = profileId;
+      // Hide both old views before replacing them.
+      for (const tab of browserTabs) this.pages[tab].setVisible(false);
+      for (const tab of browserTabs) this.pages[tab].reset(profileId);
+      this.syncVisibility();
+    } finally {
+      this.resetting = false;
+      this.publish();
+    }
+  }
+  async clearProfile(): Promise<void> {
+    const previous = browserTabs.map((tab) => this.pages[tab].view.webContents.session);
+    const id = this.profileId;
+    // Destroy both pages first; neither can recreate storage during cleanup.
+    this.reset(null);
+    const results = await Promise.allSettled(
+      previous.map(async (browserSession) => {
+        await browserSession.closeAllConnections();
+        await browserSession.clearData();
+        await browserSession.clearAuthCache();
+      }),
+    );
+    if (results.some((result) => result.status === "rejected")) {
+      this.reset(id);
+      throw new Error(
+        "Não foi possível apagar todos os dados do navegador. Tente Esquecer logins novamente.",
+      );
+    }
+  }
+  cancel(): void {
+    for (const tab of browserTabs) this.pages[tab].cancel();
+  }
+  async control(input: BrowserControl): Promise<void> {
+    this.selectTab(input.tab ?? this.activeTab);
+    await this.pages[this.activeTab].control(input);
+  }
+  async confirmationReason(input: BrowserArguments): Promise<string | null> {
+    this.selectTab(input.tab ?? this.activeTab);
+    return this.pages[this.activeTab].confirmationReason(input);
+  }
+  async execute(raw: unknown): Promise<ToolResult> {
+    const input = browserArguments.parse(raw);
+    this.selectTab(input.tab ?? this.activeTab);
+    return this.pages[this.activeTab].execute(input);
+  }
+  dispose(): void {
+    this.disposed = true;
+    for (const tab of browserTabs) this.pages[tab].dispose();
   }
 }

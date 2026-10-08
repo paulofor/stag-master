@@ -34,6 +34,7 @@ import {
   browserConfirmationReason,
   browserSessionInstructions,
   browserCertificateInstructions,
+  browserTabsInstructions,
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -96,6 +97,7 @@ const browser = {
   clearProfile: vi.fn(async () => {}),
   cancel: vi.fn(),
   setVisible: vi.fn(),
+  selectTab: vi.fn(),
 };
 beforeEach(async () => {
   optimizeImage.mockImplementation((dataUrl: string) => dataUrl);
@@ -1540,7 +1542,7 @@ describe("fontes de documentação cadastradas", () => {
     await send(sourceCorpus.input);
     await complete();
     expect(browser.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "navigate", url: source.url }),
+      expect.objectContaining({ action: "navigate", tab: "documentation", url: source.url }),
     );
     expect(service.snapshot().items.at(-1)?.text).toBe(sourceCorpus.complete);
     const replacement = { ...source, url: "http://localhost:4201/documentacao" };
@@ -1549,7 +1551,7 @@ describe("fontes de documentação cadastradas", () => {
     await complete();
     expect(service.snapshot().threadId).toBe(thread);
     expect(browser.execute).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "navigate", url: replacement.url }),
+      expect.objectContaining({ action: "navigate", tab: "documentation", url: replacement.url }),
     );
     const calls =
       await rpc.call<{ method: string; params: Record<string, unknown> }[]>("_fixture/readCalls");
@@ -2522,6 +2524,7 @@ describe("fluxo local do assistente", () => {
     ]);
     expect(browser.execute).toHaveBeenCalledWith({
       action: "navigate",
+      tab: "system",
       url: "http://localhost:4201/",
       risk: "routine",
       intent: "Conferir aplicação local no navegador do STAG",
@@ -2540,6 +2543,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain("use exclusivamente stag_browser");
       expect(call.params.developerInstructions).toContain(browserSessionInstructions);
       expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
+      expect(call.params.developerInstructions).toContain(browserTabsInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -2656,10 +2660,65 @@ describe("fluxo local do assistente", () => {
     await send("navegador misto");
     await vi.waitFor(() => expect(desktop.execute).toHaveBeenCalledOnce());
     expect(browser.execute).not.toHaveBeenCalled();
+    service.updateBrowser({ ...service.snapshot().browser, activeTab: "system" });
     release();
     await complete();
     expect(browser.execute).toHaveBeenCalledOnce();
-    expect(browser.execute).toHaveBeenCalledWith({ action: "scroll", delta: 200 });
+    expect(browser.execute).toHaveBeenCalledWith({
+      action: "scroll",
+      delta: 200,
+      tab: "documentation",
+    });
+  });
+  it("troca de aba manual preserva consentimento e Leitura e é bloqueada durante execução/aprovação", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "browserConsent", allow: true });
+    await service.request({ type: "browserTab", tab: "system" });
+    expect(browser.selectTab).toHaveBeenCalledWith("system");
+    expect(service.snapshot().browser.authorized).toBe(true);
+    expect(service.snapshot().mode).toBe("read");
+    browser.selectTab.mockClear();
+    await send("navegador abas crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().approvals[0].detail).toContain("Aba: Sistema do projeto");
+    await expect(service.request({ type: "browserTab", tab: "documentation" })).rejects.toThrow(
+      "Pare a execução",
+    );
+    expect(browser.selectTab).not.toHaveBeenCalled();
+    await approve(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    await service.request({ type: "browserTab", tab: "documentation" });
+    expect(browser.selectTab).toHaveBeenCalledWith("documentation");
+  });
+  it("roteia pedidos das duas abas pela mesma fila e recupera falha sem perder o contrato", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador abas");
+    await complete();
+    expect(browser.execute.mock.calls.map(([args]) => [args.action, args.tab])).toEqual([
+      ["snapshot", "system"],
+      ["snapshot", "documentation"],
+    ]);
+    expect(service.snapshot().metrics.failures).toBe(0);
+    browser.execute.mockClear();
+    browser.execute.mockRejectedValueOnce(new Error("Falha sintética na aba system."));
+    await send("navegador abas");
+    await complete();
+    expect(service.snapshot().metrics.failures).toBe(1);
+    browser.execute.mockClear();
+    await send("navegador abas");
+    await complete();
+    expect(browser.execute.mock.calls.map(([args]) => args.tab)).toEqual([
+      "system",
+      "documentation",
+    ]);
+    browser.execute.mockClear();
+    await send("navegador abas crítico duplicado");
+    await approve(true);
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(browser.execute.mock.calls[0][0].tab).toBe("system");
+    expect(service.snapshot().error).toBeNull();
   });
   it("navegador exige consentimento e segue sequência rotineira sem cards nem pixels públicos", async () => {
     await ready();
