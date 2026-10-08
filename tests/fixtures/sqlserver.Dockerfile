@@ -3,6 +3,7 @@ WORKDIR /workspace
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev --no-audit --no-fund
-COPY src/main/sqlserver.ts src/main/database-errors.ts src/main/
+COPY src/main/ src/main/
+COPY src/shared/ src/shared/
 COPY scripts/test-sqlserver.mjs scripts/test-sqlserver.mjs
 CMD ["node", "scripts/test-sqlserver.mjs"]

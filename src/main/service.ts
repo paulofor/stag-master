@@ -37,6 +37,7 @@ import { databaseTestError } from "./database-errors";
 import type { SqlServerTester } from "./sqlserver";
 import { ApiFailure, apiError } from "./api-connections";
 import { apiContext, httpArguments, httpTool, type HttpTools } from "./http-tools";
+import { databaseContext, sqlArguments, sqlTool, type SqlTools } from "./sql-tools";
 import {
   ProjectBranchManager,
   projectBranchesContext,
@@ -93,7 +94,7 @@ interface WireThread {
 interface PendingApproval {
   message: RpcMessage;
   execute?: (approved?: boolean) => Promise<ToolResult>;
-  tool?: "desktop" | "browser" | "http";
+  tool?: "desktop" | "browser" | "http" | "sql";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
   safety?: () => string | null;
@@ -121,7 +122,7 @@ interface Options {
     setVisible: (visible: boolean) => void;
   };
   platform?: string;
-  databases?: { connections: DatabaseConnections; test: SqlServerTester };
+  databases?: { connections: DatabaseConnections; test: SqlServerTester; tools?: SqlTools };
   apis?: HttpTools;
   video?: VideoProcessor;
   videoAnalysis?: { store: VideoAnalysisStore; processor: BackgroundVideoProcessor };
@@ -187,9 +188,11 @@ export class AssistantService extends EventEmitter {
   private databasesReady = false;
   private apisReady = false;
   private apiConsentThread: string | null = null;
+  private databaseConsentThread: string | null = null;
   private apiLoginGeneration = 0;
   private apiLoginWork: Promise<void> = Promise.resolve();
   private httpWork: Promise<void> = Promise.resolve();
+  private sqlWork: Promise<void> = Promise.resolve();
   private databaseAbort: AbortController | null = null;
   private databaseWork: Promise<void> = Promise.resolve();
   private databaseTestIds = new Set<string>();
@@ -427,6 +430,7 @@ export class AssistantService extends EventEmitter {
       this.state.metrics.failures++;
     }
     this.databasesReady = false;
+    this.revokeDatabases();
     try {
       await this.options.databases?.connections.init();
       this.databasesReady = !!this.options.databases;
@@ -458,6 +462,7 @@ export class AssistantService extends EventEmitter {
       (action.type === "browserVisibility" && !action.visible);
     const disablingMouse = action.type === "mouseMovement" && !action.enabled;
     const revokingApis = action.type === "apiConsent" && !action.allow;
+    const revokingDatabases = action.type === "databaseConsent" && !action.allow;
     if (
       this.changing &&
       !["stop", "answer", "removeVideo", "cancelDatabaseTest", "cancelApiLogin"].includes(
@@ -465,6 +470,7 @@ export class AssistantService extends EventEmitter {
       ) &&
       !revokingBrowser &&
       !revokingApis &&
+      !revokingDatabases &&
       !disablingMouse
     )
       throw new Error("Aguarde a ação em andamento.");
@@ -474,7 +480,6 @@ export class AssistantService extends EventEmitter {
         "logout",
         "selectProject",
         "projectSources",
-        "listDatabases",
         "saveDatabase",
         "deleteDatabase",
         "testDatabase",
@@ -491,6 +496,7 @@ export class AssistantService extends EventEmitter {
       ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
       (action.type === "apiConsent" && action.allow) ||
+      (action.type === "databaseConsent" && action.allow) ||
       action.type === "browserControl" ||
       (action.type === "videoAnalysis" &&
         ["resume", "retry"].includes(action.control) &&
@@ -571,6 +577,30 @@ export class AssistantService extends EventEmitter {
           this.databaseProject(action.projectPath);
           this.refreshDatabases();
           break;
+        case "databaseConsent": {
+          const database = this.databaseProject(action.projectPath);
+          database.connections.check(action.projectPath, action.revision);
+          if (action.allow) {
+            if (
+              !database.tools ||
+              (this.state.threadId && !this.settings.threads[this.state.threadId]?.sqlTool)
+            )
+              throw new Error(
+                "Este histórico não possui stag_sql. Abra uma nova conversa preservando o modo desejado.",
+              );
+            if (!this.state.projectDatabases?.connections.length)
+              throw new Error("Cadastre uma conexão antes de autorizar bancos.");
+            this.state.projectDatabases.authorized = true;
+            this.databaseConsentThread = this.state.threadId;
+          } else {
+            this.revokeDatabases();
+            this.state.queuePaused = true;
+            this.analysis?.detach();
+            if (this.state.busy) await this.stop();
+            else await this.toolQueue;
+          }
+          break;
+        }
         case "saveDatabase": {
           const database = this.databaseProject(action.projectPath);
           await database.connections.save(
@@ -581,6 +611,7 @@ export class AssistantService extends EventEmitter {
             action.password,
             action.rememberPassword,
           );
+          this.revokeDatabases();
           this.refreshDatabases();
           break;
         }
@@ -591,6 +622,7 @@ export class AssistantService extends EventEmitter {
             action.revision,
             action.connectionId,
           );
+          this.revokeDatabases();
           this.refreshDatabases();
           break;
         }
@@ -832,6 +864,7 @@ export class AssistantService extends EventEmitter {
           this.toolEpoch++;
           this.options.desktop.cancel?.();
           this.options.apis?.cancel();
+          this.options.databases?.tools?.cancel();
           this.state.browser.authorized = false;
           this.browserConsentThread = null;
           this.contextInstructionsDirty = true;
@@ -907,10 +940,23 @@ export class AssistantService extends EventEmitter {
     this.state.pendingVideo = null;
   }
   private refreshDatabases(): void {
-    this.state.projectDatabases =
+    const previous = this.state.projectDatabases;
+    const next =
       this.state.project && this.databasesReady
         ? this.options.databases!.connections.snapshot(this.state.project.path)
         : null;
+    if (next && previous) {
+      next.authorized = previous.authorized && previous.revision === next.revision;
+      if (!next.authorized) this.databaseConsentThread = null;
+      next.test = previous.test;
+      next.metrics = previous.metrics;
+    }
+    this.state.projectDatabases = next;
+  }
+  private revokeDatabases(): void {
+    this.options.databases?.tools?.cancel();
+    this.databaseConsentThread = null;
+    if (this.state.projectDatabases) this.state.projectDatabases.authorized = false;
   }
   private refreshApis(): void {
     const previous = this.state.projectApis;
@@ -928,6 +974,7 @@ export class AssistantService extends EventEmitter {
   }
   private revokeApis(): void {
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.apiLoginGeneration++;
     this.apiConsentThread = null;
     if (this.state.projectApis) this.state.projectApis.authorized = false;
@@ -1376,6 +1423,7 @@ export class AssistantService extends EventEmitter {
   }
   private async connect(): Promise<void> {
     this.revokeApis();
+    this.revokeDatabases();
     this.databaseAbort?.abort();
     this.disableMouseMovement();
     this.analysis?.detach();
@@ -1385,11 +1433,13 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.options.browser?.cancel();
     this.stopping = false;
     this.toolRequests.clear();
     this.rpc?.removeAllListeners();
     await this.rpc?.shutdown();
+    await this.sqlWork;
     this.pending.clear();
     this.state.approvals = [];
     this.state.busy = false;
@@ -1415,12 +1465,14 @@ export class AssistantService extends EventEmitter {
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
       this.revokeApis();
+      this.revokeDatabases();
       this.databaseAbort?.abort();
       this.branchController?.abort();
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
       this.options.apis?.cancel();
+      this.options.databases?.tools?.cancel();
       this.options.browser?.cancel();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1462,6 +1514,7 @@ export class AssistantService extends EventEmitter {
         : null;
     if (previousAccount && previousAccount.email !== this.state.account?.email) {
       this.revokeApis();
+      this.revokeDatabases();
       this.disableMouseMovement();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1528,6 +1581,7 @@ export class AssistantService extends EventEmitter {
     this.branches.clear();
     this.state.projectBranches = null;
     this.state.projectSources = this.settings.projectSources[path] || [];
+    this.state.projectDatabases = null;
     this.refreshDatabases();
     this.restoreBrowserProfile();
     this.settings.project = path;
@@ -1552,6 +1606,7 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.clearVideo();
     this.clearMessageQueue();
     this.toolRequests.clear();
@@ -1567,6 +1622,7 @@ export class AssistantService extends EventEmitter {
     this.windowsConsent = false;
     this.windowsConsentThread = null;
     this.revokeApis();
+    this.revokeDatabases();
     this.state.browser.authorized = false;
     this.browserConsentThread = null;
     this.contextInstructionsDirty = false;
@@ -1591,6 +1647,7 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.state.browser.authorized = allow;
     this.contextInstructionsDirty = true;
     this.browserConsentThread = allow ? this.state.threadId : null;
@@ -1677,10 +1734,12 @@ export class AssistantService extends EventEmitter {
       );
     if (this.state.threadId !== id) {
       this.revokeApis();
+      this.revokeDatabases();
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
       this.options.apis?.cancel();
+      this.options.databases?.tools?.cancel();
       this.toolRequests.clear();
       this.state.browser.authorized = false;
       this.browserConsentThread = null;
@@ -1759,6 +1818,7 @@ export class AssistantService extends EventEmitter {
           ...(this.state.mode === "windows" ? [desktopTool] : []),
           ...(this.options.browser ? [browserTool] : []),
           ...(this.apisReady ? [httpTool] : []),
+          ...(this.databasesReady && this.options.databases?.tools ? [sqlTool] : []),
         ],
       });
       this.state.threadId = result.thread.id;
@@ -1766,11 +1826,13 @@ export class AssistantService extends EventEmitter {
       if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
       if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
       if (this.state.projectApis?.authorized) this.apiConsentThread = result.thread.id;
+      if (this.state.projectDatabases?.authorized) this.databaseConsentThread = result.thread.id;
       this.settings.threads[result.thread.id] = {
         path: project.path,
         mode: this.state.mode,
         browserTool: !!this.options.browser,
         httpTool: this.apisReady,
+        sqlTool: this.databasesReady && !!this.options.databases?.tools,
       };
       await this.options.store.save(this.settings);
     }
@@ -1848,6 +1910,7 @@ export class AssistantService extends EventEmitter {
           : {}),
       });
       this.publish();
+      this.refreshDatabases();
       const result = await this.call<{ turn: WireTurn }>("turn/start", {
         threadId: this.state.threadId,
         cwd: this.state.project.path,
@@ -1858,6 +1921,10 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          ...databaseContext(
+            this.state.projectDatabases,
+            !!this.settings.threads[this.state.threadId!]?.sqlTool,
+          ),
           ...apiContext(
             this.state.projectApis,
             !!this.settings.threads[this.state.threadId!]?.httpTool,
@@ -1898,6 +1965,7 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    const sqlWork = this.sqlWork;
     const apiWork = Promise.all([this.apiLoginWork, this.httpWork]);
     const databaseWork = this.databaseAbort ? this.databaseWork : null;
     this.databaseAbort?.abort();
@@ -1908,10 +1976,12 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.options.browser?.cancel();
     if (!this.state.busy) {
       if (databaseWork) await databaseWork;
       await apiWork;
+      await sqlWork;
       return;
     }
     if (!this.turnId || !this.state.threadId)
@@ -1928,6 +1998,8 @@ export class AssistantService extends EventEmitter {
       // An uncertain interrupt must not leave an agent waiting on discarded requests.
       this.rpc?.close();
       throw error;
+    } finally {
+      await sqlWork;
     }
   }
   private upsert(item: WireItem): void {
@@ -2082,6 +2154,7 @@ export class AssistantService extends EventEmitter {
         this.toolEpoch++;
         this.options.desktop.cancel?.();
         this.options.apis?.cancel();
+        this.options.databases?.tools?.cancel();
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -2137,6 +2210,10 @@ export class AssistantService extends EventEmitter {
       return;
     }
     if (message.method === "item/tool/call") {
+      if (p.tool === "stag_sql") {
+        await this.sqlRequest(message);
+        return;
+      }
       if (p.tool === "stag_http") {
         await this.httpRequest(message);
         return;
@@ -2296,11 +2373,13 @@ export class AssistantService extends EventEmitter {
       ownsRequest() &&
       (waiting.tool === "http"
         ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
-        : waiting.tool === "browser"
-          ? this.state.browser.authorized && this.browserConsentThread === ownerThread
-          : this.state.mode === "windows" &&
-            this.windowsConsent &&
-            this.windowsConsentThread === ownerThread);
+        : waiting.tool === "sql"
+          ? !!this.state.projectDatabases?.authorized && this.databaseConsentThread === ownerThread
+          : waiting.tool === "browser"
+            ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+            : this.state.mode === "windows" &&
+              this.windowsConsent &&
+              this.windowsConsentThread === ownerThread);
     const noAuthority: ToolResult = {
       success: false,
       contentItems: [
@@ -2382,9 +2461,79 @@ export class AssistantService extends EventEmitter {
       }
       this.publish();
     });
-    // Desktop and browser actions share one queue, including approved operations.
+    // Desktop, browser, HTTP and SQL share one queue, including approved operations.
     this.toolQueue = execution.catch(() => {});
+    if (waiting.tool === "sql") this.sqlWork = execution;
     await execution;
+  }
+  private async sqlRequest(message: RpcMessage): Promise<void> {
+    const p = message.params || {};
+    const reply = (messageText: string) =>
+      this.rpc!.respond(message.id!, {
+        success: false,
+        contentItems: [{ type: "inputText", text: messageText }],
+      });
+    if (
+      !this.databasesReady ||
+      !this.options.databases?.tools ||
+      !this.state.project ||
+      !this.state.projectDatabases?.authorized ||
+      this.databaseConsentThread !== this.state.threadId ||
+      !this.settings.threads[this.state.threadId!]?.sqlTool ||
+      (p.namespace !== undefined && p.namespace !== null) ||
+      !text(p.turnId)
+    ) {
+      reply(
+        "stag_sql não autorizado nesta conversa. Cadastre a conexão e clique em Conexões > Autorizar bancos nesta conversa. Históricos sem stag_sql precisam de nova conversa. Não obtenha credenciais por JDBC/arquivos nem contorne o bloqueio por outra ferramenta.",
+      );
+      return;
+    }
+    const parsed = sqlArguments.safeParse(p.arguments);
+    if (!parsed.success) {
+      reply(
+        "Argumentos SQL inválidos. Informe id/revisão, operação, SQL, parâmetros tipados, risco e intenção; nunca envie senha ou destino pela ferramenta.",
+      );
+      return;
+    }
+    const id = String(message.id);
+    if (this.toolRequests.has(id)) return;
+    this.toolRequests.add(id);
+    if (!this.turnId) this.turnId = text(p.turnId);
+    const args = parsed.data,
+      sql = this.options.databases.tools;
+    const project = this.state.project.path,
+      mode = this.state.mode,
+      epoch = this.toolEpoch;
+    await this.executeTool(
+      {
+        message,
+        tool: "sql",
+        safety: () =>
+          cyberSafetyReason([
+            args.intent,
+            args.sql,
+            ...(args.parameters || []).map((parameter) => String(parameter.value ?? "")),
+          ]),
+        confirmation: async () => sql.confirmation(project, args, mode),
+        approval: (reason) => sql.approval(project, args, mode, reason),
+        execute: (approved) =>
+          sql.execute(project, args, mode, approved, (rows, elapsedMs, failed) => {
+            if (this.disposed || this.toolEpoch !== epoch || this.state.project?.path !== project)
+              return;
+            const metrics = this.state.projectDatabases!.metrics;
+            metrics.requests++;
+            metrics.elapsedMs += elapsedMs;
+            metrics.lastRows = rows;
+            if (failed) {
+              metrics.failures++;
+              this.state.metrics.failures++;
+            }
+            this.refreshDatabases();
+          }),
+      },
+      null,
+    );
+    this.publish();
   }
   private async httpRequest(message: RpcMessage): Promise<void> {
     const p = message.params || {};
@@ -2513,6 +2662,7 @@ export class AssistantService extends EventEmitter {
     this.toolEpoch++;
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
+    this.options.databases?.tools?.cancel();
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();

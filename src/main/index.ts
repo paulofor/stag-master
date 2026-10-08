@@ -17,6 +17,8 @@ import { RpcClient } from "./rpc";
 import { AssistantService } from "./service";
 import { SettingsStore } from "./settings";
 import { DatabaseConnections } from "./database-connections";
+import { SqlTools } from "./sql-tools";
+import { runSqlQuery } from "./sql-query";
 import { testSqlServer } from "./sqlserver";
 import { ApiConnections } from "./api-connections";
 import { HttpTools } from "./http-tools";
@@ -124,6 +126,10 @@ async function start(): Promise<void> {
     encrypt: (value: string) => safeStorage.encryptString(value),
     decrypt: (value: Buffer) => safeStorage.decryptString(value),
   };
+  const databaseConnections = new DatabaseConnections(
+    join(dataRoot, "database-connections.json"),
+    secretStorage,
+  );
   service = new AssistantService({
     optimizeImage: optimizeModelImage,
     createRpc: () =>
@@ -151,11 +157,9 @@ async function start(): Promise<void> {
       },
     ),
     databases: {
-      connections: new DatabaseConnections(
-        join(dataRoot, "database-connections.json"),
-        secretStorage,
-      ),
+      connections: databaseConnections,
       test: testSqlServer,
+      tools: new SqlTools(databaseConnections, runSqlQuery),
     },
     confirmBranchDeletion: async (project, branch) => {
       const result = await dialog.showMessageBox(window!, {
@@ -279,6 +283,9 @@ async function start(): Promise<void> {
         "browserVisibility",
         "browserSession",
         "apiConsent",
+        "databaseConsent",
+        "saveDatabase",
+        "deleteDatabase",
         "saveApi",
         "deleteApi",
         "analyzeVideo",
@@ -335,6 +342,29 @@ async function start(): Promise<void> {
         message: "Permitir consultas autenticadas a estas APIs nesta conversa?",
         detail: `${snapshot.projectApis.connections.map((entry) => `${entry.config.name}: ${entry.config.baseUrl}`).join("\n")}\n\nO STAG usará as credenciais cadastradas, sem entregá-las ao assistente. As respostas das APIs serão enviadas ao ChatGPT. Requisições com efeitos exigem confirmação específica. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra esta autorização.`,
         buttons: ["Cancelar", "Autorizar APIs"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (result.response !== 1) return service!.snapshot();
+      if (owner !== authorizationRevision)
+        throw new Error("O contexto mudou durante a confirmação. Confira e autorize novamente.");
+    }
+    if (action.type === "databaseConsent" && action.allow) {
+      const snapshot = service!.snapshot();
+      if (
+        snapshot.project?.path !== action.projectPath ||
+        snapshot.projectDatabases?.revision !== action.revision ||
+        snapshot.busy
+      )
+        throw new Error("Confira o projeto e pare a execução antes de autorizar bancos.");
+      const owner = authorizationRevision;
+      const result = await dialog.showMessageBox(window!, {
+        type: "question",
+        title: "Autorizar bancos",
+        message: "Permitir consultas autenticadas a estes bancos nesta conversa?",
+        detail: `${snapshot.projectDatabases.connections.map((entry) => `${entry.config.name}: ${entry.config.server} / ${entry.config.database}`).join("\n")}\n\nO STAG usará a senha cadastrada, sem entregá-la ao assistente. Os resultados SQL serão enviados ao ChatGPT. Alterações de dados exigem confirmação específica por operação. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra a autorização.`,
+        buttons: ["Cancelar", "Autorizar bancos"],
         defaultId: 0,
         cancelId: 0,
         noLink: true,

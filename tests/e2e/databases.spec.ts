@@ -12,6 +12,8 @@ test.beforeEach(async ({ page }, info) => {
             revision: "11111111-1111-4111-8111-111111111111",
             connections: [],
             canRememberPassword: false,
+            authorized: false,
+            metrics: { requests: 0, failures: 0, elapsedMs: 0, lastRows: null },
             test: null,
           },
         }
@@ -30,6 +32,81 @@ async function fill(dialog: import("@playwright/test").Locator) {
   await dialog.getByLabel("Usuário", { exact: true }).fill("fixture");
   await dialog.getByLabel("Senha do usuário", { exact: true }).fill("synthetic only !");
 }
+test("autoriza bancos por conversa, permite revogar e edição encerra consentimento", async ({
+  page,
+}) => {
+  let dialog = await form(page);
+  await expect(
+    dialog.getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true }),
+  ).toBeDisabled();
+  await fill(dialog);
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await expect(dialog).toContainText("Salvar ou testar não autoriza consultas");
+  await dialog
+    .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+    .click();
+  await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true }),
+  ).toBeVisible();
+  await dialog
+    .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+    .click();
+  await dialog.getByLabel("Conexão salva", { exact: true }).selectOption({ label: "Homologação" });
+  await dialog.getByLabel("Nome da conexão", { exact: true }).fill("Editada");
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await expect(
+    dialog.getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true }),
+  ).toBeVisible();
+});
+test("senha somente na sessão permite testar e lembrar sem redigitar", async ({ page }) => {
+  let dialog = await form(page);
+  await fill(dialog);
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await dialog.getByLabel("Conexão salva", { exact: true }).selectOption({ label: "Homologação" });
+  await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
+  await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveAttribute(
+    "placeholder",
+    /nesta sessão/,
+  );
+  await dialog.getByRole("button", { name: "Testar conexão", exact: true }).click();
+  await expect(dialog.getByRole("status")).toContainText("Conexão validada");
+  await dialog.getByLabel("Lembrar senha neste computador", { exact: true }).check();
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+});
+test("consulta em andamento permite abrir Conexões e revogar, mantendo edição bloqueada", async ({
+  page,
+}) => {
+  let dialog = await form(page);
+  await fill(dialog);
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await dialog
+    .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+    .click();
+  await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent("stag-fixture-snapshot", {
+        detail: { busy: true, threadId: "sql-active-fixture" },
+      }),
+    );
+  });
+  await expect(page.getByRole("button", { name: "Conexões com banco de dados" })).toBeEnabled();
+  dialog = await form(page);
+  await expect(dialog.getByRole("button", { name: "Salvar conexão", exact: true })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "Testar conexão", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true }),
+  ).toBeVisible();
+  expect((await page.evaluate(() => window.stag!.getSnapshot())).busy).toBe(false);
+});
 test("diálogo de conexão oculta o navegador lateral e restaura seus bounds ao fechar", async ({
   page,
 }) => {

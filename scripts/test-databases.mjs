@@ -4,7 +4,14 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 
-export async function validateDatabaseConnections(application, page, project, data, browserUrl) {
+export async function validateDatabaseConnections(
+  application,
+  page,
+  project,
+  data,
+  browserUrl,
+  conversationFixture,
+) {
   const previousVisibility = await page.evaluate(
     async () => (await window.stag.getSnapshot()).browser.visible,
   );
@@ -66,6 +73,7 @@ export async function validateDatabaseConnections(application, page, project, da
   assert.equal(JSON.stringify(persisted).includes(password), false);
   const state = await page.evaluate(async () => window.stag.getSnapshot());
   assert.equal(state.projectDatabases.connections[0].passwordSaved, protectedStorage);
+  assert.equal(state.projectDatabases.connections[0].passwordAvailable, true);
   assert.equal(JSON.stringify(state).includes(password), false);
   assert.equal(JSON.stringify(state).includes("encryptedPassword"), false);
   assert.equal(state.metrics.requests, before.metrics.requests);
@@ -94,6 +102,71 @@ export async function validateDatabaseConnections(application, page, project, da
     .getByLabel("Conexão salva", { exact: true })
     .selectOption({ label: "SQL Server sintético" });
   await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
+  // Exercise the production native consent gate, including cancellation, reload and revocation.
+  await application.evaluate(({ dialog }) => {
+    global.databasePreviousDialog = dialog.showMessageBox;
+    global.databaseConsentResponse = 0;
+    dialog.showMessageBox = async (...args) =>
+      args.some((arg) => arg?.title === "Autorizar bancos")
+        ? { response: global.databaseConsentResponse }
+        : global.databasePreviousDialog(...args);
+  });
+  try {
+    await dialog
+      .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+      .click();
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
+      false,
+    );
+    await application.evaluate(() => {
+      global.databaseConsentResponse = 1;
+    });
+    await dialog
+      .getByRole("button", { name: "Autorizar bancos nesta conversa", exact: true })
+      .click();
+    await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+    await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
+    if (conversationFixture) {
+      await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+      // Login belongs only to the deterministic process double. Windows launches
+      // the real Codex with an empty home and must never attempt real OAuth here.
+      await page.evaluate(() => window.stag.request({ type: "login" }));
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
+        )
+        .toBe(true);
+      // Await turn/start's response before interruption; busy alone is not a handshake.
+      await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
+      assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
+      await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+      await expect(
+        dialog.getByRole("button", { name: "Salvar conexão", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        dialog.getByRole("button", { name: "Testar conexão", exact: true }),
+      ).toBeDisabled();
+    }
+    await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
+      .toBe(false);
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
+      false,
+    );
+    if (conversationFixture) await page.evaluate(() => window.stag.request({ type: "logout" }));
+    await dialog
+      .getByLabel("Conexão salva", { exact: true })
+      .selectOption({ label: "SQL Server sintético" });
+  } finally {
+    await application.evaluate(({ dialog }) => {
+      dialog.showMessageBox = global.databasePreviousDialog;
+    });
+  }
   const wrongProject = await page.evaluate(async () => {
     const state = await window.stag.getSnapshot();
     try {
@@ -108,6 +181,7 @@ export async function validateDatabaseConnections(application, page, project, da
     }
   });
   assert.match(wrongProject, /projeto mudou/i);
+  const probeBaseline = await page.evaluate(() => window.stag.getSnapshot());
   // The production driver sends PRELOGIN to a loopback TCP double; cancel only after that handshake.
   let accept;
   const handshake = new Promise((resolve) => {
@@ -140,8 +214,8 @@ export async function validateDatabaseConnections(application, page, project, da
     await expect(dialog.getByRole("alert")).toContainText("Não foi possível conectar");
     const after = await page.evaluate(async () => window.stag.getSnapshot());
     assert.equal(JSON.stringify(after).includes(password), false);
-    assert.equal(after.metrics.requests, before.metrics.requests);
-    assert.equal(after.metrics.totalTokens, before.metrics.totalTokens);
+    assert.equal(after.metrics.requests, probeBaseline.metrics.requests);
+    assert.equal(after.metrics.totalTokens, probeBaseline.metrics.totalTokens);
     await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
   } finally {
     for (const socket of sockets) socket.destroy();

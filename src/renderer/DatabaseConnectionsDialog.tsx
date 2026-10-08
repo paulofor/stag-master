@@ -15,6 +15,7 @@ export function DatabaseConnectionsDialog({
   projectPath,
   data,
   pending,
+  busy,
   error,
   run,
   close,
@@ -23,6 +24,7 @@ export function DatabaseConnectionsDialog({
   projectPath: string;
   data: ProjectDatabases | null;
   pending: boolean;
+  busy: boolean;
   error: string | null;
   run: (action: Action) => Promise<boolean>;
   close: () => void;
@@ -39,7 +41,7 @@ export function DatabaseConnectionsDialog({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testId, setTestId] = useState<string | null>(null);
   const testing = data?.test?.status === "testing";
-  const locked = pending || testing;
+  const locked = pending || testing || busy;
   const saved = data?.connections.find((entry) => entry.id === id);
   useEffect(() => {
     const element = dialog.current!;
@@ -97,7 +99,7 @@ export function DatabaseConnectionsDialog({
     if (locked || !data) return;
     const parsed = valid();
     if (!parsed) return;
-    if ((test || remember) && !password && !saved?.passwordSaved) {
+    if ((test || remember) && !password && !saved?.passwordAvailable) {
       setValidation("Informe a senha do usuário.");
       return;
     }
@@ -155,12 +157,43 @@ export function DatabaseConnectionsDialog({
         Conexões SQL Server de <strong>{projectName}</strong>.
       </p>
       <p className="sources-hint">
-        Teste de conexão sem alterar dados. A senha é usada pelo STAG e não é enviada ao assistente.
+        O assistente consulta os bancos após sua autorização. A senha fica no STAG; resultados SQL
+        são enviados ao assistente. Alterações de dados pedem confirmação por operação.
       </p>
       {!data ? (
         <p role="alert">{error || "Carregando conexões…"}</p>
       ) : (
         <>
+          <div className="api-consent">
+            <p>
+              {data.authorized
+                ? "Bancos autorizados nesta conversa. Alterações de dados pedem confirmação."
+                : "O uso pelo assistente está desautorizado. Salvar ou testar não autoriza consultas."}
+            </p>
+            <button
+              className="secondary-button"
+              disabled={(!data.authorized && (locked || busy)) || !data.connections.length}
+              onClick={() => (
+                setValidation(null),
+                void run({
+                  type: "databaseConsent",
+                  projectPath,
+                  revision: data.revision,
+                  allow: !data.authorized,
+                })
+              )}
+            >
+              {data.authorized ? "Revogar bancos" : "Autorizar bancos nesta conversa"}
+            </button>
+          </div>
+          {data.metrics.requests > 0 && (
+            <p className="sources-hint" role="status">
+              {data.metrics.requests} operações SQL · {data.metrics.failures} falhas
+              {data.metrics.lastRows !== null
+                ? ` · última consulta: ${data.metrics.lastRows} linhas`
+                : ""}
+            </p>
+          )}
           <label className="database-saved">
             Conexão salva
             <select
@@ -289,7 +322,9 @@ export function DatabaseConnectionsDialog({
                     placeholder={
                       saved?.passwordSaved
                         ? "Salva · deixe vazio para manter ou digite para substituir"
-                        : "Digite a senha"
+                        : saved?.passwordAvailable
+                          ? "Disponível nesta sessão · digite para substituir"
+                          : "Digite a senha"
                     }
                     onChange={(event) => {
                       setPassword(event.target.value);
@@ -319,7 +354,7 @@ export function DatabaseConnectionsDialog({
               <p className="sources-hint">
                 {data.canRememberPassword
                   ? "A senha salva fica protegida pelo sistema para este usuário e projeto. Desmarcar e salvar remove a senha guardada."
-                  : "Armazenamento protegido indisponível. Você pode salvar os demais campos e informar a senha ao testar."}
+                  : "Armazenamento protegido indisponível. Ao salvar, a senha fica somente nesta sessão do STAG."}
               </p>
               <details className="database-advanced">
                 <summary>Segurança e opções avançadas</summary>
