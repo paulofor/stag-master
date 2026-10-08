@@ -475,7 +475,7 @@ describe("movimento periódico do mouse", () => {
   });
 });
 
-it("handshake pronto ainda pode ter configuração Windows pendente antes de account/read", async () => {
+it("conexão fica em preparação enquanto setup Windows aguarda resposta após handshake", async () => {
   const before = service.snapshot().metrics.requests;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -498,16 +498,99 @@ it("handshake pronto ainda pode ter configuração Windows pendente antes de acc
   const connecting = service.request({ type: "connect" });
   try {
     await vi.waitFor(() => expect(setupPending).toBe(true));
-    expect(service.snapshot().connection).toBe("ready");
+    expect(service.snapshot().connection).toBe("connecting");
     expect(service.snapshot().metrics.requests).toBe(before + 1);
+    await expect(service.request({ type: "browserTab", tab: "system" })).rejects.toThrow(
+      "Aguarde a ação em andamento.",
+    );
     release();
-    await connecting;
+    expect((await connecting).connection).toBe("ready");
     expect(service.snapshot().account).toBeNull();
     expect(service.snapshot().metrics.requests).toBe(before + 2);
     expect(service.snapshot().error).toBeNull();
   } finally {
     release();
     await connecting.finally(() => spy.mockRestore());
+  }
+});
+
+it.each(["account/read", "model/list", "thread/list", "thread/resume"])(
+  "só publica pronto após %s e libera navegação sem repetir a ação no reinício",
+  async (heldMethod) => {
+    await ready();
+    await send("Explique a arquitetura do projeto");
+    await complete();
+    const threadId = service.snapshot().threadId;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    const states: string[] = [];
+    service.on("snapshot", (snapshot) => states.push(snapshot.connection));
+    const original = RpcClient.prototype.call;
+    const spy = vi.spyOn(RpcClient.prototype, "call").mockImplementation(async function <T>(
+      this: RpcClient,
+      method: string,
+      params: Record<string, unknown> = {},
+    ): Promise<T> {
+      if (method === heldMethod) {
+        entered = true;
+        await gate;
+      }
+      return original.call(this, method, params) as Promise<T>;
+    });
+    const connecting = service.request({ type: "connect" });
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true));
+      expect(service.snapshot().connection).toBe("connecting");
+      expect(states).not.toContain("ready");
+      await expect(service.request({ type: "browserTab", tab: "system" })).rejects.toThrow(
+        "Aguarde a ação em andamento.",
+      );
+      expect(browser.selectTab).not.toHaveBeenCalled();
+      release();
+      const connected = await connecting;
+      expect(connected.connection).toBe("ready");
+      expect(connected.threadId).toBe(threadId);
+      expect(connected.error).toBeNull();
+      expect(states.at(-1)).toBe("ready");
+      await service.request({ type: "browserTab", tab: "system" });
+      expect(browser.selectTab).toHaveBeenCalledExactlyOnceWith("system");
+    } finally {
+      release();
+      await connecting.finally(() => spy.mockRestore());
+    }
+  },
+);
+
+it("falha ao carregar histórico mantém erro e uma reconexão explícita libera as abas", async () => {
+  await service.request({ type: "selectProject" });
+  const original = RpcClient.prototype.call;
+  let fail = true;
+  const spy = vi.spyOn(RpcClient.prototype, "call").mockImplementation(async function <T>(
+    this: RpcClient,
+    method: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (method === "thread/list" && fail) {
+      fail = false;
+      throw new Error("Falha sintética no histórico");
+    }
+    return original.call(this, method, params) as Promise<T>;
+  });
+  try {
+    await expect(service.request({ type: "connect" })).rejects.toThrow(
+      "Falha sintética no histórico",
+    );
+    expect(service.snapshot().connection).toBe("error");
+    expect(browser.selectTab).not.toHaveBeenCalled();
+    expect((await service.request({ type: "connect" })).connection).toBe("ready");
+    await service.request({ type: "browserTab", tab: "documentation" });
+    expect(browser.selectTab).toHaveBeenCalledExactlyOnceWith("documentation");
+    expect(service.snapshot().error).toBeNull();
+  } finally {
+    spy.mockRestore();
   }
 });
 

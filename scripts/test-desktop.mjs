@@ -157,7 +157,7 @@ try {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("button", { name: "Entrar com ChatGPT" })).toBeVisible();
-  // ready marks the handshake; Windows still issues account/read after sandbox setup.
+  // ready acknowledges setup/account/history, so the next action can run without retrying.
   // With this fresh, unauthenticated home: account/read, plus setupStart on Windows.
   await expect
     .poll(() =>

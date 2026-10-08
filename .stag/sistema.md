@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-08 — Prontidão no reinício 0.4.39: o primeiro CI Windows revelou navegação recusada após connection=ready, pois o histórico ainda carregava. Agora a conexão permanece connecting até concluir setup/conta/modelos/histórico/retomada. Guarda de ações preservada; regressões locais controlam respostas após handshake e verificam falha/recuperação sem repetir navegação. Fonte: run 37818655934 e testes determinísticos desta tarefa.
+
 2026-10-08 — Navegador 0.4.39: duas WebContentsView com driver de produção compartilhado, documentação e sistema, cada uma com URL/histórico/estado/sessão. stag_browser recebe tab; o serviço fixa a aba no recebimento e mantém a fila única/consentimento da conversa. pageId/ref só funcionam na página de origem. Preferência por projeto abrange ambas as partições; documentação mantém o identificador persistente anterior e sistema usa partição distinta. Fechar/revogar/trocar descarta as páginas. Fonte: pedido atual, código e matriz de homologação; validação somente sintética, sem sites/sessões reais do cliente.
 
 2026-10-08 — SQL 0.4.38: stag_sql registra o catálogo de conexões por turno, com autorização por conversa/revisão e senha apenas no main (sessão ou proteção do sistema). Consultas SELECT/CTE parametrizadas e limitadas; INSERT/UPDATE/DELETE confirmados, bloqueados em Leitura. Compartilha fila/limpeza e preserva teste fixo SELECT 1. Históricos antigos requerem nova conversa. Fonte: pedido atual e implementação; a base e a remessa reais citadas pelo cliente não foram acessadas.

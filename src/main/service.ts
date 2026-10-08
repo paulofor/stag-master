@@ -1498,7 +1498,6 @@ export class AssistantService extends EventEmitter {
     });
     try {
       await rpc.start();
-      this.state.connection = "ready";
       this.sandboxReady = this.state.platform !== "win32";
       if (!this.sandboxReady) await this.call("windowsSandbox/setupStart", { mode: "unelevated" });
       await this.refreshAccount();
@@ -1506,6 +1505,8 @@ export class AssistantService extends EventEmitter {
       await this.refreshHistory();
       // Rejoin persisted history after disconnect; never automatically replay user input.
       if (this.state.threadId) await this.resume(this.state.threadId);
+      // Publish readiness only after initialization, while request() releases the context guard.
+      this.state.connection = "ready";
     } catch (error) {
       this.state.connection = "error";
       rpc.close();
