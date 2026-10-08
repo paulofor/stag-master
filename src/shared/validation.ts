@@ -4,6 +4,9 @@ import { projectSourcesSchema } from "./project-sources";
 import { branchOperationSchema } from "./project-branches";
 import { databasePasswordSchema, sqlServerConfigSchema } from "./database-connections";
 import { apiActionSchemas } from "./api-connections";
+import { browserTabs } from "./types";
+
+export const browserTabSchema = z.enum(browserTabs);
 
 export const actionSchema = z.discriminatedUnion("type", [
   ...apiActionSchemas,
@@ -157,6 +160,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("openLink"), url: z.string().max(8000) }).strict(),
   z.object({ type: z.literal("browserVisibility"), visible: z.boolean() }).strict(),
   z.object({ type: z.literal("browserConsent"), allow: z.boolean() }).strict(),
+  z.object({ type: z.literal("browserTab"), tab: browserTabSchema }).strict(),
   z
     .object({
       type: z.literal("browserSession"),
@@ -168,8 +172,19 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({
       type: z.literal("browserControl"),
       control: z.discriminatedUnion("action", [
-        z.object({ action: z.literal("navigate"), url: z.string().min(1).max(8000) }).strict(),
-        z.object({ action: z.enum(["back", "forward", "reload"]) }).strict(),
+        z
+          .object({
+            action: z.literal("navigate"),
+            url: z.string().min(1).max(8000),
+            tab: browserTabSchema.optional(),
+          })
+          .strict(),
+        z
+          .object({
+            action: z.enum(["back", "forward", "reload"]),
+            tab: browserTabSchema.optional(),
+          })
+          .strict(),
       ]),
     })
     .strict(),

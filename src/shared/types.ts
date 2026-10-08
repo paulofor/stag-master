@@ -99,11 +99,19 @@ export interface Snapshot {
   mouseMovement: { enabled: boolean; moves: number; skipped: number; status: string };
   browser: BrowserState;
 }
-export interface BrowserState {
+export const browserTabs = ["documentation", "system"] as const;
+export type BrowserTab = (typeof browserTabs)[number];
+export const browserTabLabels: Record<BrowserTab, string> = {
+  documentation: "Documentação",
+  system: "Sistema do projeto",
+};
+export interface BrowserState extends BrowserInfo {
   available: boolean;
   visible: boolean;
   authorized: boolean;
   remember: boolean;
+}
+export interface BrowserPageInfo {
   url: string;
   title: string;
   loading: boolean;
@@ -111,7 +119,18 @@ export interface BrowserState {
   canGoForward: boolean;
   error: string | null;
 }
-export type BrowserInfo = Omit<BrowserState, "available" | "visible" | "authorized" | "remember">;
+export interface BrowserInfo extends BrowserPageInfo {
+  activeTab: BrowserTab;
+  tabs: Record<BrowserTab, BrowserPageInfo>;
+}
+export const emptyBrowserPage: BrowserPageInfo = {
+  url: "",
+  title: "",
+  loading: false,
+  canGoBack: false,
+  canGoForward: false,
+  error: null,
+};
 export const emptySnapshot: Snapshot = {
   connection: "disconnected",
   error: null,
@@ -145,12 +164,9 @@ export const emptySnapshot: Snapshot = {
     visible: true,
     authorized: false,
     remember: false,
-    url: "",
-    title: "",
-    loading: false,
-    canGoBack: false,
-    canGoForward: false,
-    error: null,
+    ...emptyBrowserPage,
+    activeTab: "documentation",
+    tabs: { documentation: { ...emptyBrowserPage }, system: { ...emptyBrowserPage } },
   },
 };
 export type Action =
@@ -214,11 +230,13 @@ export type Action =
   | { type: "openLink"; url: string }
   | { type: "browserVisibility"; visible: boolean }
   | { type: "browserConsent"; allow: boolean }
+  | { type: "browserTab"; tab: BrowserTab }
   | { type: "browserSession"; projectPath: string; remember: boolean }
   | { type: "browserControl"; control: BrowserControl }
   | { type: "browserBounds"; bounds: { x: number; y: number; width: number; height: number } };
-export type BrowserControl =
-  { action: "navigate"; url: string } | { action: "back" | "forward" | "reload" };
+export type BrowserControl = (
+  { action: "navigate"; url: string } | { action: "back" | "forward" | "reload" }
+) & { tab?: BrowserTab };
 export interface DesktopBridge {
   getSnapshot(): Promise<Snapshot>;
   request(action: Action): Promise<Snapshot>;

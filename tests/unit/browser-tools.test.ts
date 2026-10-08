@@ -9,6 +9,35 @@ import {
 import { actionSchema } from "../../src/shared/validation";
 
 describe("contrato do navegador", () => {
+  it("aceita somente as duas abas em tools e IPC e identifica a aba na aprovação", () => {
+    for (const tab of ["documentation", "system"] as const) {
+      expect(browserArguments.parse({ action: "snapshot", tab }).tab).toBe(tab);
+      expect(actionSchema.parse({ type: "browserTab", tab })).toEqual({ type: "browserTab", tab });
+      const input = browserArguments.parse({
+        action: "navigate",
+        tab,
+        url: "http://127.0.0.1:1234/",
+        risk: "critical",
+        intent: "Abrir página sintética",
+      });
+      expect(browserApproval(input, "Confirmar navegação").detail).toContain(
+        tab === "system" ? "Aba: Sistema do projeto" : "Aba: Documentação",
+      );
+    }
+    for (const tab of ["other", "", 1, "../../profile"]) {
+      expect(browserArguments.safeParse({ action: "snapshot", tab }).success).toBe(false);
+      expect(actionSchema.safeParse({ type: "browserTab", tab }).success).toBe(false);
+      expect(
+        actionSchema.safeParse({ type: "browserControl", control: { action: "reload", tab } })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      actionSchema.safeParse({ type: "browserTab", tab: "system", processId: 1 }).success,
+    ).toBe(false);
+    expect(browserTool.inputSchema.properties.tab.enum).toEqual(["documentation", "system"]);
+    expect(browserTool.description).toContain("pageId/ref só valem na aba");
+  });
   it("seleciona por exatamente um texto, índice ou valor legado, sem ampliar outras operações", () => {
     for (const selection of [{ label: "Ambiente local" }, { index: 0 }, { value: "" }]) {
       const input = browserArguments.parse({

@@ -5,6 +5,7 @@ import { expect } from "@playwright/test";
 import { validateBrowserCombos } from "./test-browser-combos.mjs";
 import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 import { validateBrowserCertificates } from "./test-browser-certificates.mjs";
+import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
@@ -15,6 +16,201 @@ export async function buildBrowserHarness(dir) {
     format: "cjs",
     external: ["electron"],
   });
+}
+
+async function validateBrowserTabs({
+  application,
+  site,
+  execute,
+  reason,
+  snapshot,
+  state,
+  dom,
+  target,
+  page,
+}) {
+  const tls = await startBrowserTlsSite();
+  const navigate = (tab, url = site.url) =>
+    execute({ action: "navigate", tab, url, risk: "routine", intent: "Conferir aba sintética" });
+  try {
+    await application.evaluate(() => global.browserHarness.browser.reset(null));
+    await navigate("documentation");
+    const docs = await snapshot();
+    assert.equal(docs.tab, "documentation");
+    const docsEdit = {
+      action: "fill",
+      ...target(docs, "Texto local"),
+      tab: "documentation",
+      text: "rascunho documentação",
+      risk: "routine",
+      intent: "Editar campo sintético",
+    };
+    await execute(docsEdit);
+    await dom(
+      "document.cookie='synthetic_tab=documentation';localStorage.setItem('tab','documentation')",
+    );
+    await navigate("system");
+    assert.equal(await dom("document.cookie"), "");
+    assert.equal(await dom("localStorage.getItem('tab')"), null);
+    const system = await snapshot();
+    assert.equal(system.tab, "system");
+    assert.notEqual(system.pageId, docs.pageId);
+    await execute({
+      ...docsEdit,
+      ...target(system, "Texto local"),
+      tab: "system",
+      text: "rascunho sistema",
+    });
+    await dom("document.cookie='synthetic_tab=system';localStorage.setItem('tab','system')");
+    await assert.rejects(execute({ ...docsEdit, tab: "system" }), /página mudou/);
+    await assert.rejects(reason({ ...docsEdit, tab: "system" }), /página mudou/);
+    assert.equal(await dom("document.querySelector('#local').value"), "rascunho sistema");
+    await execute({ action: "snapshot", tab: "documentation" });
+    assert.equal(await dom("document.querySelector('#local').value"), "rascunho documentação");
+    assert.equal(await dom("localStorage.getItem('tab')"), "documentation");
+    assert.match(await dom("document.cookie"), /documentation/);
+    assert.equal((await state()).tabs.system.url, site.url);
+    await navigate("documentation", `${site.url}next`);
+    await execute({ action: "back", tab: "documentation" });
+    await expect.poll(async () => (await state()).tabs.documentation.url).toBe(site.url);
+    assert.equal((await state()).tabs.system.url, site.url);
+    await execute({ action: "snapshot", tab: "system" });
+    assert.equal(await dom("document.querySelector('#local').value"), "rascunho sistema");
+    const shot = await execute({ action: "screenshot", tab: "system" });
+    assert.match(shot.contentItems[0].text, /Sistema do projeto/);
+    assert.match(shot.contentItems[1].imageUrl, /^data:image\/png;base64,/);
+    await assert.rejects(execute({ action: "snapshot", tab: "other" }));
+    assert.equal((await state()).activeTab, "system");
+    await assert.rejects(navigate("documentation", tls.url), /ERR_CERT_AUTHORITY_INVALID/);
+    const failed = await state();
+    assert.match(failed.tabs.documentation.error, /ERR_CERT_AUTHORITY_INVALID/);
+    assert.equal(failed.tabs.system.error, null);
+    await execute({ action: "snapshot", tab: "system" });
+    assert.equal(await dom("document.querySelector('#local').value"), "rascunho sistema");
+    await navigate("documentation");
+    const canceled = navigate("system", `${site.url}hang`).then(
+      () => null,
+      (error) => error,
+    );
+    await expect.poll(async () => (await state()).tabs.system.loading).toBe(true);
+    await application.evaluate(() => global.browserHarness.browser.selectTab("documentation"));
+    await application.evaluate(() => global.browserHarness.browser.cancel());
+    assert.ok(await canceled, "Cancelar deve interromper a carga da aba oculta.");
+    await navigate("system");
+    await application.evaluate(() => {
+      const browser = global.browserHarness.browser;
+      global.oldTabFailures = Object.values(browser.pages).map(
+        (tab) => tab.view.webContents.listeners("did-fail-load")[0],
+      );
+      browser.reset();
+      for (const failure of global.oldTabFailures)
+        failure({}, -202, "SYNTHETIC_OLD_ERROR", "", true);
+      delete global.oldTabFailures;
+    });
+    for (const tab of ["documentation", "system"]) {
+      assert.equal((await state()).tabs[tab].url, "");
+      assert.equal((await state()).tabs[tab].error, null);
+      await navigate(tab);
+      assert.equal(await dom("document.cookie"), "");
+      assert.equal(await dom("localStorage.getItem('tab')"), null);
+      assert.deepEqual(await dom("window.securityProbe"), {
+        node: "undefined",
+        require: "undefined",
+        bridge: "undefined",
+      });
+    }
+    // A partial deletion is reported and remains retryable for both persistent partitions.
+    const profile = "00000000-0000-4000-8000-000000000039";
+    await application.evaluate(
+      (_electron, id) => global.browserHarness.browser.setProfile(id),
+      profile,
+    );
+    for (const tab of ["documentation", "system"]) {
+      await navigate(tab, `${site.url}session-login`);
+      await dom(
+        "document.querySelector('#remember').checked=true;document.querySelector('form').requestSubmit()",
+      );
+      await expect
+        .poll(() => dom("document.querySelector('h1')?.textContent"))
+        .toBe("Conectado sintético");
+    }
+    await application.evaluate(() => {
+      global.failedTabSession = global.browserHarness.browser.view.webContents.session;
+      global.restoreTabClear = global.failedTabSession.clearData.bind(global.failedTabSession);
+      global.failedTabSession.clearData = async () => {
+        throw new Error("Falha sintética na segunda partição");
+      };
+    });
+    await assert.rejects(
+      application.evaluate(() => global.browserHarness.browser.clearProfile()),
+      /Não foi possível apagar todos/,
+    );
+    await navigate("system", `${site.url}session-login`);
+    assert.equal(await dom("document.querySelector('h1')?.textContent"), "Conectado sintético");
+    await navigate("documentation", `${site.url}session-login`);
+    assert.equal(await dom("document.querySelector('h1')?.textContent"), "Login necessário");
+    await application.evaluate(() => {
+      global.failedTabSession.clearData = global.restoreTabClear;
+      delete global.failedTabSession;
+      delete global.restoreTabClear;
+    });
+    await application.evaluate(() => global.browserHarness.browser.clearProfile());
+    await application.evaluate(
+      (_electron, id) => global.browserHarness.browser.setProfile(id),
+      profile,
+    );
+    for (const tab of ["documentation", "system"]) {
+      await navigate(tab, `${site.url}session-login`);
+      assert.equal(await dom("document.querySelector('h1')?.textContent"), "Login necessário");
+    }
+    // The actual renderer/preload/main can select and retain both native pages, including reload.
+    await page.evaluate(async (url) => {
+      await window.stag.request({ type: "browserVisibility", visible: true });
+      await window.stag.request({
+        type: "browserControl",
+        control: { action: "navigate", tab: "documentation", url },
+      });
+      await window.stag.request({
+        type: "browserControl",
+        control: { action: "navigate", tab: "system", url: `${url}next` },
+      });
+    }, site.url);
+    await expect(
+      page.getByRole("tab", { name: "Sistema do projeto", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await page.getByRole("tab", { name: "Documentação", exact: true }).click();
+    await expect(page.getByLabel("Endereço do navegador")).toHaveValue(site.url);
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Documentação", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await page.getByRole("tab", { name: "Sistema do projeto", exact: true }).click();
+    await expect(page.getByLabel("Endereço do navegador")).toHaveValue(`${site.url}next`);
+    await expect
+      .poll(() =>
+        application.evaluate(
+          ({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0].contentView.children.filter(
+              (view) => view.webContents && view.getVisible(),
+            ).length,
+        ),
+      )
+      .toBe(1);
+    await page.screenshot({ path: ".local/screenshots/electron-browser-tabs.png" });
+    await page.evaluate(() => window.stag.request({ type: "browserVisibility", visible: false }));
+    const closed = await page.evaluate(async () => (await window.stag.getSnapshot()).browser);
+    assert.equal(closed.authorized, false);
+    assert.equal(closed.tabs.documentation.url, "");
+    assert.equal(closed.tabs.system.url, "");
+    await application.evaluate(() => global.browserHarness.browser.reset(null));
+    await navigate("documentation");
+    console.log(
+      "Browser real: duas abas, refs cruzadas, estado/histórico/armazenamento isolados, TLS, cancelamento, reload e descarte aprovados.",
+    );
+  } finally {
+    await tls.close();
+  }
 }
 
 export async function validateBrowser(application, dir, site, page) {
@@ -227,6 +423,17 @@ export async function validateBrowser(application, dir, site, page) {
     );
     await validateBrowserSessions({ application, site, execute, reason, snapshot, dom, target });
     await validateBrowserCertificates({ application, site, execute, snapshot, state, page });
+    await validateBrowserTabs({
+      application,
+      site,
+      execute,
+      reason,
+      snapshot,
+      state,
+      dom,
+      target,
+      page,
+    });
     console.log("Browser real: descartar sessão sintética e recuperar navegação interrompida.");
     // Reproduce native window resizing after renderer bounds were accepted, before reset.
     const previousSize = await application.evaluate(() => {
@@ -313,7 +520,8 @@ export async function validateBrowser(application, dir, site, page) {
     doc = await snapshot();
     console.log("Browser real: cancelar tecla pendente ao trocar sessão durante o foco.");
     await application.evaluate(() => {
-      const browser = global.browserHarness.browser;
+      const panel = global.browserHarness.browser;
+      const browser = panel.pages[panel.snapshot().activeTab];
       const document = browser.document.bind(browser);
       browser.document = async (request) => {
         const result = await document(request);

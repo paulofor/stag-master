@@ -51,7 +51,9 @@ try {
   const { DatabaseConnections } = await import(
     pathToFileURL(join(dir, "database-connections.mjs")).href
   );
-  const { browserTool } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
+  const { browserTool, browserArguments, browserTabsInstructions } = await import(
+    pathToFileURL(join(dir, "browser-tools.mjs")).href
+  );
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
   );
@@ -305,6 +307,48 @@ try {
     );
   } finally {
     rpc.off("request", sqlRequest);
+  }
+  const browserRequests = [];
+  const browserRequest = async (message) => {
+    if (message.method !== "item/tool/call" || message.params.tool !== "stag_browser") {
+      rpc.rejectRequest(message.id, "Somente navegador sintético nesta sonda.");
+      return;
+    }
+    const args = browserArguments.parse(message.params.arguments);
+    browserRequests.push(args);
+    rpc.respond(message.id, {
+      success: true,
+      contentItems: [
+        {
+          type: "inputText",
+          text: JSON.stringify({
+            tab: args.tab,
+            pageId: `synthetic-${args.tab}`,
+            text: "Página sintética, sem rede externa.",
+          }),
+        },
+      ],
+    });
+  };
+  rpc.on("request", browserRequest);
+  try {
+    assert.ok(
+      assistantInstructions("project", process.platform, false, true, project, sources).includes(
+        browserTabsInstructions,
+      ),
+    );
+    for (const tab of ["documentation", "system"]) {
+      provider.queueToolCall({ name: "stag_browser", arguments: { action: "snapshot", tab } });
+      await syntheticTurn([{ type: "text", text: `Leia a aba ${tab} sintética.` }], sources, true);
+      assert.equal(browserRequests.at(-1).tab, tab);
+      assert.ok(JSON.stringify(provider.inputs.at(-1)).includes(`synthetic-${tab}`));
+    }
+    assert.equal(browserRequests.length, 2);
+    console.log(
+      "Codex real/provedor loopback: schema de produção com duas abas, despacho e respostas identificadas aprovados.",
+    );
+  } finally {
+    rpc.off("request", browserRequest);
   }
   function verifyTrafficSettings() {
     const traffic = provider.traffic.at(-1);

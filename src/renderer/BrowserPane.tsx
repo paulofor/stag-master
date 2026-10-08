@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Globe2, RefreshCw, ShieldCheck, X } from "lucide-react";
-import type { Action, BrowserState } from "../shared/types";
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  Globe2,
+  Monitor,
+  RefreshCw,
+  ShieldCheck,
+  X,
+} from "lucide-react";
+import { browserTabs, browserTabLabels, type Action, type BrowserState } from "../shared/types";
 
 export function BrowserPane({
   state,
@@ -19,11 +28,21 @@ export function BrowserPane({
   run: (action: Action) => Promise<boolean>;
   backToChat: () => void;
 }) {
-  const [address, setAddress] = useState(state.url);
+  const urls = { documentation: state.tabs.documentation.url, system: state.tabs.system.url };
+  const previousUrls = useRef(urls);
+  const [addresses, setAddresses] = useState(urls);
+  const address = addresses[state.activeTab];
   const viewport = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    setAddress(state.url);
-  }, [state.url]);
+    const current = { documentation: state.tabs.documentation.url, system: state.tabs.system.url };
+    const changed = Object.fromEntries(
+      browserTabs
+        .filter((tab) => current[tab] !== previousUrls.current[tab])
+        .map((tab) => [tab, current[tab]]),
+    );
+    if (Object.keys(changed).length) setAddresses((saved) => ({ ...saved, ...changed }));
+    previousUrls.current = current;
+  }, [state.tabs.documentation.url, state.tabs.system.url]);
   useEffect(() => {
     const target = viewport.current;
     const bridge = window.stag;
@@ -72,6 +91,47 @@ export function BrowserPane({
           <X size={17} />
         </button>
       </header>
+      <div className="browser-tabs" role="tablist" aria-label="Abas do navegador">
+        {browserTabs.map((tab, index) => (
+          <button
+            key={tab}
+            id={`browser-tab-${tab}`}
+            type="button"
+            role="tab"
+            aria-selected={state.activeTab === tab}
+            aria-controls="browser-page"
+            tabIndex={state.activeTab === tab ? 0 : -1}
+            disabled={manualDisabled}
+            title={state.tabs[tab].error || state.tabs[tab].title || browserTabLabels[tab]}
+            onClick={() => void run({ type: "browserTab", tab })}
+            onKeyDown={(event) => {
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? 1
+                    : event.key === "ArrowRight" || event.key === "ArrowLeft"
+                      ? 1 - index
+                      : null;
+              if (next === null) return;
+              event.preventDefault();
+              document.getElementById(`browser-tab-${browserTabs[next]}`)?.focus();
+              void run({ type: "browserTab", tab: browserTabs[next] });
+            }}
+          >
+            {tab === "documentation" ? <BookOpen size={15} /> : <Monitor size={15} />}
+            <span>{browserTabLabels[tab]}</span>
+            {state.tabs[tab].loading && (
+              <RefreshCw className="loading" size={12} aria-label="Carregando" />
+            )}
+            {state.tabs[tab].error && (
+              <span className="browser-tab-error" aria-label="Falha nesta aba">
+                !
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
       <form
         className="browser-toolbar"
         onSubmit={(event) => {
@@ -82,6 +142,7 @@ export function BrowserPane({
               type: "browserControl",
               control: {
                 action: "navigate",
+                tab: state.activeTab,
                 url: /^[a-z][a-z\d+.-]*:/i.test(raw) ? raw : `https://${raw}`,
               },
             });
@@ -92,7 +153,9 @@ export function BrowserPane({
           className="icon-button"
           aria-label="Voltar página"
           disabled={manualDisabled || !state.canGoBack}
-          onClick={() => void run({ type: "browserControl", control: { action: "back" } })}
+          onClick={() =>
+            void run({ type: "browserControl", control: { action: "back", tab: state.activeTab } })
+          }
         >
           <ArrowLeft size={16} />
         </button>
@@ -101,7 +164,12 @@ export function BrowserPane({
           className="icon-button"
           aria-label="Avançar página"
           disabled={manualDisabled || !state.canGoForward}
-          onClick={() => void run({ type: "browserControl", control: { action: "forward" } })}
+          onClick={() =>
+            void run({
+              type: "browserControl",
+              control: { action: "forward", tab: state.activeTab },
+            })
+          }
         >
           <ArrowRight size={16} />
         </button>
@@ -110,7 +178,12 @@ export function BrowserPane({
           className={`icon-button ${state.loading ? "loading" : ""}`}
           aria-label="Recarregar página"
           disabled={manualDisabled || !state.url}
-          onClick={() => void run({ type: "browserControl", control: { action: "reload" } })}
+          onClick={() =>
+            void run({
+              type: "browserControl",
+              control: { action: "reload", tab: state.activeTab },
+            })
+          }
         >
           <RefreshCw size={15} />
         </button>
@@ -119,7 +192,9 @@ export function BrowserPane({
           placeholder="Digite um endereço ou peça ao STAG"
           value={address}
           disabled={manualDisabled}
-          onChange={(event) => setAddress(event.target.value)}
+          onChange={(event) =>
+            setAddresses((saved) => ({ ...saved, [state.activeTab]: event.target.value }))
+          }
           autoComplete="off"
           spellCheck={false}
         />
@@ -178,14 +253,28 @@ export function BrowserPane({
           {state.error}
         </div>
       )}
-      <div ref={viewport} className="browser-viewport" aria-label="Conteúdo do navegador">
+      <div
+        ref={viewport}
+        id="browser-page"
+        role="tabpanel"
+        aria-labelledby={`browser-tab-${state.activeTab}`}
+        className="browser-viewport"
+      >
         {!state.url && (
           <div className="browser-empty">
             <span className="browser-empty-icon">
               <Globe2 size={32} strokeWidth={1.3} />
             </span>
-            <h2>A web, junto da conversa</h2>
-            <p>Abra um endereço ou autorize o modelo para pesquisar e trabalhar aqui.</p>
+            <h2>
+              {state.activeTab === "documentation"
+                ? "Documentação, junto da conversa"
+                : "Seu sistema, junto da conversa"}
+            </h2>
+            <p>
+              {state.activeTab === "documentation"
+                ? "Abra suas fontes de referência ou autorize o modelo para consultá-las aqui."
+                : "Abra o endereço do sistema do projeto ou peça ao STAG para acessá-lo."}
+            </p>
             <p className="small">
               Navegação rotineira segue sem interrupções.
               <br />

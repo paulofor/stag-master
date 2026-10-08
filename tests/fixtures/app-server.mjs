@@ -499,6 +499,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             {
               action: "navigate",
               url: sources[0].url,
+              tab: "documentation",
               risk: "routine",
               intent: "Consultar documentação sintética do projeto",
             },
@@ -506,7 +507,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               desktopCall(
                 thread,
                 turn,
-                { action: "snapshot" },
+                { action: "snapshot", tab: "documentation" },
                 () => response(thread, turn, sourceCorpus.complete),
                 {},
                 false,
@@ -862,6 +863,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           {
             action: "navigate",
             url: input.slice("abrir aplicação local ".length),
+            tab: "system",
             risk: "routine",
             intent: "Conferir aplicação local no navegador do STAG",
           },
@@ -869,7 +871,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             desktopCall(
               thread,
               turn,
-              { action: "snapshot" },
+              { action: "snapshot", tab: "system" },
               () => response(thread, turn, "Navegador: aplicação local conferida no STAG."),
               {},
               false,
@@ -1205,7 +1207,24 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             duplicate,
             "stag_browser",
           );
-        if (input.includes("sequência")) {
+        if (input.includes("abas")) {
+          if (input.includes("crítico"))
+            call(
+              {
+                action: "navigate",
+                tab: "system",
+                url: "https://fixture.invalid/system",
+                risk: "critical",
+                intent: "Abrir sistema sintético",
+              },
+              null,
+              input.includes("duplicado"),
+            );
+          else
+            call({ action: "snapshot", tab: "system" }, () =>
+              call({ action: "snapshot", tab: "documentation" }),
+            );
+        } else if (input.includes("sequência")) {
           const operations = [
             {
               action: "navigate",
