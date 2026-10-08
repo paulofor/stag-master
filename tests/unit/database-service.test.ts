@@ -12,7 +12,7 @@ import type { Action } from "../../src/shared/types";
 
 let dir: string, service: AssistantService;
 let connections: DatabaseConnections;
-let rpc: RpcClient;
+let rpc: RpcClient | null = null;
 const password = "service synthetic secret !";
 const config: SqlServerConfig = {
   ...emptySqlServerConfig,
@@ -26,6 +26,7 @@ const tester = vi.fn(
 );
 const select = vi.fn<() => Promise<string | null>>();
 beforeEach(async () => {
+  rpc = null;
   vi.clearAllMocks();
   tester.mockResolvedValue();
   await mkdir(".local", { recursive: true });
@@ -70,6 +71,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   service.dispose();
+  // Closing the transport initiates termination; Windows keeps the child's cwd locked
+  // until it actually exits. Await the existing shutdown before deleting the fixture.
+  await rpc?.shutdown();
   await service.mediaSettled();
   await rm(dir, { recursive: true, force: true });
 });
@@ -219,7 +223,7 @@ it("perda da conex√£o Codex cancela e limpa teste sem deixar resultado em execu√
   });
   const work = service.request(testAction());
   await handshake;
-  rpc.close();
+  rpc!.close();
   await work;
   expect(service.snapshot().projectDatabases?.test?.status).toBe("canceled");
   await service.request(testAction());
