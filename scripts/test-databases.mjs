@@ -4,7 +4,14 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 
-export async function validateDatabaseConnections(application, page, project, data, browserUrl) {
+export async function validateDatabaseConnections(
+  application,
+  page,
+  project,
+  data,
+  browserUrl,
+  conversationFixture,
+) {
   const previousVisibility = await page.evaluate(
     async () => (await window.stag.getSnapshot()).browser.visible,
   );
@@ -122,25 +129,27 @@ export async function validateDatabaseConnections(application, page, project, da
     await page.reload();
     await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
     await expect(dialog.getByRole("button", { name: "Revogar bancos", exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
-    // The surrounding registration tests deliberately run without an account.
-    // This fixture login is intercepted by the existing external-URL probe.
-    await page.evaluate(() => window.stag.request({ type: "login" }));
-    await expect
-      .poll(() =>
-        page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
-      )
-      .toBe(true);
-    // Await turn/start's response before testing interruption; busy alone is not a handshake.
-    await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
-    assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
-    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
-    await expect(
-      dialog.getByRole("button", { name: "Salvar conexão", exact: true }),
-    ).toBeDisabled();
-    await expect(
-      dialog.getByRole("button", { name: "Testar conexão", exact: true }),
-    ).toBeDisabled();
+    if (conversationFixture) {
+      await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+      // Login belongs only to the deterministic process double. Windows launches
+      // the real Codex with an empty home and must never attempt real OAuth here.
+      await page.evaluate(() => window.stag.request({ type: "login" }));
+      await expect
+        .poll(() =>
+          page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
+        )
+        .toBe(true);
+      // Await turn/start's response before interruption; busy alone is not a handshake.
+      await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
+      assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
+      await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+      await expect(
+        dialog.getByRole("button", { name: "Salvar conexão", exact: true }),
+      ).toBeDisabled();
+      await expect(
+        dialog.getByRole("button", { name: "Testar conexão", exact: true }),
+      ).toBeDisabled();
+    }
     await dialog.getByRole("button", { name: "Revogar bancos", exact: true }).click();
     await expect
       .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
@@ -149,7 +158,7 @@ export async function validateDatabaseConnections(application, page, project, da
       (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.authorized,
       false,
     );
-    await page.evaluate(() => window.stag.request({ type: "logout" }));
+    if (conversationFixture) await page.evaluate(() => window.stag.request({ type: "logout" }));
     await dialog
       .getByLabel("Conexão salva", { exact: true })
       .selectOption({ label: "SQL Server sintético" });
