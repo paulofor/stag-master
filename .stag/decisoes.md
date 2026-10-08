@@ -1,5 +1,7 @@
 # Decisões
 
+2026-10-08 — Cliente pediu minimizar tráfego do STAG com o modelo. Reduzir imagens, quadros idênticos e texto repetido; preservar detalhes necessários, transcrição, memória, modelo/esforço e permissões. Não apagar histórico, diminuir segurança, omitir fontes atuais ou aplicar cache entre conversas para economizar. Lacuna observada: harness não mede bytes; ampliar testes existentes com NativeImage, provedor loopback/Codex real e falhas de otimização recuperáveis. Não reiniciar serviços externos à aplicação nem editar configuração global nesta entrega. Fonte: solicitação atual e inspeção local.
+
 2026-10-08 — Na conferência final de 0.4.36, a regra compacta ocultava botões de escolha de vídeo também após concluir/cancelar. Quatro cenários novos reproduziram a falha em 360×600 (desktop/Pixel 7); limitar a regra às análises pendentes e ocultar somente a fase final redundante no cartão compacto restaurou o próximo envio. Validar localmente antes do PR de correção; preservar 0.4.36, pois esta entrega ainda não foi concluída. Fonte: regressão de interface desta tarefa, sem nova capacidade ou permissão.
 
 2026-10-08 — Revisão do contador 0.4.36 reproduziu início antigo da etapa ao retomar após falha na validação do original. Limpar etapa/tempo ao finalizar o trabalho, mantendo checkpoint e percentual confirmados. Nova regressão falhou antes da correção; validar manager/serviço, UI e Electron local antes de atualizar o mesmo PR. Fonte: teste sintético de retomada desta tarefa, sem mídia ou conta do cliente.

@@ -47,6 +47,7 @@ const openExternal = vi.fn(async (_url: string) => {});
 const selectProject = vi.fn<() => Promise<string | null>>();
 const prepareProjectGit = vi.fn<typeof prepareGit>();
 const confirmBranchDeletion = vi.fn(async (_project: string, _branch: string) => true);
+const optimizeImage = vi.fn((dataUrl: string) => dataUrl);
 const syntheticVideo = (): PreparedVideo => ({
   summary: {
     id: randomUUID(),
@@ -97,6 +98,7 @@ const browser = {
   setVisible: vi.fn(),
 };
 beforeEach(async () => {
+  optimizeImage.mockImplementation((dataUrl: string) => dataUrl);
   await mkdir(resolve(".local"), { recursive: true });
   dir = await mkdtemp(resolve(".local/service-test-"));
   store = new SettingsStore(resolve(dir, "settings.json"));
@@ -152,6 +154,7 @@ beforeEach(async () => {
     }),
   );
   service = new AssistantService({
+    optimizeImage,
     createRpc: () => {
       rpc = new RpcClient({
         command: process.execPath,
@@ -506,6 +509,77 @@ it("handshake pronto ainda pode ter configuração Windows pendente antes de acc
   }
 });
 
+describe("economia de imagens no transporte", () => {
+  it("item autoritativo substitui a prévia quando a codificação da imagem muda", async () => {
+    await ready();
+    // A synthetic PNG with trailing padding decodes to the same pixels; the encoder removes it.
+    const padded = `data:image/png;base64,${Buffer.concat([Buffer.from(imageFixture.dataUrl.split(",")[1], "base64"), Buffer.alloc(12)]).toString("base64")}`;
+    optimizeImage.mockReturnValueOnce(imageFixture.dataUrl);
+    await service.request({ type: "send", text: "", images: [{ dataUrl: padded }] });
+    await complete();
+    const users = service.snapshot().items.filter((item) => item.kind === "user");
+    expect(users).toHaveLength(1);
+    expect(users[0].id).not.toMatch(/^local-/);
+    expect(users[0].images).toEqual([{ dataUrl: imageFixture.dataUrl }]);
+    expect(optimizeImage).toHaveBeenCalledTimes(1);
+    const threadId = service.snapshot().threadId!;
+    await service.request({ type: "newChat" });
+    await service.request({ type: "resume", threadId });
+    expect(service.snapshot().items.filter((item) => item.kind === "user")).toEqual(users);
+    expect(optimizeImage).toHaveBeenCalledTimes(1);
+  });
+  it("falha antes do envio preserva a entrada e permite recuperação sem turno duplicado", async () => {
+    await ready();
+    optimizeImage.mockImplementationOnce(() => {
+      throw new Error("Não foi possível otimizar a imagem. Tente capturar ou colar novamente.");
+    });
+    const action = {
+      type: "send" as const,
+      text: "Analise o sistema",
+      images: [{ dataUrl: imageFixture.dataUrl }],
+    };
+    await expect(service.request(action)).rejects.toThrow("otimizar a imagem");
+    const before = await rpc.call<any[]>("_fixture/readCalls");
+    expect(before.filter((call) => call.method === "turn/start")).toHaveLength(0);
+    expect(service.snapshot().busy).toBe(false);
+    expect(action.images[0].dataUrl).toBe(imageFixture.dataUrl);
+    await service.request(action);
+    await complete();
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(1);
+    expect(service.snapshot().items.at(-1)?.text).toContain("1 imagem");
+  });
+  it("falha ao comprimir captura responde ao request e permite a próxima operação", async () => {
+    await ready();
+    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+    desktop.execute.mockImplementation(async (raw) => ({
+      success: true,
+      contentItems:
+        (raw as DesktopArguments).action === "screenshot"
+          ? [{ type: "inputImage", imageUrl: imageFixture.dataUrl }]
+          : [{ type: "inputText", text: "[]" }],
+    }));
+    optimizeImage.mockImplementationOnce(() => {
+      throw new Error("Não foi possível otimizar a imagem.");
+    });
+    await send("desktop sequência");
+    await complete();
+    expect(service.snapshot().busy).toBe(false);
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    expect(
+      calls.some(
+        (call) =>
+          call.result?.success === false &&
+          call.result?.contentItems?.some((item: any) => item.text?.includes("otimizar a imagem")),
+      ),
+    ).toBe(true);
+    await send("desktop sequência");
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toContain("concluída");
+    expect(optimizeImage).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("vídeo para as anotações do projeto", () => {
   const attach = async () => {
     await service.request({ type: "selectVideo" });
@@ -530,7 +604,9 @@ describe("vídeo para as anotações do projeto", () => {
     expect(note).toContain("00:00");
     const calls = await rpc.call<any[]>("_fixture/readCalls");
     const turn = calls.find((call) => call.method === "turn/start").params;
-    expect(turn.input.filter((entry: any) => entry.type === "image")).toHaveLength(2);
+    expect(turn.input.filter((entry: any) => entry.type === "image")).toHaveLength(1);
+    expect(JSON.parse(turn.additionalContext.stag_video.value).frameImages).toEqual([1, 1]);
+    expect(JSON.parse(turn.additionalContext.stag_video.value).frameTimes).toEqual([0, 40]);
     expect(turn.additionalContext.stag_video.kind).toBe("untrusted");
     expect(JSON.parse(turn.additionalContext.stag_video.value).id).toBe(videoId);
     expect(

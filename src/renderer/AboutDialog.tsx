@@ -36,6 +36,12 @@ export function AboutDialog({ close }: { close: () => void }) {
         Desenvolvido por: <strong>{author}</strong>
       </p>
       <p>Assistente para arquitetura, programação e regras de negócio, integrado ao Codex.</p>
+      <p>
+        <strong>Economia de dados ativa.</strong> Respostas concisas, imagens comprimidas sem
+        redimensionar e quadros idênticos de vídeo enviados uma vez por trecho. A compressão pode
+        reduzir detalhes; texto e horários são preservados. Telemetria opcional desativada; o
+        conteúdo necessário às tarefas continua sendo enviado ao modelo.
+      </p>
       <div className="approval-actions">
         <button className="primary-button" autoFocus onClick={close}>
           Fechar

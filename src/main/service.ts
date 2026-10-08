@@ -45,6 +45,7 @@ import {
 import {
   videoContext,
   videoMessage,
+  videoImages,
   type PreparedVideo,
   type VideoProcessor,
   type BackgroundVideoProcessor,
@@ -98,6 +99,7 @@ interface PendingApproval {
   safety?: () => string | null;
 }
 interface Options {
+  optimizeImage?: (dataUrl: string) => string;
   createRpc: () => RpcClient;
   store: SettingsStore;
   selectProject: () => Promise<string | null>;
@@ -1817,10 +1819,15 @@ export class AssistantService extends EventEmitter {
     }
     const localId = `local-${Date.now()}`;
     if (video) input = `${input}${input ? "\n\n" : ""}${videoMessage(video)}`;
-    const sentImages = video ? video.frames.map((frame) => frame.image) : images;
-    const displayImages = requestImagesSchema.safeParse(analysisVideo ? [] : sentImages);
+    const suppliedImages = video ? videoImages(video).images : images;
     this.sending = true;
     try {
+      // Preview and authoritative item must refer to the same encoded image; otherwise
+      // userMessage reconciliation would retain both original and compressed messages.
+      const sentImages = suppliedImages.map((image) => ({
+        dataUrl: this.options.optimizeImage?.(image.dataUrl) ?? image.dataUrl,
+      }));
+      const displayImages = requestImagesSchema.safeParse(analysisVideo ? [] : sentImages);
       if (this.state.threadId && this.contextInstructionsDirty)
         await this.resume(this.state.threadId);
       this.toolRequests.clear();
@@ -2343,6 +2350,15 @@ export class AssistantService extends EventEmitter {
                 return;
               }
               result = await waiting.execute!(accept === true);
+              if (ownsTurn() && this.options.optimizeImage)
+                result = {
+                  ...result,
+                  contentItems: result.contentItems.map((item) =>
+                    item.type === "inputImage"
+                      ? { ...item, imageUrl: this.options.optimizeImage!(item.imageUrl) }
+                      : item,
+                  ),
+                };
             }
           }
         } catch (error) {

@@ -17,6 +17,7 @@ import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
 import { validateApiConnections } from "./test-apis.mjs";
 import { validateDatabaseConnections } from "./test-databases.mjs";
+import { buildModelTrafficHarness, validateModelTraffic } from "./test-model-traffic.mjs";
 import {
   buildTaskbarHarness,
   validateWaitingAudio,
@@ -59,6 +60,7 @@ try {
   await buildBrowserHarness(dir);
   await buildDesktopIndicatorHarness(dir);
   await buildTaskbarHarness(dir);
+  await buildModelTrafficHarness(dir);
   await validateWaitingAudio(dir);
   const gitTest = await gitFixture(dir);
   const nestedRepository = join(project, "equipe", "frontend ação");
@@ -96,7 +98,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog,BrowserWindow} = require('electron'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -148,6 +150,7 @@ try {
     console.log(`Electron harness: processo encerrado (código=${code}, sinal=${signal}).`);
   });
   const page = await stagWindow(application);
+  const trafficFixture = await validateModelTraffic(application);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(page.getByRole("button", { name: "Entrar com ChatGPT" })).toBeVisible();
@@ -467,7 +470,7 @@ try {
           }),
         }),
       ]);
-    }, imageFixture.dataUrl);
+    }, trafficFixture.png);
     await imageInput.focus();
     await imageInput.press("Control+v");
     await expect(page.locator(".composer img")).toHaveCount(1);
@@ -487,6 +490,30 @@ try {
     await expect(page.locator(".user-message img")).toHaveCount(1);
     await expect(page.locator(".composer img")).toHaveCount(0);
     await expect(imageInput).toBeFocused();
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    const compressedUrl = await page.evaluate(
+      async () =>
+        (await window.stag.getSnapshot()).items.find((item) => item.kind === "user").images[0]
+          .dataUrl,
+    );
+    assert.equal(
+      compressedUrl,
+      trafficFixture.optimized,
+      "Paste nativo deve chegar comprimido ao App Server e ao histórico",
+    );
+    const resumedImage = await page.evaluate(async () => {
+      const threadId = (await window.stag.getSnapshot()).threadId;
+      await window.stag.request({ type: "newChat" });
+      const snapshot = await window.stag.request({ type: "resume", threadId });
+      return snapshot.items.find((item) => item.kind === "user").images[0].dataUrl;
+    });
+    assert.equal(
+      resumedImage,
+      compressedUrl,
+      "Retomada preserva a imagem otimizada, sem recomprimir",
+    );
     await page.getByRole("button", { name: "Nova conversa", exact: true }).click();
     const beforeBlocked = await page.evaluate(
       async () => (await window.stag.getSnapshot()).metrics,

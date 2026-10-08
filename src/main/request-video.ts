@@ -559,10 +559,26 @@ export async function prepareVideo(
   }
 }
 
+/** Exact equality only, scoped to this payload. Never reuse an image from an earlier turn. */
+export function videoImages(video: PreparedVideo) {
+  const images: RequestImage[] = [];
+  const seen = new Map<string, number>();
+  const samples = video.frames.map(({ seconds, image }) => {
+    let index = seen.get(image.dataUrl);
+    if (index === undefined) {
+      index = images.push(image);
+      seen.set(image.dataUrl, index);
+    }
+    return { seconds, image: index };
+  });
+  return { images, samples };
+}
+
 export function videoMessage(video: PreparedVideo): string {
   const summary = video.summary;
   const part = summary.segment;
-  return `${part ? `Análise STAG ${summary.id} · trecho ${part.index + 1}/${part.total} (${videoTime(part.start)}–${videoTime(part.end)}).\n` : ""}Vídeo do projeto: ${JSON.stringify(summary.name)} · ${videoTime(summary.seconds)} · ${summary.frames} imagens amostradas · ${summary.audio === "transcribed" ? "fala transcrita automaticamente" : "sem fala reconhecida"}.\nExtraia as informações importantes para as anotações do projeto. Quadros em ordem: ${video.frames.map((frame) => videoTime(frame.seconds)).join(", ")}. ${part && !summary.frames ? "Não há quadros decodificáveis neste trecho; não invente conteúdo visual. " : ""}A amostragem e a transcrição podem omitir detalhes ou conter erros.`;
+  const { images, samples } = videoImages(video);
+  return `${part ? `Análise STAG ${summary.id} · trecho ${part.index + 1}/${part.total} (${videoTime(part.start)}–${videoTime(part.end)}).\n` : ""}Vídeo do projeto: ${JSON.stringify(summary.name)} · ${videoTime(summary.seconds)} · ${summary.frames} imagens amostradas · ${summary.audio === "transcribed" ? "fala transcrita automaticamente" : "sem fala reconhecida"}.\nExtraia as informações importantes para as anotações do projeto. ${images.length} imagens enviadas; amostras (tempo → imagem): ${samples.map((sample) => `${videoTime(sample.seconds)} → ${sample.image}`).join(", ")}. Quadros idênticos usam a mesma imagem, mantendo todos os tempos. ${part && !summary.frames ? "Não há quadros decodificáveis neste trecho; não invente conteúdo visual. " : ""}A amostragem e a transcrição podem omitir detalhes ou conter erros.`;
 }
 export function videoContext(video: PreparedVideo) {
   return {
@@ -573,6 +589,7 @@ export function videoContext(video: PreparedVideo) {
       ...video.summary,
       recordedAt: new Date().toISOString().slice(0, 10),
       frameTimes: video.frames.map((frame) => frame.seconds),
+      frameImages: videoImages(video).samples.map((sample) => sample.image),
       transcript: video.transcript,
     }),
   };
