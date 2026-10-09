@@ -1980,3 +1980,15 @@ summary::-webkit-details-marker {
   width: 100%;
   min-width: 0;
 }
+.browser-download {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  font-size: 12px;
+  background: #eef5ff;
+  color: #24456b;
+  overflow-wrap: anywhere;
+}
+.browser-download progress {
+  width: 100%;
+}

@@ -269,6 +269,27 @@ export function BrowserPane({
           {state.error}
         </div>
       )}
+      {state.download && (
+        <div className="browser-download" role="status" aria-label="Download do navegador">
+          <strong>{state.download.message}</strong>
+          <span>
+            {(state.download.receivedBytes / 1024 / 1024).toFixed(1)} MiB
+            {state.download.totalBytes !== null &&
+              ` de ${(state.download.totalBytes / 1024 / 1024).toFixed(1)} MiB`}
+          </span>
+          {state.download.status === "downloading" && (
+            <>
+              <progress
+                aria-label="Progresso do download"
+                max={state.download.totalBytes || 1}
+                value={state.download.totalBytes ? state.download.receivedBytes : undefined}
+              />
+              <small>Use Parar na conversa para cancelar.</small>
+            </>
+          )}
+          {state.download.path && <code>{state.download.path}</code>}
+        </div>
+      )}
       <div
         ref={viewport}
         id="browser-page"

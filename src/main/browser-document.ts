@@ -1,6 +1,6 @@
 // Serialized into an isolated world. Keep this function self-contained and use only fixed operations.
 export function browserDocument(request: {
-  action: "snapshot" | "probe" | "click" | "fill" | "select" | "focus" | "scroll";
+  action: "snapshot" | "probe" | "download" | "click" | "fill" | "select" | "focus" | "scroll";
   pageId?: string;
   ref?: string;
   text?: string;
@@ -52,7 +52,8 @@ export function browserDocument(request: {
       el.tagName,
       el.getAttribute("type"),
       label(el),
-      el.getAttribute("href"),
+      el instanceof HTMLAnchorElement ? el.href : el.getAttribute("href"),
+      el.getAttribute("download"),
       el.getAttribute("formaction"),
       el.getAttribute("role"),
       el.closest("form")?.getAttribute("action"),
@@ -236,6 +237,13 @@ export function browserDocument(request: {
         ? "O controle ou a opção pode enviar dados ou efetuar uma ação crítica."
         : null;
   if (request.action === "probe") return { reason, label: label(el) };
+  if (request.action === "download") {
+    if (!(el instanceof HTMLAnchorElement) || !/^https?:/.test(el.href))
+      throw new Error(
+        "Download exige um link HTTP(S) do snapshot atual. Botões e URLs blob/data não são suportados.",
+      );
+    return { url: el.href };
+  }
   el.scrollIntoView({ block: "center", inline: "nearest" });
   if (request.action === "click") {
     // Custom combos commonly open on mouse/pointer down, not on HTMLElement.click().

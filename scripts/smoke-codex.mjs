@@ -509,8 +509,30 @@ try {
       assert.ok(JSON.stringify(provider.inputs.at(-1)).includes(`synthetic-${tab}`));
     }
     assert.equal(browserRequests.length, 2);
+    for (const tab of ["documentation", "system"]) {
+      const args = {
+        action: "download",
+        tab,
+        pageId: `synthetic-${tab}`,
+        ref: "e1",
+        risk: "routine",
+        intent: "Consulta local sintética",
+      };
+      provider.queueToolCall({ name: "stag_browser", arguments: args });
+      await syntheticTurn(
+        [
+          {
+            type: "text",
+            text: "Solicite download do PDF sintético; transporte substituído neste smoke.",
+          },
+        ],
+        sources,
+        true,
+      );
+      assert.deepEqual(browserRequests.at(-1), args);
+    }
     console.log(
-      "Codex real/provedor loopback: schema de produção com duas abas, despacho e respostas identificadas aprovados.",
+      "Codex real/provedor loopback: schema de produção com duas abas e download, despacho e respostas identificadas aprovados.",
     );
   } finally {
     rpc.off("request", browserRequest);
