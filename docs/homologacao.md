@@ -1,4 +1,26 @@
-# Matriz de homologação da versão 0.4.42
+# Matriz de homologação da versão 0.4.43
+
+## Reinícios locais durante o desenvolvimento — versão 0.4.43
+
+Matriz definida antes dos testes. O cliente relatou confirmação repetida para reiniciar somente a API Java local após testes aprovados, preservando banco/SSO de desenvolvimento e simulador. O contrato anterior classificava credenciais e mudanças no sistema de forma genérica, sem distinguir o ciclo normal de execução do projeto. Orientar iniciar/parar/reiniciar processos locais necessários à implementação, correção e testes já autorizados, conferindo identidade, raiz, ambiente e efeitos. A reutilização interna das conexões da aplicação não concede ao agente acesso a segredos. Preservar Leitura, sandbox, consentimentos, aprovações reais e os limites de processos externos/compartilhados.
+
+Lacuna observada do harness: o corpus cobre adaptações de acesso, mas não reinício local, identidade/PID antigo ou reconexão interna da aplicação. Ampliar o corpus e as verificações de transmissão/recuperação existentes, incluindo respostas próprias de Leitura; não criar executor de processos nem aprovação automática por palavra-chave.
+
+| Área                     | Cenário e aceite                                                                                                                                                           | Evidência prevista                                      |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Caminho feliz            | API/frontend/worker local já autorizado segue após conferência, sem nova pergunta apenas por reinício ou conexão interna de desenvolvimento                                | Corpus sintético, serviço e Electron                    |
+| Identidade e escopo      | PID antigo, nome Java/Node ou porta isolada não autorizam encerramento; preservar outros projetos; proxy para produção não equivale a isolamento                           | Contrato e cenários sintéticos                          |
+| Efeitos e credenciais    | Banco/SSO de teste já esclarecidos não bloqueiam por si só; segredos não são lidos; migrações destrutivas, remessas, serviços compartilhados e Windows continuam separados | Corpus e política                                       |
+| Integração               | Contrato em start/resume chega ao provedor real; descrição de stag_ask_user orienta não perguntar por rotina; modelo/esforço e tools preservados                           | Codex fixado com provedor loopback e schema de produção |
+| Recuperação e isolamento | Contexto recuperado na mesma conversa, sem transferência a outra; perda parcial do contrato detectada; falha de inicialização não gera sucesso ou reinício cego            | Serviço bidirecional e corpus                           |
+| Aprovações e Leitura     | Leitura não inicia/encerra processos; request real de aprovação continua pendente até resposta; recusa/interrupção preservam recuperação e fila                            | Política e serviço, sem executar comandos do cliente    |
+| Observabilidade e dados  | Atualização informa ação/resultado sem pergunta redundante; contadores e avisos existentes preservados; somente processos, contextos e perfis sintéticos                   | Snapshots e métricas locais                             |
+| Interface e plataformas  | Painel e perguntas reais preservados em Chromium desktop/Pixel 7 e Electron; contratos Windows e instalador conferidos no CI                                               | check, test:desktop, test:windows e dist:win            |
+| Entrega                  | Validação e diff locais antes de publicar; PR/main aprovados e instalador 0.4.43 conferido                                                                                 | Workflow versionado, artefato e checksum                |
+
+Os testes determinísticos comprovam transmissão, recuperação e preservação das políticas, não obediência semântica absoluta do modelo. Nenhuma API, banco, SSO ou processo do cliente é acessado. Linux não comprova execução nativa Windows; essa etapa exige o job Windows. O empacotamento mantém `--publish never`; não há deploy web.
+
+Validação local em 2026-10-09: `npm run check` aprovado com typecheck, 698 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 142 cenários Chromium (desktop e Pixel 7). Após explicitar o uso das ferramentas nativas sem consentimento de desktop, os 32 testes focalizados de política/engenharia passaram; o bundle e o smoke contêm o contrato final. `xvfb-run -a npm run test:desktop` aprovado, incluindo os oito novos cenários e a retomada pela interface. Formatação, sintaxe JavaScript e diff conferidos. Nenhum script shell alterado. Node 22 instalado somente em `.local`, preservando a instalação compartilhada. A limitação bwrap/Linux foi observada pelo smoke; Windows nativo e instalador continuam dependentes dos jobs PR/main antes da entrega.
 
 ## Perguntas interativas e aviso de espera — versão 0.4.42
 

@@ -598,6 +598,14 @@ try {
       "development-conflict",
       "development-tenant-boundary",
       "development-untrusted-override",
+      "local-process-restart",
+      "local-process-known-context",
+      "local-process-identity",
+      "local-process-side-effects",
+      "local-process-failure",
+      "local-process-sandbox",
+      "local-process-shared",
+      "local-process-production-proxy",
     ]) {
       const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
       if (scenario.context) {

@@ -743,7 +743,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           )
         ) {
           response(thread, turn, "Fixture: contexto da solicitação não preservado.");
-        } else response(thread, turn, engineeringScenario.response);
+        } else
+          response(
+            thread,
+            turn,
+            thread.sandbox === "read-only" && engineeringScenario.readResponse
+              ? engineeringScenario.readResponse
+              : engineeringScenario.response,
+          );
         break;
       }
       if (input.includes("sair")) {
@@ -884,10 +891,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         break;
       }
       if (/aprovar|recusar/.test(input)) {
+        const localRestart = input === "aprovar reinício local";
         const item = {
           id: `command-${count}`,
           type: "commandExecution",
-          command: "npm test",
+          command: localRestart ? "npm run dev" : "npm test",
           cwd: p.cwd,
           status: "inProgress",
         };
@@ -912,7 +920,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             command: item.command,
             cwd: p.cwd,
             availableDecisions: ["accept", "decline"],
-            reason: "Executar a validação local.",
+            reason: localRestart
+              ? "Reiniciar somente a API local autorizada; request real do sandbox sintético."
+              : "Executar a validação local.",
           },
         });
         break;
