@@ -1,133 +1,160 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile, symlink, link } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink, link, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import {
-  databaseImportArguments,
-  databaseImportDetail,
-  readDatabaseImport,
-} from "../../src/main/database-import";
+import { databaseImportArguments, inspectDatabaseImport } from "../../src/main/database-import";
 
 let dir: string;
-const password = "synthetic-import-only !";
-const args = { file: "application.properties", name: "Desenvolvimento" };
-const properties = `spring.datasource.url=jdbc:sqlserver://localhost:1433;databaseName=stag_synthetic;encrypt=true\nspring.datasource.username=synthetic\nspring.datasource.password=${password}\n`;
+const secret = "synthetic-Import-Only!";
+const properties = `spring.datasource.url=jdbc:sqlserver://127.0.0.1:1433;databaseName=stag_fixture;encrypt=true\nspring.datasource.username=fixture\nspring.datasource.password=${secret}\n`;
 beforeEach(async () => {
   await mkdir(".local", { recursive: true });
-  dir = await mkdtemp(resolve(".local/import-test-"));
-  await writeFile(join(dir, args.file), properties);
+  dir = await realpath(await mkdtemp(resolve(".local/import-")));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
-
-it("importa properties sem transmitir senha na aprovação; identidade muda quando a fonte muda", async () => {
-  const imported = await readDatabaseImport(dir, args);
-  expect(imported.config).toMatchObject({
-    name: args.name,
-    server: "localhost",
-    database: "stag_synthetic",
-    user: "synthetic",
-    encrypt: true,
-    trustServerCertificate: false,
-  });
-  expect(imported.password).toBe(password);
-  const detail = databaseImportDetail(args, imported);
-  expect(detail).not.toContain(password);
-  expect(detail).toContain("somente nesta sessão");
-  await writeFile(join(dir, args.file), properties + "# revised\n");
-  expect((await readDatabaseImport(dir, args)).fingerprint).not.toBe(imported.fingerprint);
-});
-it("resolve placeholders somente do envFile indicado e nunca do ambiente do processo", async () => {
-  await writeFile(join(dir, args.file), properties.replace(password, "${STAG_SYNTHETIC_PASSWORD}"));
-  const previous = process.env.STAG_SYNTHETIC_PASSWORD;
-  process.env.STAG_SYNTHETIC_PASSWORD = password;
-  try {
-    await expect(readDatabaseImport(dir, args)).rejects.toThrow("Falta uma variável local");
-    await writeFile(join(dir, ".env.local"), `STAG_SYNTHETIC_PASSWORD='${password}'\n`);
-    expect((await readDatabaseImport(dir, { ...args, envFile: ".env.local" })).password).toBe(
-      password,
+it.each(["application.properties", "nested/application.properties"])(
+  "importa Spring %s com senha privada e TLS",
+  async (sourcePath) => {
+    await mkdir(join(dir, "nested"));
+    await writeFile(join(dir, sourcePath), properties);
+    const result = await inspectDatabaseImport(dir, { sourcePath });
+    expect(result.config).toMatchObject({
+      name: "stag_fixture",
+      database: "stag_fixture",
+      user: "fixture",
+      encrypt: true,
+      trustServerCertificate: false,
+      endpoint: { kind: "port", port: 1433 },
+    });
+    expect(result.password).toBe(secret);
+    await writeFile(join(dir, sourcePath), properties.replace("1433", "1434"));
+    expect((await inspectDatabaseImport(dir, { sourcePath })).fingerprint).not.toBe(
+      result.fingerprint,
     );
-  } finally {
-    if (previous === undefined) delete process.env.STAG_SYNTHETIC_PASSWORD;
-    else process.env.STAG_SYNTHETIC_PASSWORD = previous;
-  }
-});
-it("importa .env, instância e TLS explícitos; senha com espaços permanece no main", async () => {
+  },
+);
+it.each(["yaml", "yml", "json"])(
+  "importa %s com variáveis somente do .env selecionado",
+  async (format) => {
+    const sourcePath = `application.${format}`;
+    const value = {
+      spring: {
+        datasource: { url: "${DB_URL}", username: "${DB_USER}", password: "${DB_PASSWORD}" },
+      },
+    };
+    await writeFile(
+      join(dir, sourcePath),
+      format === "json"
+        ? JSON.stringify(value)
+        : 'spring:\n  datasource:\n    url: "${DB_URL}"\n    username: "${DB_USER}"\n    password: "${DB_PASSWORD}"\n',
+    );
+    await writeFile(
+      join(dir, ".env.test"),
+      `DB_URL=jdbc:sqlserver://localhost;databaseName=stag_fixture\nDB_USER=fixture\nDB_PASSWORD='${secret}'\n`,
+    );
+    await expect(inspectDatabaseImport(dir, { sourcePath })).rejects.toThrow("incompleta");
+    expect(
+      (await inspectDatabaseImport(dir, { sourcePath, environmentPath: ".env.test" })).password,
+    ).toBe(secret);
+  },
+);
+it("importa .env e preserva instância, certificado, senha entre chaves e espaços", async () => {
   await writeFile(
     join(dir, ".env"),
-    `DB_HOST=localhost\nDB_INSTANCE=SQLEXPRESS\nDB_DATABASE=stag_synthetic\nDB_USER=synthetic\nDB_PASSWORD=' ${password} '\nDB_ENCRYPT=false\nDB_TRUST_SERVER_CERTIFICATE=true\n`,
+    `DB_HOST=localhost\nDB_INSTANCE=SQLEXPRESS\nDB_DATABASE=stag_fixture\nDB_USER=fixture\nDB_PASSWORD=' ${secret} '\nDB_TRUST_SERVER_CERTIFICATE=true`,
   );
-  const imported = await readDatabaseImport(dir, { ...args, file: ".env" });
-  expect(imported.config.endpoint).toEqual({ kind: "instance", instance: "SQLEXPRESS" });
-  expect(imported.password).toBe(` ${password} `);
-  expect(databaseImportDetail(args, imported)).toContain("DESABILITADO");
-  expect(databaseImportDetail(args, imported)).toContain("SEM VALIDAÇÃO");
-});
-it("JDBC entre chaves, unicode properties, continuação e prefix selecionado", async () => {
+  const value = await inspectDatabaseImport(dir, { sourcePath: ".env", name: "Teste" });
+  expect(value.config).toMatchObject({
+    name: "Teste",
+    endpoint: { kind: "instance", instance: "SQLEXPRESS" },
+    trustServerCertificate: true,
+  });
+  expect(value.password).toBe(` ${secret} `);
   await writeFile(
-    join(dir, args.file),
-    "custom.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_synthetic;\\\n encrypt=true;user=synthetic;password={semi;colon}}value}\ncustom.datasource.username=synthet\\u0069c\n",
+    join(dir, "application.properties"),
+    `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_fixture;user=fixture;password={ a;}}b }\n`,
   );
-  const imported = await readDatabaseImport(dir, { ...args, prefix: "custom.datasource" });
-  expect(imported.password).toBe("semi;colon}value");
-  expect(imported.config.user).toBe("synthetic");
+  expect(
+    (await inspectDatabaseImport(dir, { sourcePath: "application.properties" })).password,
+  ).toBe(" a;}b ");
 });
 it.each([
-  "spring.datasource.url=jdbc:mysql://localhost/fixture",
-  properties + "spring.datasource.password=other\n",
-  properties + "spring.datasource.user=different\n",
-  properties.replace("encrypt=true", "encrypt=yes"),
-  properties.replace("databaseName=stag_synthetic", "databaseName=stag_synthetic;database=other"),
-  properties.replace("encrypt=true", "integratedSecurity=true"),
-  properties.replace("encrypt=true", "trustStorePassword=inert"),
-  properties.replace("localhost:1433", "localhost:1433;instanceName=SQLEXPRESS"),
-  properties.replace(password, "${MISSING}"),
-  properties.replace(password, "$(inert)"),
-  properties.replace("databaseName=stag_synthetic", "databaseName="),
-])("recusa configuração inválida sem eco de credenciais %#", async (text) => {
-  await writeFile(join(dir, args.file), text);
-  await expect(readDatabaseImport(dir, args)).rejects.toThrow();
-  try {
-    await readDatabaseImport(dir, args);
-  } catch (error) {
-    expect(String(error)).not.toContain(password);
-  }
-});
-it.each([
-  "../application.properties",
-  "/application.properties",
-  "C:\\application.properties",
-  ".git/application.properties",
+  "../outside.properties",
+  "/outside.properties",
+  "C:\\outside.properties",
+  "\\\\host\\file.properties",
+  "a/../../file.properties",
   ".codex/auth.json",
-  "application.properties:stream",
-  "missing.properties",
-])("isola caminho %s", async (file) => {
-  await expect(readDatabaseImport(dir, { ...args, file })).rejects.toThrow();
-});
-it("recusa links/junctions e hard links sem afetar próxima leitura válida", async () => {
-  await mkdir(join(dir, "nested"));
-  await symlink(join(dir, "nested"), join(dir, "alias"), "junction");
-  await writeFile(join(dir, "nested", args.file), properties);
-  await expect(readDatabaseImport(join(dir, "alias"), args)).rejects.toThrow("raiz");
-  await expect(
-    readDatabaseImport(dir, { ...args, file: "alias/application.properties" }),
-  ).rejects.toThrow("links");
-  await link(join(dir, args.file), join(dir, "hard.properties"));
-  await expect(readDatabaseImport(dir, { ...args, file: "hard.properties" })).rejects.toThrow(
-    "links",
+  ".stag/secrets.json",
+  "a/.git/config.properties",
+  "file.properties:stream",
+  "folder./file.properties",
+  "folder /file.properties",
+])("recusa caminho %s no schema sem ler arquivos", (sourcePath) =>
+  expect(databaseImportArguments.safeParse({ sourcePath }).success).toBe(false),
+);
+it("não aceita senhas ou configuração bruta nos argumentos", () => {
+  expect(databaseImportArguments.safeParse({ sourcePath: ".env", password: secret }).success).toBe(
+    false,
   );
-  await rm(join(dir, "hard.properties"));
-  expect((await readDatabaseImport(dir, args)).password).toBe(password);
 });
-it("limita bytes e rejeita encoding inválido, conteúdo binário e argumentos secretos", async () => {
-  for (const value of [
-    Buffer.alloc(256 * 1024 + 1, 65),
-    Buffer.from([0xff, 0xfe]),
-    Buffer.from("binary\0"),
+it.each([
+  properties.replace("databaseName=stag_fixture;", ""),
+  properties.replace("jdbc:sqlserver", "jdbc:postgresql"),
+  properties.replace("encrypt=true", "encrypt=invalid"),
+  properties.replace("encrypt=true", "integratedSecurity=true"),
+  properties + "spring.datasource.driver-class-name=org.postgresql.Driver\n",
+  properties + "spring.datasource.hikari.jdbc-url=jdbc:sqlserver://other;databaseName=another\n",
+  properties + "secondary.datasource.url=jdbc:sqlserver://other;databaseName=another\n",
+  properties.replace("127.0.0.1:1433", "localhost\\\\SQLEXPRESS:1433"),
+  properties + "spring.datasource.password=conflict",
+  properties.replace(secret, "${NOT_DEFINED}"),
+  properties.replace("stag_fixture", secret),
+  properties.replace(secret, "#{inertExpression}"),
+  "spring.datasource.url=${a}\na=${a}\n",
+])("recusa configuração inválida sem ecoar o conteúdo (%#)", async (content) => {
+  await writeFile(join(dir, "application.properties"), content);
+  const error = await inspectDatabaseImport(dir, { sourcePath: "application.properties" }).catch(
+    (e) => e,
+  );
+  expect(error).toBeInstanceOf(Error);
+  expect(String(error)).not.toContain(secret);
+});
+it("recusa YAML com aliases, duplicatas, tags ou vários documentos sem logs com segredos", async () => {
+  for (const content of [
+    `a: &a [${secret}]\nb: *a`,
+    `a: ${secret}\na: duplicate`,
+    `a: !unknown ${secret}`,
+    `a: 1\n---\na: ${secret}`,
+    `a: [${secret}`,
   ]) {
-    await writeFile(join(dir, args.file), value);
-    await expect(readDatabaseImport(dir, args)).rejects.toThrow();
+    await writeFile(join(dir, "application.yaml"), content);
+    await expect(inspectDatabaseImport(dir, { sourcePath: "application.yaml" })).rejects.toThrow(
+      "não suportada",
+    );
   }
-  expect(databaseImportArguments.safeParse({ ...args, password }).success).toBe(false);
-  expect(databaseImportArguments.safeParse({ ...args, command: "inert" }).success).toBe(false);
+});
+it("recusa links/hardlinks, diretórios, arquivos grandes e UTF-8 inválido e recupera", async () => {
+  await writeFile(join(dir, "real.properties"), properties);
+  await symlink(join(dir, "real.properties"), join(dir, "link.properties"));
+  await link(join(dir, "real.properties"), join(dir, "hard.properties"));
+  await mkdir(join(dir, "directory.properties"));
+  await writeFile(join(dir, "large.properties"), Buffer.alloc(256 * 1024 + 1));
+  await writeFile(join(dir, "invalid.properties"), Buffer.from([0xff]));
+  for (const sourcePath of [
+    "link.properties",
+    "hard.properties",
+    "directory.properties",
+    "large.properties",
+    "invalid.properties",
+    "absent.properties",
+  ])
+    await expect(inspectDatabaseImport(dir, { sourcePath })).rejects.toThrow(
+      "Não foi possível ler",
+    );
+  await rm(join(dir, "hard.properties"));
+  expect((await inspectDatabaseImport(dir, { sourcePath: "real.properties" })).password).toBe(
+    secret,
+  );
 });

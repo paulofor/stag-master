@@ -1,6 +1,5 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { statSync } from "node:fs";
-import { dirname, win32 } from "node:path";
+import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -44,41 +43,13 @@ function binding(config: SqlServerConfig): string {
 export class DatabaseConnections {
   private data: Stored = { version: 1, projects: {} };
   private revisions = new Map<string, string>();
-  private projectIds = new Map<string, string>();
   private queue: Promise<void> = Promise.resolve();
   private sessionPasswords = new Map<string, { binding: string; password: string }>();
+  private sourceIds = new Map<string, string>();
   constructor(
     private file: string,
     private secrets: DatabaseSecretStorage,
-    private platform = process.platform,
   ) {}
-
-  private projectKey(path: string): string {
-    if (this.platform !== "win32") return path;
-    const normalize = (value: string) => win32.normalize(value).replace(/\\+$/, "").toLowerCase();
-    const matches = Object.keys(this.data.projects).filter((key) => {
-      if (key === path) return true;
-      if (normalize(key) !== normalize(path)) return false;
-      try {
-        const a = statSync(key, { bigint: true }),
-          b = statSync(path, { bigint: true });
-        // NTFS can enable case sensitivity per directory. Equal text ignoring case
-        // is insufficient authority to reuse a different project's credential.
-        return a.isDirectory() && b.isDirectory() && a.dev === b.dev && a.ino === b.ino;
-      } catch {
-        return false;
-      }
-    });
-    if (matches.length > 1)
-      throw new Error(
-        "Há cadastros conflitantes para esta pasta. Preserve os dados antes de continuar.",
-      );
-    return matches[0] || path;
-  }
-  private revision(path: string): string {
-    if (!this.revisions.has(path)) this.revisions.set(path, randomUUID());
-    return this.revisions.get(path)!;
-  }
 
   async init(): Promise<void> {
     this.sessionPasswords.clear();
@@ -94,20 +65,9 @@ export class DatabaseConnections {
   }
 
   snapshot(path: string): ProjectDatabases {
-    path = this.projectKey(path);
+    if (!this.revisions.has(path)) this.revisions.set(path, randomUUID());
     return {
-      revision: this.revision(path),
-      recoverySources: Object.entries(this.data.projects)
-        .filter(([key, list]) => key !== path && list.length > 0)
-        .map(([key, list]) => {
-          if (!this.projectIds.has(key)) this.projectIds.set(key, randomUUID());
-          return {
-            id: this.projectIds.get(key)!,
-            projectPath: key,
-            count: list.length,
-            revision: this.revision(key),
-          };
-        }),
+      revision: this.revisions.get(path)!,
       connections: (this.data.projects[path] || []).map(({ id, config, encryptedPassword }) => ({
         id,
         config: structuredClone(config),
@@ -120,6 +80,18 @@ export class DatabaseConnections {
       authorized: false,
       metrics: { requests: 0, failures: 0, elapsedMs: 0, lastRows: null },
       test: null,
+      recoverySources: Object.entries(this.data.projects)
+        .filter(([source, entries]) => source !== path && entries.length > 0)
+        .map(([source, entries]) => {
+          if (!this.sourceIds.has(source)) this.sourceIds.set(source, randomUUID());
+          if (!this.revisions.has(source)) this.revisions.set(source, randomUUID());
+          return {
+            id: this.sourceIds.get(source)!,
+            revision: this.revisions.get(source)!,
+            path: source,
+            count: entries.length,
+          };
+        }),
     };
   }
 
@@ -129,7 +101,6 @@ export class DatabaseConnections {
   }
 
   private record(path: string, id: string) {
-    path = this.projectKey(path);
     const record = this.data.projects[path]?.find((entry) => entry.id === id);
     if (!record) throw new Error("Conexão não encontrada neste projeto. Reabra Conexões.");
     return record;
@@ -149,7 +120,6 @@ export class DatabaseConnections {
     config: SqlServerConfig,
     supplied: string,
   ): string {
-    path = this.projectKey(path);
     this.check(path, revision);
     const previous = id ? this.record(path, id) : null;
     const password = databasePasswordSchema.parse(supplied);
@@ -187,9 +157,10 @@ export class DatabaseConnections {
     raw: SqlServerConfig,
     password: string,
     remember: boolean,
+    signal?: AbortSignal,
   ): Promise<void> {
     return this.enqueue(async () => {
-      path = this.projectKey(path);
+      signal?.throwIfAborted();
       this.check(path, revision);
       const config = sqlServerConfigSchema.parse(raw);
       databasePasswordSchema.parse(password);
@@ -242,7 +213,7 @@ export class DatabaseConnections {
       const connections = id
         ? list.map((entry) => (entry.id === id ? next : entry))
         : [...list, next];
-      await this.persist(path, connections);
+      await this.persist(path, connections, signal);
       this.sessionPasswords.delete(this.key(path, nextId));
       if (!remember && sessionPassword)
         this.sessionPasswords.set(this.key(path, nextId), {
@@ -254,7 +225,6 @@ export class DatabaseConnections {
 
   remove(path: string, revision: string, id: string): Promise<void> {
     return this.enqueue(async () => {
-      path = this.projectKey(path);
       this.check(path, revision);
       this.record(path, id);
       await this.persist(
@@ -265,53 +235,63 @@ export class DatabaseConnections {
     });
   }
 
-  restore(path: string, revision: string, sourceId: string, sourceRevision: string): Promise<void> {
+  recoverySource(path: string, revision: string, sourceId: string, sourceRevision: string) {
+    this.check(path, revision);
+    const source = this.snapshot(path).recoverySources!.find((entry) => entry.id === sourceId);
+    if (!source || source.revision !== sourceRevision)
+      throw new Error("O cadastro de origem mudou. Reabra Conexões e confira novamente.");
+    return source;
+  }
+
+  recover(
+    path: string,
+    revision: string,
+    sourceId: string,
+    sourceRevision: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     return this.enqueue(async () => {
-      path = this.projectKey(path);
-      this.check(path, revision);
-      const source = [...this.projectIds].find(([, id]) => id === sourceId)?.[0];
-      if (!source || source === path)
-        throw new Error("Cadastro de origem indisponível. Reabra Conexões.");
-      this.check(source, sourceRevision);
-      const previous = this.data.projects[path] || [];
-      const additions: Stored["projects"][string] = [];
+      signal?.throwIfAborted();
+      const source = this.recoverySource(path, revision, sourceId, sourceRevision);
+      const next = [...(this.data.projects[path] || [])];
       const sessions: { id: string; config: SqlServerConfig; password: string }[] = [];
-      for (const record of this.data.projects[source] || []) {
-        const duplicate = previous.find(
-          (entry) =>
-            entry.config.name.toLocaleLowerCase() === record.config.name.toLocaleLowerCase(),
+      for (const entry of this.data.projects[source.path]) {
+        const existing = next.find(
+          (item) => item.config.name.toLocaleLowerCase() === entry.config.name.toLocaleLowerCase(),
         );
-        if (duplicate) {
-          if (JSON.stringify(duplicate.config) === JSON.stringify(record.config)) continue;
+        if (existing) {
+          if (binding(existing.config) === binding(entry.config)) continue;
           throw new Error(
-            "Já existe uma conexão diferente com esse nome. Renomeie-a antes de recuperar.",
+            "Há uma conexão com o mesmo nome e outro destino. Renomeie antes de recuperar; nenhum cadastro foi alterado.",
           );
         }
-        const id = randomUUID(),
-          config = structuredClone(record.config);
+        if (next.length >= maxDatabaseConnections)
+          throw new Error("A recuperação excede 20 conexões. Nenhum cadastro foi alterado.");
+        const id = randomUUID();
         let encryptedPassword: string | undefined;
-        if (record.encryptedPassword) {
-          const password = this.password(source, sourceRevision, record.id, record.config, "");
-          try {
-            encryptedPassword = this.secrets
-              .encrypt(JSON.stringify({ project: path, id, binding: binding(config), password }))
-              .toString("base64");
-          } catch {
-            throw new Error(
-              "Não foi possível proteger a senha recuperada. Cadastros anteriores preservados.",
-            );
-          }
-        } else {
-          const session = this.sessionPasswords.get(this.key(source, record.id));
-          if (session && session.binding === binding(config))
-            sessions.push({ id, config, password: session.password });
+        if (entry.encryptedPassword || this.sessionPasswords.has(this.key(source.path, entry.id))) {
+          const password = this.password(source.path, sourceRevision, entry.id, entry.config, "");
+          if (entry.encryptedPassword) {
+            try {
+              encryptedPassword = this.secrets
+                .encrypt(
+                  JSON.stringify({ project: path, id, binding: binding(entry.config), password }),
+                )
+                .toString("base64");
+            } catch {
+              throw new Error(
+                "Não foi possível proteger a senha recuperada. Os cadastros anteriores foram preservados.",
+              );
+            }
+          } else sessions.push({ id, config: entry.config, password });
         }
-        additions.push({ id, config, ...(encryptedPassword ? { encryptedPassword } : {}) });
+        next.push({
+          id,
+          config: structuredClone(entry.config),
+          ...(encryptedPassword ? { encryptedPassword } : {}),
+        });
       }
-      if (previous.length + additions.length > maxDatabaseConnections)
-        throw new Error("A recuperação excede 20 conexões. Os cadastros foram preservados.");
-      if (!additions.length) return;
-      await this.persist(path, [...previous, ...additions]);
+      await this.persist(path, next, signal);
       for (const entry of sessions)
         this.sessionPasswords.set(this.key(path, entry.id), {
           binding: binding(entry.config),
@@ -325,7 +305,11 @@ export class DatabaseConnections {
     this.queue = execution.catch(() => {});
     return execution;
   }
-  private async persist(path: string, connections: Stored["projects"][string]): Promise<void> {
+  private async persist(
+    path: string,
+    connections: Stored["projects"][string],
+    signal?: AbortSignal,
+  ): Promise<void> {
     const next: Stored = { version: 1, projects: { ...this.data.projects, [path]: connections } };
     try {
       const content = JSON.stringify(storageSchema.parse(next));
@@ -334,6 +318,7 @@ export class DatabaseConnections {
       await writeFile(`${this.file}.tmp`, content, {
         mode: 0o600,
       });
+      signal?.throwIfAborted();
       await rename(`${this.file}.tmp`, this.file);
     } catch {
       throw new Error(

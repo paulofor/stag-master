@@ -16,7 +16,7 @@ import { gitFixture } from "../tests/fixtures/project-git.mjs";
 import { validateProjectBranches } from "./test-project-branches.mjs";
 import { validateResponseCopy } from "./test-copy.mjs";
 import { validateApiConnections } from "./test-apis.mjs";
-import { validateDatabaseConnections } from "./test-databases.mjs";
+import { validateDatabaseConnections, validateDatabaseRecovery } from "./test-databases.mjs";
 import { buildModelTrafficHarness, validateModelTraffic } from "./test-model-traffic.mjs";
 import {
   buildTaskbarHarness,
@@ -695,10 +695,7 @@ try {
     ).toBeVisible();
     await expect(page.getByLabel("Endereço do navegador")).toHaveValue(site.url);
     assert.deepEqual(await application.evaluate(() => global.externalUrls), [
-      // SQL consent and project import each enter/leave their isolated account fixture.
-      ...(databaseConversationFixture
-        ? Array(2).fill("https://auth.openai.com/fixture-login")
-        : []),
+      ...(databaseConversationFixture ? ["https://auth.openai.com/fixture-login"] : []),
       "https://auth.openai.com/fixture-login",
     ]);
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
@@ -1180,6 +1177,7 @@ try {
     .poll(() => forgottenPage.evaluate(async () => (await window.stag.getSnapshot()).connection))
     .toBe("ready");
   await validateSavedSession(application, forgottenPage, site, "forgotten");
+  await validateDatabaseRecovery(application, forgottenPage, project, data);
   console.log(
     "Fontes do projeto: cadastro IPC, persistência e reinício real OK; consentimento não herdado.",
   );

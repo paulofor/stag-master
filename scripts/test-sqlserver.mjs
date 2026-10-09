@@ -28,7 +28,7 @@ await build({
   format: "cjs",
   external: ["tedious"],
 });
-const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections, readDatabaseImport } =
+const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections, inspectDatabaseImport } =
   createRequire(import.meta.url)(join(dir, "driver.cjs"));
 const config = {
   name: "Synthetic only",
@@ -105,19 +105,22 @@ try {
     },
   });
   await connections.init();
+  const toolConfig = { ...config, database, user };
   await writeFile(
-    join(dir, ".env"),
-    `DB_HOST=127.0.0.1\nDB_PORT=${port}\nDB_DATABASE=${database}\nDB_USER=${user}\nDB_PASSWORD=${password}\nDB_ENCRYPT=true\nDB_TRUST_SERVER_CERTIFICATE=true\n`,
+    join(dir, "application.properties"),
+    `spring.datasource.url=jdbc:sqlserver://127.0.0.1:${port};databaseName=${database};encrypt=true;trustServerCertificate=true\nspring.datasource.username=${user}\nspring.datasource.password=${password}\n`,
   );
-  const imported = await readDatabaseImport(dir, { file: ".env", name: config.name });
-  const toolConfig = imported.config;
-  assert.deepEqual(toolConfig, { ...config, database, user });
+  const imported = await inspectDatabaseImport(dir, {
+    sourcePath: "application.properties",
+    name: toolConfig.name,
+  });
+  assert.deepEqual(imported.config, toolConfig);
   assert.equal(imported.password, password);
   await connections.save(
     dir,
     connections.snapshot(dir).revision,
     null,
-    toolConfig,
+    imported.config,
     imported.password,
     false,
   );

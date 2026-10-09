@@ -12,7 +12,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   ...apiActionSchemas,
   z
     .object({
-      type: z.literal("restoreDatabases"),
+      type: z.literal("recoverDatabases"),
       projectPath: z.string().min(1).max(32768),
       revision: z.uuid(),
       sourceId: z.uuid(),

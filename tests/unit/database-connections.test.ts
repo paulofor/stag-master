@@ -56,6 +56,58 @@ afterEach(async () => {
 });
 
 describe("configuração e credenciais SQL Server", () => {
+  it("recupera para outra raiz com vínculo protegido novo, sem alterar origem ou duplicar", async () => {
+    await store.save(dir, store.snapshot(dir).revision, null, config, password, true);
+    const other = join(dir, "recreated");
+    const before = store.snapshot(dir).connections;
+    const state = store.snapshot(other),
+      source = state.recoverySources![0];
+    expect(state.connections).toEqual([]);
+    expect(JSON.stringify(state)).not.toContain(password);
+    await store.recover(other, state.revision, source.id, source.revision);
+    let recovered = store.snapshot(other);
+    expect(recovered.connections).toHaveLength(1);
+    expect(recovered.connections[0].id).not.toBe(before[0].id);
+    expect(store.password(other, recovered.revision, recovered.connections[0].id, config, "")).toBe(
+      password,
+    );
+    expect(store.snapshot(dir).connections).toEqual(before);
+    await store.recover(other, recovered.revision, source.id, source.revision);
+    recovered = store.snapshot(other);
+    expect(recovered.connections).toHaveLength(1);
+    const restarted = new DatabaseConnections(join(dir, "connections.json"), secrets);
+    await restarted.init();
+    const stateAfter = restarted.snapshot(other);
+    expect(
+      restarted.password(other, stateAfter.revision, stateAfter.connections[0].id, config, ""),
+    ).toBe(password);
+  });
+  it("recuperação obsoleta, conflitante ou falha preserva ambos catálogos", async () => {
+    await store.save(dir, store.snapshot(dir).revision, null, config, password, false);
+    const other = join(dir, "other");
+    const initial = store.snapshot(other),
+      source = initial.recoverySources![0];
+    await store.save(other, initial.revision, null, { ...config, database: "another" }, "", false);
+    await expect(
+      store.recover(other, initial.revision, source.id, source.revision),
+    ).rejects.toThrow("mudaram");
+    await expect(
+      store.recover(other, store.snapshot(other).revision, source.id, source.revision),
+    ).rejects.toThrow("outro destino");
+    const empty = join(dir, "third");
+    await mkdir(join(dir, "connections.json.tmp"));
+    await expect(
+      store.recover(empty, store.snapshot(empty).revision, source.id, source.revision),
+    ).rejects.toThrow("preservados");
+    expect(store.snapshot(empty).connections).toEqual([]);
+    await rm(join(dir, "connections.json.tmp"), { recursive: true });
+    await store.recover(empty, store.snapshot(empty).revision, source.id, source.revision);
+    const recovered = store.snapshot(empty);
+    expect(store.password(empty, recovered.revision, recovered.connections[0].id, config, "")).toBe(
+      password,
+    );
+    expect(recovered.connections[0].passwordSaved).toBe(false);
+  });
   it.each([
     "https://sql.invalid",
     "user:synthetic-secret@host",
@@ -390,87 +442,4 @@ describe("driver SQL Server", () => {
     }
     await expect(testSqlServer(config, password, controller.signal)).rejects.toThrow("cancelado");
   });
-});
-
-it.skipIf(process.platform !== "win32")(
-  "caminhos Windows equivalentes preservam cadastro, revisão e vínculo da credencial",
-  async () => {
-    const windows = new DatabaseConnections(join(dir, "windows.json"), secrets, "win32");
-    await windows.init();
-    const original = dir;
-    await windows.save(original, windows.snapshot(original).revision, null, config, password, true);
-    const saved = windows.snapshot(original);
-    for (const alias of [dir.toUpperCase().replaceAll("\\", "/"), dir + "\\"]) {
-      const state = windows.snapshot(alias);
-      expect(state.connections).toEqual(saved.connections);
-      expect(state.revision).toBe(saved.revision);
-      expect(windows.password(alias, state.revision, state.connections[0].id, config, "")).toBe(
-        password,
-      );
-      expect(state.recoverySources).toEqual([]);
-    }
-  },
-);
-it("recuperação explícita copia e revincula segredo, preserva origem e não duplica", async () => {
-  await store.save(dir, store.snapshot(dir).revision, null, config, password, true);
-  const target = dir + "-moved";
-  const before = store.snapshot(dir);
-  const state = store.snapshot(target),
-    source = state.recoverySources![0];
-  expect(state.connections).toEqual([]);
-  await store.restore(target, state.revision, source.id, source.revision);
-  const restored = store.snapshot(target);
-  expect(restored.connections).toHaveLength(1);
-  expect(store.password(target, restored.revision, restored.connections[0].id, config, "")).toBe(
-    password,
-  );
-  expect(store.snapshot(dir).connections).toEqual(before.connections);
-  expect(restored.authorized).toBe(false);
-  await store.restore(target, restored.revision, source.id, source.revision);
-  expect(store.snapshot(target).connections).toEqual(restored.connections);
-  const reopened = new DatabaseConnections(join(dir, "connections.json"), secrets);
-  await reopened.init();
-  const next = reopened.snapshot(target);
-  expect(reopened.password(target, next.revision, next.connections[0].id, config, "")).toBe(
-    password,
-  );
-});
-it("recuperação revalida ids/revisões e falha atômica preserva destino e origem", async () => {
-  await store.save(dir, store.snapshot(dir).revision, null, config, password, true);
-  const target = dir + "-moved",
-    state = store.snapshot(target),
-    source = state.recoverySources![0];
-  await expect(
-    store.restore(target, state.revision, randomUUID(), source.revision),
-  ).rejects.toThrow("origem");
-  await expect(store.restore(target, state.revision, source.id, randomUUID())).rejects.toThrow(
-    "mudaram",
-  );
-  await mkdir(join(dir, "connections.json.tmp"));
-  await expect(store.restore(target, state.revision, source.id, source.revision)).rejects.toThrow(
-    "preservados",
-  );
-  expect(store.snapshot(target).connections).toEqual([]);
-  expect(store.snapshot(dir).connections).toHaveLength(1);
-  await rm(join(dir, "connections.json.tmp"), { recursive: true });
-  await store.save(
-    target,
-    state.revision,
-    null,
-    { ...config, database: "different" },
-    password,
-    false,
-  );
-  await expect(
-    store.restore(target, store.snapshot(target).revision, source.id, source.revision),
-  ).rejects.toThrow("diferente");
-});
-
-it("sem identidade de diretório equivalente não associa credenciais apenas pelo texto Windows", async () => {
-  const windows = new DatabaseConnections(join(dir, "windows-metadata.json"), secrets, "win32");
-  await windows.init();
-  const source = "C:/project-missing";
-  await windows.save(source, windows.snapshot(source).revision, null, config, password, true);
-  expect(windows.snapshot("c:/PROJECT-MISSING").connections).toEqual([]);
-  expect(windows.snapshot(source).connections).toHaveLength(1);
 });

@@ -64,7 +64,7 @@ export interface Question {
 }
 export interface Approval {
   id: string;
-  kind: "command" | "file" | "desktop" | "browser" | "http" | "sql" | "questions";
+  kind: "command" | "file" | "desktop" | "browser" | "http" | "sql" | "database" | "questions";
   title: string;
   detail: string;
   questions?: Question[];
@@ -193,7 +193,7 @@ export type Action =
   | { type: "listBranches"; projectPath: string }
   | { type: "listDatabases"; projectPath: string }
   | {
-      type: "restoreDatabases";
+      type: "recoverDatabases";
       projectPath: string;
       revision: string;
       sourceId: string;

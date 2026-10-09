@@ -103,7 +103,7 @@ function desktopCall(
       response(
         thread,
         turn,
-        `${["stag_sql", "stag_database_config"].includes(tool) ? "SQL" : tool === "stag_http" ? "API" : tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}. ${["stag_sql", "stag_database_config"].includes(tool) ? JSON.stringify(answer.result?.contentItems || []) : ""}`.trim(),
+        `${tool === "stag_sql" ? "SQL" : tool === "stag_http" ? "API" : tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}. ${tool === "stag_sql" ? JSON.stringify(answer.result?.contentItems || []) : ""}`.trim(),
       );
   });
   const request = {
@@ -401,11 +401,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         desktopCall(
           thread,
           turn,
-          request.args,
-          (answer) => response(thread, turn, JSON.stringify(answer.result)),
+          request.args || {},
+          (answer) =>
+            response(thread, turn, "Cadastro: " + JSON.stringify(answer.result.contentItems)),
           request.overrides || {},
           !!request.duplicate,
-          "stag_database_config",
+          "stag_database",
         );
         break;
       }

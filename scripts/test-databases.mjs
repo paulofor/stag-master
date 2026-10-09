@@ -92,11 +92,12 @@ export async function validateDatabaseConnections(
     assert.deepEqual(decoded, { available: true, matches: true });
   }
   await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+  await expect(
+    dialog.getByLabel("Conexão salva", { exact: true }).locator("option:checked"),
+  ).toHaveText("SQL Server sintético");
   await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue(
     "SQL Server sintético",
   );
-  await expect(dialog).toContainText(project);
-  await expect(dialog).toContainText("1 conexão(ões) salva(s)");
   await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
   await page.reload();
   await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
@@ -141,6 +142,58 @@ export async function validateDatabaseConnections(
           page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
         )
         .toBe(true);
+      await writeFile(
+        join(project, "application-import.properties"),
+        "spring.datasource.url=jdbc:sqlserver://localhost;databaseName=imported_fixture\nspring.datasource.username=fixture\nspring.datasource.password=synthetic-electron-import-secret\n",
+      );
+      await page.evaluate(() =>
+        window.stag.request({
+          type: "send",
+          text: 'database import fixture {"args":{"sourcePath":"application-import.properties"}}',
+        }),
+      );
+      await expect(page.getByText("Importar conexão do projeto", { exact: true })).toBeVisible();
+      assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
+      await page.getByRole("button", { name: "Recusar", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
+        .toBe(false);
+      await page.evaluate(() =>
+        window.stag.request({
+          type: "send",
+          text: 'database import fixture {"args":{"sourcePath":"application-import.properties"}}',
+        }),
+      );
+      await expect(page.getByText("Importar conexão do projeto", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Permitir esta ação", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
+        .toBe(false);
+      const imported = await page.evaluate(() => window.stag.getSnapshot());
+      assert.equal(imported.projectDatabases.connections.length, 2);
+      assert.equal(imported.projectDatabases.authorized, false);
+      assert.equal(JSON.stringify(imported).includes("synthetic-electron-import-secret"), false);
+      const importedProfile = imported.projectDatabases.connections.find(
+        (entry) => entry.config.database === "imported_fixture",
+      );
+      assert.equal(importedProfile.passwordAvailable, true);
+      await page.evaluate(async (entry) => {
+        const state = await window.stag.getSnapshot();
+        await window.stag.request({
+          type: "deleteDatabase",
+          projectPath: state.project.path,
+          revision: state.projectDatabases.revision,
+          connectionId: entry.id,
+        });
+        const next = await window.stag.getSnapshot();
+        await window.stag.request({
+          type: "databaseConsent",
+          projectPath: next.project.path,
+          revision: next.projectDatabases.revision,
+          allow: true,
+        });
+      }, importedProfile);
+      await rm(join(project, "application-import.properties"));
       // Await turn/start's response before interruption; busy alone is not a handshake.
       await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
       assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
@@ -223,145 +276,6 @@ export async function validateDatabaseConnections(
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => server.close(resolve));
   }
-  // Reselecting the exact root must preserve the saved profiles, independently of threads.
-  const movedProject = join(project, "recovery-workspace");
-  await mkdir(movedProject, { recursive: true });
-  await application.evaluate(({ dialog }, project) => {
-    global.previousDatabaseOpenDialog = dialog.showOpenDialog;
-    global.previousDatabaseRestoreDialog = dialog.showMessageBox;
-    global.databaseSelectedProject = project;
-    global.databaseRestoreResponse = 0;
-    dialog.showOpenDialog = async () => ({
-      canceled: false,
-      filePaths: [global.databaseSelectedProject],
-    });
-    dialog.showMessageBox = async (...args) => {
-      const options = args.find((arg) => arg?.title === "Recuperar conexões");
-      if (!options) return global.previousDatabaseRestoreDialog(...args);
-      global.databaseRestoreDetail = options.detail;
-      return { response: global.databaseRestoreResponse };
-    };
-  }, project);
-  try {
-    await page.evaluate(() => window.stag.request({ type: "selectProject" }));
-    assert.deepEqual(
-      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.connections,
-      state.projectDatabases.connections,
-    );
-    await application.evaluate((_electron, path) => {
-      global.databaseSelectedProject = path;
-    }, movedProject);
-    await page.evaluate(() => window.stag.request({ type: "selectProject" }));
-    const moved = await page.evaluate(() => window.stag.getSnapshot());
-    assert.equal(moved.projectDatabases.connections.length, 0);
-    const source = moved.projectDatabases.recoverySources.find(
-      (entry) => entry.projectPath === project,
-    );
-    assert.ok(source);
-    for (const response of [0, 1]) {
-      await application.evaluate((_electron, value) => {
-        global.databaseRestoreResponse = value;
-      }, response);
-      await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
-      await dialog.getByText("Recuperar conexões de outra pasta", { exact: true }).click();
-      await dialog
-        .getByLabel("Pasta do cadastro anterior", { exact: true })
-        .selectOption(source.id);
-      await dialog.getByRole("button", { name: "Recuperar conexões", exact: true }).click();
-      await expect(dialog).toBeVisible();
-      const next = await page.evaluate(() => window.stag.getSnapshot());
-      assert.equal(next.projectDatabases.connections.length, response);
-      assert.equal(next.projectDatabases.authorized, false);
-      if (response)
-        await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue(
-          "SQL Server sintético",
-        );
-      await dialog.getByRole("button", { name: "Fechar conexões", exact: true }).click();
-    }
-    assert.ok(
-      (await application.evaluate(() => global.databaseRestoreDetail)).includes(movedProject),
-    );
-    const recovered = (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases
-      .connections[0];
-    assert.equal(recovered.passwordAvailable, true);
-    assert.equal(recovered.passwordSaved, protectedStorage);
-    await application.evaluate((_electron, path) => {
-      global.databaseSelectedProject = path;
-    }, project);
-    await page.evaluate(() => window.stag.request({ type: "selectProject" }));
-    assert.deepEqual(
-      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.connections,
-      state.projectDatabases.connections,
-    );
-  } finally {
-    await application.evaluate(({ dialog }) => {
-      dialog.showOpenDialog = global.previousDatabaseOpenDialog;
-      dialog.showMessageBox = global.previousDatabaseRestoreDialog;
-    });
-  }
-  if (conversationFixture) {
-    const sourcePath = join(project, "application-stag-test.properties");
-    await writeFile(
-      sourcePath,
-      `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_import_fixture;encrypt=true\nspring.datasource.username=fixture\nspring.datasource.password=${password.trim()}\n`,
-    );
-    await page.evaluate(() => window.stag.request({ type: "login" }));
-    await expect
-      .poll(() =>
-        page.evaluate(() => window.stag.getSnapshot().then((s) => !!s.account && !!s.model)),
-      )
-      .toBe(true);
-    await page.evaluate(
-      (rememberPassword) =>
-        window.stag.request({
-          type: "send",
-          text:
-            "database import fixture " +
-            JSON.stringify({
-              args: {
-                file: "application-stag-test.properties",
-                name: "Importada Electron",
-                rememberPassword,
-              },
-              duplicate: true,
-            }),
-        }),
-      protectedStorage,
-    );
-    await expect
-      .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.approvals.length)))
-      .toBe(1);
-    const pendingImport = await page.evaluate(() => window.stag.getSnapshot());
-    assert.equal(pendingImport.approvals[0].title, "Importar conexão SQL Server");
-    assert.ok(pendingImport.approvals[0].detail.includes("stag_import_fixture"));
-    assert.equal(JSON.stringify(pendingImport).includes(password.trim()), false);
-    await page.evaluate(
-      (id) => window.stag.request({ type: "answer", id, accept: true }),
-      pendingImport.approvals[0].id,
-    );
-    await expect
-      .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
-      .toBe(false);
-    const importedState = await page.evaluate(() => window.stag.getSnapshot());
-    const imported = importedState.projectDatabases.connections.find(
-      (entry) => entry.config.name === "Importada Electron",
-    );
-    assert.ok(imported?.passwordAvailable);
-    assert.equal(imported.passwordSaved, protectedStorage);
-    assert.equal(importedState.projectDatabases.authorized, false);
-    assert.equal(JSON.stringify(importedState).includes(password.trim()), false);
-    await page.evaluate(
-      ({ projectPath, revision, connectionId }) =>
-        window.stag.request({ type: "deleteDatabase", projectPath, revision, connectionId }),
-      {
-        projectPath: project,
-        revision: importedState.projectDatabases.revision,
-        connectionId: imported.id,
-      },
-    );
-    await page.evaluate(() => window.stag.request({ type: "logout" }));
-    await rm(sourcePath);
-  }
   await input.fill("");
   await page.evaluate(
     (visible) => window.stag.request({ type: "browserVisibility", visible }),
@@ -376,4 +290,90 @@ export async function validateDatabaseConnections(
     `Conexões SQL Server no Electron: IPC/formulário, persistência ${protectedStorage ? "protegida pelo sistema" : "sem senha (backend indisponível)"}, reload, isolamento, cancelamento/limpeza e recuperação aprovados.`,
   );
   return state.projectDatabases.connections;
+}
+
+export async function validateDatabaseRecovery(application, page, project, data) {
+  const moved = join(project, "pasta-recriada");
+  await mkdir(moved, { recursive: true });
+  const before = await page.evaluate(() => window.stag.getSnapshot());
+  await application.evaluate(({ dialog }, path) => {
+    global.recoveryOpenDialog = dialog.showOpenDialog;
+    global.recoveryMessageDialog = dialog.showMessageBox;
+    global.recoveryResponse = 0;
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    dialog.showMessageBox = async (...args) => {
+      const box = args.find((arg) => arg?.title === "Recuperar conexões");
+      if (!box) return global.recoveryMessageDialog(...args);
+      global.recoveryBox = box;
+      return { response: global.recoveryResponse };
+    };
+  }, moved);
+  try {
+    await page.evaluate(() => window.stag.request({ type: "selectProject" }));
+    let next = await page.evaluate(() => window.stag.getSnapshot());
+    assert.equal(next.projectDatabases.connections.length, 0);
+    const source = next.projectDatabases.recoverySources.find((entry) => entry.path === project);
+    assert.ok(source);
+    const recover = {
+      type: "recoverDatabases",
+      projectPath: moved,
+      revision: next.projectDatabases.revision,
+      sourceId: source.id,
+      sourceRevision: source.revision,
+    };
+    await page.evaluate((action) => window.stag.request(action), recover);
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.connections.length,
+      0,
+    );
+    const box = await application.evaluate(() => global.recoveryBox);
+    assert.ok(box.detail.includes(project) && box.detail.includes(moved));
+    await application.evaluate(() => {
+      global.recoveryResponse = 1;
+    });
+    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+    const form = page.getByRole("dialog", { name: "Conexões com banco de dados", exact: true });
+    await form.getByText("Recuperar conexões de outra pasta", { exact: true }).click();
+    await form.getByLabel("Pasta de origem", { exact: true }).selectOption(source.id);
+    await form.getByRole("button", { name: "Recuperar conexões", exact: true }).click();
+    await expect(form.getByLabel("Nome da conexão", { exact: true })).toHaveValue(
+      before.projectDatabases.connections[0].config.name,
+    );
+    await form.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+    next = await page.evaluate(() => window.stag.getSnapshot());
+    assert.equal(
+      next.projectDatabases.connections.length,
+      before.projectDatabases.connections.length,
+    );
+    assert.equal(next.projectDatabases.authorized, false);
+    const persisted = JSON.parse(await readFile(join(data, "database-connections.json"), "utf8"));
+    assert.equal(persisted.projects[project].length, before.projectDatabases.connections.length);
+    if (process.platform === "win32") {
+      const secret = await application.evaluate(
+        ({ safeStorage }, value) =>
+          JSON.parse(safeStorage.decryptString(Buffer.from(value, "base64"))),
+        persisted.projects[moved][0].encryptedPassword,
+      );
+      assert.equal(secret.project, moved);
+      assert.equal(secret.password, " synthetic password only ! ");
+    }
+    await page.getByRole("button", { name: "Conexões com banco de dados", exact: true }).click();
+    await expect(form.getByLabel("Nome da conexão", { exact: true })).toHaveValue(
+      before.projectDatabases.connections[0].config.name,
+    );
+    await form.getByRole("button", { name: "Fechar conexões", exact: true }).click();
+    await page.evaluate(() => window.stag.request({ type: "selectProject" }));
+    assert.deepEqual(
+      (await page.evaluate(() => window.stag.getSnapshot())).projectDatabases.connections,
+      next.projectDatabases.connections,
+    );
+    console.log(
+      "Electron: recuperação nativa recusada/aprovada, origem preservada, novo vínculo protegido e reseleção sem perda aprovados.",
+    );
+  } finally {
+    await application.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = global.recoveryOpenDialog;
+      dialog.showMessageBox = global.recoveryMessageDialog;
+    });
+  }
 }

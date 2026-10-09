@@ -67,7 +67,11 @@ test("senha somente na sessão permite testar e lembrar sem redigitar", async ({
   await fill(dialog);
   await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
   dialog = await form(page);
-  await dialog.getByLabel("Conexão salva", { exact: true }).selectOption({ label: "Homologação" });
+  await expect(
+    dialog.getByLabel("Conexão salva", { exact: true }).locator("option:checked"),
+  ).toHaveText("Homologação");
+  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("Homologação");
+  await expect(dialog).toContainText("1 conexão salva nesta pasta: C:/fixture");
   await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
   await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveAttribute(
     "placeholder",
@@ -78,6 +82,48 @@ test("senha somente na sessão permite testar e lembrar sem redigitar", async ({
   await dialog.getByLabel("Lembrar senha neste computador", { exact: true }).check();
   await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+});
+test("explica catálogo por pasta e oferece recuperação explícita sem perder o formulário", async ({
+  page,
+}) => {
+  const dialog = await form(page);
+  await fill(dialog);
+  await page.evaluate(() => {
+    window.stag!.getSnapshot().then((state) =>
+      window.dispatchEvent(
+        new CustomEvent("stag-fixture-snapshot", {
+          detail: {
+            projectDatabases: {
+              ...state.projectDatabases,
+              recoverySources: [
+                {
+                  id: "22222222-2222-4222-8222-222222222222",
+                  revision: "33333333-3333-4333-8333-333333333333",
+                  path: "C:/previous/project",
+                  count: 1,
+                },
+              ],
+            },
+          },
+        }),
+      ),
+    );
+  });
+  await expect(dialog).toContainText("0 conexões salvas nesta pasta");
+  await dialog.getByText("Recuperar conexões de outra pasta", { exact: true }).click();
+  await expect(
+    dialog.getByRole("button", { name: "Recuperar conexões", exact: true }),
+  ).toBeDisabled();
+  await dialog
+    .getByLabel("Pasta de origem", { exact: true })
+    .selectOption("22222222-2222-4222-8222-222222222222");
+  await expect(
+    dialog.getByRole("button", { name: "Recuperar conexões", exact: true }),
+  ).toBeEnabled();
+  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("Homologação");
+  expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+    true,
+  );
 });
 test("consulta em andamento permite abrir Conexões e revogar, mantendo edição bloqueada", async ({
   page,
@@ -255,19 +301,4 @@ test("janela 360×600 mantém campos e botões acessíveis sem overflow", async 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await mkdir(".local/screenshots", { recursive: true });
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-databases-360.png` });
-});
-
-test("reabrir seleciona conexão salva e informa raiz; Nova conexão continua explícita", async ({
-  page,
-}) => {
-  let dialog = await form(page);
-  await fill(dialog);
-  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
-  dialog = await form(page);
-  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("Homologação");
-  await expect(dialog).toContainText("Pasta: C:/fixture");
-  await expect(dialog).toContainText("1 conexão(ões) salva(s)");
-  await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
-  await dialog.getByLabel("Conexão salva", { exact: true }).selectOption("");
-  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("");
 });

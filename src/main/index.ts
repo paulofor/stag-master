@@ -167,13 +167,13 @@ async function start(): Promise<void> {
       test: testSqlServer,
       tools: new SqlTools(databaseConnections, runSqlQuery),
     },
-    confirmDatabaseRestore: async (source, destination, count) => {
+    confirmDatabaseRecovery: async (source, destination, count) => {
       const result = await dialog.showMessageBox(window!, {
         type: "question",
         title: "Recuperar conexões",
-        message: `Copiar ${count} conexão(ões) para a pasta atual?`,
-        detail: `Origem: ${source}\nDestino: ${destination}\n\nOs cadastros e credenciais disponíveis serão copiados e vinculados à pasta atual, preservando a origem. Nenhum banco será acessado. Consultas continuam exigindo autorização nesta conversa.`,
-        buttons: ["Cancelar", "Recuperar conexões"],
+        message: `Copiar ${count} conexão(ões) para esta pasta?`,
+        detail: `Origem: ${source}\nDestino: ${destination}\n\nOs cadastros originais serão preservados. Senhas disponíveis serão vinculadas ao novo projeto, mantendo a opção de armazenamento protegido. Não autoriza consultas. Conexões de mesmo nome e destino já cadastradas não são substituídas.`,
+        buttons: ["Cancelar", "Copiar conexões"],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -304,7 +304,7 @@ async function start(): Promise<void> {
         "apiConsent",
         "databaseConsent",
         "saveDatabase",
-        "restoreDatabases",
+        "recoverDatabases",
         "deleteDatabase",
         "saveApi",
         "deleteApi",
