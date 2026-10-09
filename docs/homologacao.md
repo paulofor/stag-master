@@ -1,4 +1,22 @@
-# Matriz de homologação da versão 0.4.49
+# Matriz de homologação da versão 0.4.50
+
+## Testes e build locais sem perguntas redundantes — versão 0.4.50
+
+Matriz definida antes dos testes. Lacuna observada: o contrato cobre testes e reinícios, mas não explicita build/execução Angular, runners headless ou a distinção entre pergunta conversacional redundante e aprovação efetiva para sair da sandbox. Ampliar o contrato e o corpus existentes, sem novo executor, liberação automática ou mudança de política.
+
+| Área                       | Cenário e aceite                                                                                                                                           | Evidência prevista                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Caminho feliz              | Pedido de correção autoriza testes, build e servidor Angular locais em Projeto/Windows; não exige pergunta adicional ou consentimento visual para o runner | Contrato + corpus sintético do serviço                  |
+| Validação e falhas         | Conferir scripts, raiz, destinos e efeitos; falha de build/teste leva a investigação e correção local, sem declarar sucesso ou publicar para testar        | Corpus existente + recuperação                          |
+| Integração                 | Contrato em start/resume e ferramenta stag_ask_user; runner headless local não libera navegação interativa fora de stag_browser                            | Serviço + política + Codex real/provedor loopback       |
+| Sandbox e Leitura          | Requests reais continuam bloqueantes e recusáveis; sem desativar sandbox/ACLs, ampliar raízes ou executar builds/testes que escrevam em Leitura            | Aprovação bidirecional + políticas de start/resume/turn |
+| Isolamento                 | Autorização/contexto não atravessam conversas/projetos; scripts com deploy, migração destrutiva ou efeitos externos mantêm confirmação específica          | Corpus e perda parcial do contrato                      |
+| Observabilidade e métricas | Relatar ações e resultados; perguntas redundantes não criam cards; aprovação real preserva fila/estado, decisão única e recuperação após recusa            | Snapshots/contadores e calls da fixture, sem segredos   |
+| Plataformas e interface    | Sem nova interface; Chromium desktop/Pixel 7 e Electron Linux preservados; sandbox/runner e pacote Windows exigem CI nativo                                | check, test:desktop, format:check; jobs PR/main         |
+
+Execução já permitida pelo modo Windows não cria aprovação apenas por estar sem sandbox; somente escalonamento real usa o fluxo nativo. Dados e respostas do corpus são sintéticos e determinísticos: comprovam transmissão, disponibilidade, bloqueio e recuperação, sem garantir decisões semânticas do LLM. Nenhum projeto Angular, serviço, credencial ou sessão do cliente será acessado. Linux não comprova execução nativa Windows; os limites reais do ambiente serão registrados.
+
+Evidência local: regressão de contrato falhou antes do ajuste; typecheck e build aprovados, 835 testes na rodada completa e 66 cenários focalizados após explicitar o acesso Windows já vigente (incluindo um novo caso de perda parcial), mais 148 cenários Chromium/Pixel 7. Smoke com Codex fixado/provedor loopback confirmou start/resume, perguntas bloqueantes, contratos e ferramentas sem inferência paga. Decoder/ASR reais e Electron com projetos, contas e conteúdo sintéticos passaram. O primeiro Electron encerrou em SIGTRAP antes de abrir a janela; a execução seguinte com diagnóstico completou o fluxo, sem mudança na proteção de produção e sem atribuir causa à máquina do cliente. Uma repetição do typecheck encontrou limite de threads (`newosproc`); execução com `GOMAXPROCS=4` somente no comando passou. Node 22.23.3 instalado apenas no workspace; ferramentas compartilhadas preservadas. Formatação, sintaxe da fixture JavaScript e diff aprovados; nenhum script shell alterado. Linux declarou indisponibilidade de namespaces bwrap; Windows/NTFS e instalador dependem dos jobs nativos do PR/main. Não houve acesso a projeto Angular, sessão ou destino do cliente.
 
 ## Leitor PDF do assistente — versão 0.4.49
 
