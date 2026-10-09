@@ -21,6 +21,12 @@ Evidência local: o harness focal falhou com UnknownVizError no driver anterior 
 
 Linux não comprova a GPU nem a sessão Windows do cliente. O smoke mantém explícita a limitação de namespaces bwrap para operações nativas de arquivos; Windows nativo, minimização e instalador exigem os jobs do PR/main. Nenhum site, documento, credencial ou perfil do cliente foi acessado.
 
+### Complemento do CI: limite de downloads de imagens
+
+As tentativas 1 e 2 do CI do PR #58 falharam antes da inicialização do servidor de traces: Docker Hub devolveu 429 para Node e Caddy. Os outros três jobs passaram, incluindo Windows/PDF. Antes de testar o ajuste, o aceite é preservar os digests e as definições de produção, derivar um overlay de imagens somente para o harness a partir desses arquivos e consultar o espelho público mirror.gcr.io; registros externos permanecem iguais. Não copiar versões para uma segunda lista, mudar credenciais ou configurar o daemon global. Validar contratos, build e o fluxo completo de traces com dados sintéticos, isolamento e limpeza no Compose exclusivo da sandbox; repetir os jobs do mesmo PR após validação local.
+
+Validação local complementar aprovada: quatro contratos de configuração, build dos Dockerfiles, validação Caddy, ingestão/consulta, recusa de autenticação inválida, isolamento de projetos, duplicatas, indisponibilidade e persistência após recriação. O harness executou bash -n/ShellCheck no script gerado e terminou com código zero; containers e volumes do Compose exclusivo foram removidos. Formatação e diff conferidos. As imagens do espelho mantêm os mesmos digests; as definições de produção permanecem como defaults. O ajuste não modifica o aplicativo já validado e segue no mesmo PR 0.4.47.
+
 ## Recuperação da visualização do navegador — versão 0.4.46
 
 Matriz definida antes dos testes. Relato/imagem: página branca enquanto stag_browser continua, com aviso de timeout na conversa. A inspeção identificou descarte permanente dos limites aceitos quando a janela nativa fica temporariamente menor; o renderer só reenviava limites ao mudar de tamanho. Timeout também não aparecia no estado da aba. Reproduzir essas condições sem acessar sites, sessões ou dados do cliente; não afirmar que a causa no Windows do cliente foi comprovada.
