@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
@@ -10,6 +10,7 @@ import { emptySqlServerConfig } from "../../src/shared/database-connections";
 import { RpcClient } from "../../src/main/rpc";
 import { codexEnvironment } from "../../src/main/policy";
 import { cyberSafetyRefusal } from "../../src/main/cyber-safety";
+import { databaseTool, databaseImportInstructions } from "../../src/main/database-import";
 const password = "synthetic-SQL-service-password";
 const config = {
   ...emptySqlServerConfig,
@@ -26,6 +27,7 @@ let dir: string,
 let calls: { method: string; params: unknown }[];
 const runner = vi.fn<SqlQueryRunner>();
 const select = vi.fn<() => Promise<string | null>>();
+const confirmRecovery = vi.fn(async () => true);
 const project = () => service.snapshot().projectDatabases!;
 const authorize = (allow = true) =>
   service.request({
@@ -43,6 +45,7 @@ beforeEach(async () => {
   rpc = null;
   calls = [];
   runner.mockReset();
+  confirmRecovery.mockReset().mockResolvedValue(true);
   runner.mockResolvedValue({
     columns: ["id", "status"],
     rows: [[10039, "synthetic verified"]],
@@ -61,6 +64,7 @@ beforeEach(async () => {
   service = new AssistantService({
     store: settings,
     selectProject: select,
+    confirmDatabaseRecovery: confirmRecovery,
     createRpc: () => {
       rpc = new RpcClient({
         command: process.execPath,
@@ -110,6 +114,168 @@ beforeEach(async () => {
   await service.request({ type: "connect" });
   await service.request({ type: "login" });
   await vi.waitFor(() => expect(service.snapshot().models.length).toBeGreaterThan(0));
+});
+
+const importSecret = "synthetic-import-service-secret";
+const sourcePath = "application.properties";
+const importText = (database = "imported_fixture") =>
+  `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=${database}\nspring.datasource.username=fixture\nspring.datasource.password=${importSecret}\n`;
+const importConnection = (extra: Record<string, unknown> = {}) =>
+  service.request({
+    type: "send",
+    text:
+      "database import fixture " +
+      JSON.stringify({ args: { sourcePath, rememberPassword: true }, ...extra }),
+  });
+const approveImport = async (accept = true) => {
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  const approval = service.snapshot().approvals[0];
+  expect(approval.kind).toBe("database");
+  await service.request({ type: "answer", id: approval.id, accept });
+  await done();
+};
+it("importa pelo main com aprovação bloqueante, senha protegida, sem conceder SQL e sem duplicar", async () => {
+  await writeFile(join(dir, sourcePath), importText());
+  await importConnection({ duplicate: true });
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().busy).toBe(true);
+  expect(service.snapshot().approvals[0].detail).toContain("imported_fixture");
+  expect(service.snapshot().approvals[0].detail).toContain("lembrar com proteção");
+  expect(JSON.stringify(service.snapshot())).not.toContain(importSecret);
+  await approveImport();
+  expect(project().connections).toHaveLength(2);
+  const entry = project().connections.find((item) => item.config.database === "imported_fixture")!;
+  expect(store.password(dir, project().revision, entry.id, entry.config, "")).toBe(importSecret);
+  expect(project().authorized).toBe(false);
+  expect(project().metrics.requests).toBe(0);
+  expect(runner).not.toHaveBeenCalled();
+  const start = calls.find((call) => call.method === "thread/start")!.params as {
+    dynamicTools: unknown[];
+    developerInstructions: string;
+  };
+  expect(start.dynamicTools).toContainEqual(databaseTool);
+  expect(start.developerInstructions).toContain(databaseImportInstructions);
+  for (const output of [
+    JSON.stringify(service.snapshot()),
+    JSON.stringify(calls),
+    await readFile(join(dir, "fixture-state.json"), "utf8"),
+    await readFile(join(dir, "connections.json"), "utf8"),
+  ])
+    expect(output).not.toContain(importSecret);
+});
+it("recusa e arquivo alterado durante aprovação não cadastram; nova tentativa recupera", async () => {
+  await writeFile(join(dir, sourcePath), importText());
+  await importConnection();
+  await approveImport(false);
+  expect(project().connections).toHaveLength(1);
+  await importConnection();
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  await writeFile(join(dir, sourcePath), importText("changed_fixture"));
+  await approveImport();
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().error).toContain("configuração mudou");
+  await importConnection();
+  await approveImport();
+  expect(project().connections).toHaveLength(2);
+});
+it("falha de gravação preserva conexões e permite nova tentativa; parar não aplica aprovação antiga", async () => {
+  await writeFile(join(dir, sourcePath), importText());
+  await importConnection();
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  await mkdir(join(dir, "connections.json.tmp"));
+  await approveImport();
+  expect(project().connections).toHaveLength(1);
+  await rm(join(dir, "connections.json.tmp"), { recursive: true });
+  await importConnection();
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  const approval = service.snapshot().approvals[0];
+  await service.request({ type: "stop" });
+  await expect(
+    service.request({ type: "answer", id: approval.id, accept: true }),
+  ).rejects.toThrow();
+  expect(project().connections).toHaveLength(1);
+  await done();
+  await importConnection();
+  await approveImport();
+  expect(project().connections).toHaveLength(2);
+});
+it("Leitura e histórico sem ferramenta recusam importação e mantêm a política original", async () => {
+  await writeFile(join(dir, sourcePath), importText());
+  await service.request({ type: "preferences", mode: "read" });
+  await importConnection();
+  await done();
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().approvals).toHaveLength(0);
+  await service.request({ type: "newChat" });
+  await service.request({ type: "preferences", mode: "project" });
+  await send();
+  await done();
+  const thread = service.snapshot().threadId!;
+  const data = await settings.load();
+  delete data.threads[thread].databaseTool;
+  await settings.save(data);
+  await service.init();
+  await service.request({ type: "resume", threadId: thread });
+  await importConnection();
+  await done();
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().approvals).toHaveLength(0);
+  expect(service.snapshot().mode).toBe("project");
+  const resumed = calls.filter((call) => call.method === "thread/resume").at(-1)!.params;
+  expect(JSON.stringify(resumed)).toContain(databaseImportInstructions);
+});
+it("reseleção preserva cadastro; mudança de raiz pode recuperar com confirmação e sem transferir consentimento", async () => {
+  const before = project().connections;
+  await authorize();
+  await service.request({ type: "selectProject" });
+  expect(project().connections).toEqual(before);
+  expect(project().authorized).toBe(false);
+  const other = join(dir, "moved");
+  await mkdir(other);
+  select.mockResolvedValue(other);
+  await service.request({ type: "selectProject" });
+  expect(project().connections).toEqual([]);
+  const source = project().recoverySources!.find((entry) => entry.path === dir)!;
+  const action = {
+    type: "recoverDatabases" as const,
+    projectPath: other,
+    revision: project().revision,
+    sourceId: source.id,
+    sourceRevision: source.revision,
+  };
+  confirmRecovery.mockResolvedValueOnce(false);
+  await service.request(action);
+  expect(project().connections).toEqual([]);
+  await service.request(action);
+  expect(project().connections).toHaveLength(1);
+  expect(project().authorized).toBe(false);
+  expect(store.snapshot(dir).connections).toEqual(before);
+  expect(confirmRecovery).toHaveBeenCalledWith(dir, other, 1);
+});
+it("recriar a pasta no mesmo caminho preserva cadastro e senha protegida após recarregar", async () => {
+  const root = join(dir, "workspace");
+  await mkdir(root);
+  select.mockResolvedValue(root);
+  await service.request({ type: "selectProject" });
+  await service.request({
+    type: "saveDatabase",
+    projectPath: root,
+    revision: project().revision,
+    connectionId: null,
+    config,
+    password,
+    rememberPassword: true,
+  });
+  const before = project().connections;
+  await rm(root, { recursive: true });
+  await mkdir(root);
+  await service.request({ type: "selectProject" });
+  expect(project().connections).toEqual(before);
+  await store.init();
+  await service.request({ type: "listDatabases", projectPath: root });
+  expect(project().connections).toEqual(before);
+  expect(store.password(root, project().revision, before[0].id, config, "")).toBe(password);
 });
 afterEach(async () => {
   service.dispose();

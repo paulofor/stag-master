@@ -396,6 +396,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (input === "sonda fila sem resposta") break;
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
+      if (input.startsWith("database import fixture ")) {
+        const request = JSON.parse(input.slice("database import fixture ".length));
+        desktopCall(
+          thread,
+          turn,
+          request.args || {},
+          (answer) =>
+            response(thread, turn, "Cadastro: " + JSON.stringify(answer.result.contentItems)),
+          request.overrides || {},
+          !!request.duplicate,
+          "stag_database",
+        );
+        break;
+      }
       if (input.startsWith("sql fixture ")) {
         const request = JSON.parse(input.slice("sql fixture ".length));
         const context = JSON.parse(p.additionalContext?.stag_databases?.value || "{}");

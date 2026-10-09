@@ -75,6 +75,7 @@ export interface ProjectDatabases {
   authorized: boolean;
   metrics: { requests: number; failures: number; elapsedMs: number; lastRows: number | null };
   test: DatabaseConnectionTest | null;
+  recoverySources?: { id: string; revision: string; path: string; count: number }[];
 }
 export const emptySqlServerConfig: SqlServerConfig = {
   name: "",

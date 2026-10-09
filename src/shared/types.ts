@@ -64,7 +64,7 @@ export interface Question {
 }
 export interface Approval {
   id: string;
-  kind: "command" | "file" | "desktop" | "browser" | "http" | "sql" | "questions";
+  kind: "command" | "file" | "desktop" | "browser" | "http" | "sql" | "database" | "questions";
   title: string;
   detail: string;
   questions?: Question[];
@@ -192,6 +192,13 @@ export type Action =
   | { type: "projectSources"; projectPath: string; sources: DocumentationSource[] }
   | { type: "listBranches"; projectPath: string }
   | { type: "listDatabases"; projectPath: string }
+  | {
+      type: "recoverDatabases";
+      projectPath: string;
+      revision: string;
+      sourceId: string;
+      sourceRevision: string;
+    }
   | { type: "databaseConsent"; projectPath: string; revision: string; allow: boolean }
   | {
       type: "saveDatabase";

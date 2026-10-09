@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -18,7 +18,7 @@ const dir = await mkdtemp(resolve(".local/sqlserver-real-"));
 await build({
   stdin: {
     contents:
-      'export * from "./src/main/sqlserver"; export * from "./src/main/sql-query"; export * from "./src/main/sql-tools"; export * from "./src/main/database-connections";',
+      'export * from "./src/main/sqlserver"; export * from "./src/main/sql-query"; export * from "./src/main/sql-tools"; export * from "./src/main/database-connections"; export * from "./src/main/database-import";',
     resolveDir: process.cwd(),
     loader: "ts",
   },
@@ -28,9 +28,8 @@ await build({
   format: "cjs",
   external: ["tedious"],
 });
-const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections } = createRequire(
-  import.meta.url,
-)(join(dir, "driver.cjs"));
+const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections, inspectDatabaseImport } =
+  createRequire(import.meta.url)(join(dir, "driver.cjs"));
 const config = {
   name: "Synthetic only",
   driver: "sqlserver",
@@ -107,12 +106,22 @@ try {
   });
   await connections.init();
   const toolConfig = { ...config, database, user };
+  await writeFile(
+    join(dir, "application.properties"),
+    `spring.datasource.url=jdbc:sqlserver://127.0.0.1:${port};databaseName=${database};encrypt=true;trustServerCertificate=true\nspring.datasource.username=${user}\nspring.datasource.password=${password}\n`,
+  );
+  const imported = await inspectDatabaseImport(dir, {
+    sourcePath: "application.properties",
+    name: toolConfig.name,
+  });
+  assert.deepEqual(imported.config, toolConfig);
+  assert.equal(imported.password, password);
   await connections.save(
     dir,
     connections.snapshot(dir).revision,
     null,
-    toolConfig,
-    password,
+    imported.config,
+    imported.password,
     false,
   );
   const sql = new SqlTools(connections, runSqlQuery);

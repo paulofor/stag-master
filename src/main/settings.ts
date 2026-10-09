@@ -16,6 +16,7 @@ const settingsSchema = z.object({
         browserTool: z.boolean().optional(),
         httpTool: z.boolean().optional(),
         sqlTool: z.boolean().optional(),
+        databaseTool: z.boolean().optional(),
         userInputTool: z.boolean().optional(),
         backgroundVideo: z.boolean().optional(),
       }),

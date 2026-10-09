@@ -56,6 +56,58 @@ afterEach(async () => {
 });
 
 describe("configuração e credenciais SQL Server", () => {
+  it("recupera para outra raiz com vínculo protegido novo, sem alterar origem ou duplicar", async () => {
+    await store.save(dir, store.snapshot(dir).revision, null, config, password, true);
+    const other = join(dir, "recreated");
+    const before = store.snapshot(dir).connections;
+    const state = store.snapshot(other),
+      source = state.recoverySources![0];
+    expect(state.connections).toEqual([]);
+    expect(JSON.stringify(state)).not.toContain(password);
+    await store.recover(other, state.revision, source.id, source.revision);
+    let recovered = store.snapshot(other);
+    expect(recovered.connections).toHaveLength(1);
+    expect(recovered.connections[0].id).not.toBe(before[0].id);
+    expect(store.password(other, recovered.revision, recovered.connections[0].id, config, "")).toBe(
+      password,
+    );
+    expect(store.snapshot(dir).connections).toEqual(before);
+    await store.recover(other, recovered.revision, source.id, source.revision);
+    recovered = store.snapshot(other);
+    expect(recovered.connections).toHaveLength(1);
+    const restarted = new DatabaseConnections(join(dir, "connections.json"), secrets);
+    await restarted.init();
+    const stateAfter = restarted.snapshot(other);
+    expect(
+      restarted.password(other, stateAfter.revision, stateAfter.connections[0].id, config, ""),
+    ).toBe(password);
+  });
+  it("recuperação obsoleta, conflitante ou falha preserva ambos catálogos", async () => {
+    await store.save(dir, store.snapshot(dir).revision, null, config, password, false);
+    const other = join(dir, "other");
+    const initial = store.snapshot(other),
+      source = initial.recoverySources![0];
+    await store.save(other, initial.revision, null, { ...config, database: "another" }, "", false);
+    await expect(
+      store.recover(other, initial.revision, source.id, source.revision),
+    ).rejects.toThrow("mudaram");
+    await expect(
+      store.recover(other, store.snapshot(other).revision, source.id, source.revision),
+    ).rejects.toThrow("outro destino");
+    const empty = join(dir, "third");
+    await mkdir(join(dir, "connections.json.tmp"));
+    await expect(
+      store.recover(empty, store.snapshot(empty).revision, source.id, source.revision),
+    ).rejects.toThrow("preservados");
+    expect(store.snapshot(empty).connections).toEqual([]);
+    await rm(join(dir, "connections.json.tmp"), { recursive: true });
+    await store.recover(empty, store.snapshot(empty).revision, source.id, source.revision);
+    const recovered = store.snapshot(empty);
+    expect(store.password(empty, recovered.revision, recovered.connections[0].id, config, "")).toBe(
+      password,
+    );
+    expect(recovered.connections[0].passwordSaved).toBe(false);
+  });
   it.each([
     "https://sql.invalid",
     "user:synthetic-secret@host",

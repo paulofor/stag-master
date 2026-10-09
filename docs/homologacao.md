@@ -1,4 +1,27 @@
-# Matriz de homologação da versão 0.4.43
+# Matriz de homologação da versão 0.4.44
+
+## Conexões preservadas e importação pelo assistente — versão 0.4.44
+
+Matriz definida antes dos testes. A tela abria em Nova conexão mesmo com cadastros existentes; o armazenamento usa a raiz canônica e não é apagado pela seleção. Mostrar a conexão salva ao abrir, quantidade e pasta do catálogo. Oferecer cópia explícita de cadastros de outra pasta com confirmação e novo vínculo de credenciais, preservando a origem. Não inferir que os dados do cliente foram apagados nem unir projetos automaticamente.
+
+Disponibilizar stag_database para importar uma configuração SQL Server do projeto pelo main, sem senha nos argumentos/resultados do modelo. Suportar Spring properties/YAML, JSON e variáveis em arquivo .env explícito. Não executar scripts, interpolar ambiente do processo nem consultar banco durante importação. Cadastro exige conferência do destino, arquivos e persistência; uso SQL mantém consentimento separado. Leitura não cadastra por ferramenta.
+
+Lacunas concretas do harness: testes selecionam manualmente uma conexão após abrir a tela, ocultando o formulário vazio; não há importação nem recuperação entre raízes. Reutilizar fila, cards, stores, fixtures e provedor loopback existentes.
+
+| Área            | Aceite                                                                                                                                                        | Evidência prevista                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Caminho feliz   | Cadastro visível ao abrir; reseleção/recriação da mesma pasta e reinício preservam configurações; senha lembrada sobrevive protegida                          | Store, serviço, Electron/DPAPI Windows     |
+| Recuperação     | Cópia explícita para nova raiz, origem intacta, recusa, revisão antiga, duplicatas e falha de gravação sem perda                                              | Store, serviço, diálogo nativo             |
+| Importação      | Arquivo local e .env opcionais, destino exato, senha somente no main, salvar após aprovação sem rede/SQL implícito                                            | Parser real, serviço e Codex real/loopback |
+| Validações      | Caminho relativo interno, sem links/junctions/metadados privados; arquivos limitados, formato/variáveis/SQL Server válidos; TLS preservado e sem banco padrão | Projetos e credenciais sintéticos          |
+| Autoridade      | Leitura, histórico sem tool, duplicatas, contexto alterado, arquivo alterado durante aprovação e interrupção recusados; fila única e recuperação              | Requests bidirecionais e schemas reais     |
+| Observabilidade | Cadastro e erro explícitos, aviso de espera existente, sem senha/cifra/conteúdo bruto em snapshot/RPC/logs; métricas SQL inalteradas sem consulta             | Serviço, UI e smoke                        |
+| Interface       | Contagem e raiz visíveis, seleção inicial, recuperação sem perder formulário em falha; desktop compacto/Pixel 7 e Electron                                    | Playwright/Electron                        |
+| Entrega         | check, test:desktop, format:check e diff locais; PR/main, Windows e instalador conferidos                                                                     | Workflow versionado, --publish never       |
+
+Linux não comprova DPAPI ou execução nativa Windows. Testes usam exclusivamente arquivos, contas e destinos sintéticos; nenhuma conexão do cliente é acessada. Harness comprova transmissão e execução controlada, não obediência semântica absoluta do modelo.
+
+Validação local em 2026-10-09: `npm run check` executado com typecheck, 735 contratos e build aprovados. A etapa de vídeo revelou incompatibilidade de bundling ESM com o novo parser YAML; o harness passou a resolver essa dependência pelo Node. Revalidados `test:video` (decoder/ASR reais), `test:codex` (schema stag_database e contrato no provedor loopback sem senha) e `test:e2e` (144 cenários desktop/Pixel 7). A sonda de contrato foi corrigida para conferir também as mensagens de entrada, onde o Codex transmite instruções de desenvolvedor. A revisão acrescentou rejeição de datasources/drivers conflitantes e teste de recriação da mesma pasta: 49 contratos focalizados, typecheck e build finais aprovados, total de 739 contratos no harness. `xvfb-run -a npm run test:desktop` aprovado com importação recusada/aprovada, senha privada, recuperação por diálogo nativo e reseleção sem perda. `test:sqlserver` aprovou a configuração importada com SQL Server real sintético e consultas/alterações limitadas; topologia temporária removida. A porta habitual estava ocupada: o teste usou somente a rede interna do projeto Compose isolado, sem alterar outro serviço. Formatação, sintaxe JavaScript e diff revisados; nenhum script shell alterado. Node 22 instalado somente no workspace. Windows/DPAPI e instalador exigem os jobs PR/main; bwrap do Linux não permitiu homologar operações nativas de arquivo. Nenhuma conexão do cliente foi acessada.
 
 ## Reinícios locais durante o desenvolvimento — versão 0.4.43
 

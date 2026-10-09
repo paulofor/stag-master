@@ -45,6 +45,7 @@ import type { SqlServerTester } from "./sqlserver";
 import { ApiFailure, apiError } from "./api-connections";
 import { apiContext, httpArguments, httpTool, type HttpTools } from "./http-tools";
 import { databaseContext, sqlArguments, sqlTool, type SqlTools } from "./sql-tools";
+import { databaseImportArguments, databaseTool, inspectDatabaseImport } from "./database-import";
 import {
   ProjectBranchManager,
   projectBranchesContext,
@@ -101,7 +102,7 @@ interface WireThread {
 interface PendingApproval {
   message: RpcMessage;
   execute?: (approved?: boolean) => Promise<ToolResult>;
-  tool?: "desktop" | "browser" | "http" | "sql";
+  tool?: "desktop" | "browser" | "http" | "sql" | "database";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
   safety?: () => string | null;
@@ -111,6 +112,11 @@ interface Options {
   createRpc: () => RpcClient;
   store: SettingsStore;
   selectProject: () => Promise<string | null>;
+  confirmDatabaseRecovery?: (
+    source: string,
+    destination: string,
+    count: number,
+  ) => Promise<boolean>;
   prepareProjectGit?: typeof prepareProjectGit;
   branches?: ProjectBranchManager;
   confirmBranchDeletion?: (project: string, branch: string) => Promise<boolean>;
@@ -203,6 +209,7 @@ export class AssistantService extends EventEmitter {
   private httpWork: Promise<void> = Promise.resolve();
   private sqlWork: Promise<void> = Promise.resolve();
   private databaseAbort: AbortController | null = null;
+  private databaseImportAbort: AbortController | null = null;
   private databaseWork: Promise<void> = Promise.resolve();
   private databaseTestIds = new Set<string>();
   private videoPreparation: AbortController | null = null;
@@ -517,6 +524,7 @@ export class AssistantService extends EventEmitter {
         "selectProject",
         "projectSources",
         "saveDatabase",
+        "recoverDatabases",
         "deleteDatabase",
         "testDatabase",
         "saveApi",
@@ -637,6 +645,56 @@ export class AssistantService extends EventEmitter {
             if (this.state.busy) await this.stop();
             else await this.toolQueue;
           }
+          break;
+        }
+        case "recoverDatabases": {
+          const database = this.databaseProject(action.projectPath);
+          const source = database.connections.recoverySource(
+            action.projectPath,
+            action.revision,
+            action.sourceId,
+            action.sourceRevision,
+          );
+          const epoch = this.toolEpoch;
+          if (
+            !(await this.options.confirmDatabaseRecovery?.(
+              source.path,
+              action.projectPath,
+              source.count,
+            ))
+          )
+            break;
+          if (
+            this.disposed ||
+            this.stopping ||
+            epoch !== this.toolEpoch ||
+            this.state.project?.path !== action.projectPath
+          )
+            throw new Error(
+              "O contexto mudou durante a confirmação. Confira as conexões novamente.",
+            );
+          const controller = new AbortController();
+          this.databaseImportAbort = controller;
+          const work = this.toolQueue.then(async () => {
+            try {
+              if (this.disposed || this.stopping || epoch !== this.toolEpoch)
+                throw new Error("Recuperação interrompida.");
+              await database.connections.recover(
+                action.projectPath,
+                action.revision,
+                action.sourceId,
+                action.sourceRevision,
+                controller.signal,
+              );
+              this.revokeDatabases();
+              this.refreshDatabases();
+            } finally {
+              if (this.databaseImportAbort === controller) this.databaseImportAbort = null;
+            }
+          });
+          this.toolQueue = work.catch(() => {});
+          this.sqlWork = work;
+          await work;
           break;
         }
         case "saveDatabase": {
@@ -907,6 +965,7 @@ export class AssistantService extends EventEmitter {
           this.options.desktop.cancel?.();
           this.options.apis?.cancel();
           this.options.databases?.tools?.cancel();
+          this.databaseImportAbort?.abort();
           this.state.browser.authorized = false;
           this.browserConsentThread = null;
           this.contextInstructionsDirty = true;
@@ -1003,6 +1062,7 @@ export class AssistantService extends EventEmitter {
   }
   private revokeDatabases(): void {
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.databaseConsentThread = null;
     if (this.state.projectDatabases) this.state.projectDatabases.authorized = false;
   }
@@ -1023,6 +1083,7 @@ export class AssistantService extends EventEmitter {
   private revokeApis(): void {
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.apiLoginGeneration++;
     this.apiConsentThread = null;
     if (this.state.projectApis) this.state.projectApis.authorized = false;
@@ -1485,6 +1546,7 @@ export class AssistantService extends EventEmitter {
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.options.browser?.cancel();
     this.stopping = false;
     this.toolRequests.clear();
@@ -1525,6 +1587,7 @@ export class AssistantService extends EventEmitter {
       this.options.desktop.cancel?.();
       this.options.apis?.cancel();
       this.options.databases?.tools?.cancel();
+      this.databaseImportAbort?.abort();
       this.options.browser?.cancel();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
@@ -1715,6 +1778,7 @@ export class AssistantService extends EventEmitter {
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.clearVideo();
     this.clearMessageQueue();
     this.toolRequests.clear();
@@ -1757,6 +1821,7 @@ export class AssistantService extends EventEmitter {
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.state.browser.authorized = allow;
     this.contextInstructionsDirty = true;
     this.browserConsentThread = allow ? this.state.threadId : null;
@@ -1849,6 +1914,7 @@ export class AssistantService extends EventEmitter {
       this.options.desktop.cancel?.();
       this.options.apis?.cancel();
       this.options.databases?.tools?.cancel();
+      this.databaseImportAbort?.abort();
       this.toolRequests.clear();
       this.state.browser.authorized = false;
       this.browserConsentThread = null;
@@ -1930,6 +1996,7 @@ export class AssistantService extends EventEmitter {
           ...(this.options.browser ? [browserTool] : []),
           ...(this.apisReady ? [httpTool] : []),
           ...(this.databasesReady && this.options.databases?.tools ? [sqlTool] : []),
+          ...(this.databasesReady ? [databaseTool] : []),
         ],
       });
       this.state.threadId = result.thread.id;
@@ -1944,6 +2011,7 @@ export class AssistantService extends EventEmitter {
         browserTool: !!this.options.browser,
         httpTool: this.apisReady,
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
+        databaseTool: this.databasesReady,
         userInputTool: true,
       };
       await this.options.store.save(this.settings);
@@ -2042,6 +2110,7 @@ export class AssistantService extends EventEmitter {
           ...databaseContext(
             this.state.projectDatabases,
             !!this.settings.threads[this.state.threadId!]?.sqlTool,
+            !!this.settings.threads[this.state.threadId!]?.databaseTool,
           ),
           ...apiContext(
             this.state.projectApis,
@@ -2097,6 +2166,7 @@ export class AssistantService extends EventEmitter {
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.options.browser?.cancel();
     if (!this.state.busy) {
       if (databaseWork) await databaseWork;
@@ -2278,6 +2348,7 @@ export class AssistantService extends EventEmitter {
         this.options.desktop.cancel?.();
         this.options.apis?.cancel();
         this.options.databases?.tools?.cancel();
+        this.databaseImportAbort?.abort();
         this.completedTurns.add(turn.id);
         for (const item of turn.items || []) this.upsert(item);
         this.state.busy = false;
@@ -2380,6 +2451,10 @@ export class AssistantService extends EventEmitter {
           questions: parsed.data.questions.map((q) => ({ ...q, options: q.options || [] })),
         });
         this.publish();
+        return;
+      }
+      if (p.tool === "stag_database") {
+        await this.databaseImportRequest(message);
         return;
       }
       if (p.tool === "stag_sql") {
@@ -2547,15 +2622,20 @@ export class AssistantService extends EventEmitter {
       this.toolEpoch === epoch;
     const ownsTurn = () =>
       ownsRequest() &&
-      (waiting.tool === "http"
-        ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
-        : waiting.tool === "sql"
-          ? !!this.state.projectDatabases?.authorized && this.databaseConsentThread === ownerThread
-          : waiting.tool === "browser"
-            ? this.state.browser.authorized && this.browserConsentThread === ownerThread
-            : this.state.mode === "windows" &&
-              this.windowsConsent &&
-              this.windowsConsentThread === ownerThread);
+      (waiting.tool === "database"
+        ? this.databasesReady &&
+          this.state.mode !== "read" &&
+          !!this.settings.threads[ownerThread!]?.databaseTool
+        : waiting.tool === "http"
+          ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
+          : waiting.tool === "sql"
+            ? !!this.state.projectDatabases?.authorized &&
+              this.databaseConsentThread === ownerThread
+            : waiting.tool === "browser"
+              ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+              : this.state.mode === "windows" &&
+                this.windowsConsent &&
+                this.windowsConsentThread === ownerThread);
     const noAuthority: ToolResult = {
       success: false,
       contentItems: [
@@ -2639,8 +2719,121 @@ export class AssistantService extends EventEmitter {
     });
     // Desktop, browser, HTTP and SQL share one queue, including approved operations.
     this.toolQueue = execution.catch(() => {});
-    if (waiting.tool === "sql") this.sqlWork = execution;
+    if (waiting.tool === "sql" || waiting.tool === "database") this.sqlWork = execution;
     await execution;
+  }
+  private async databaseImportRequest(message: RpcMessage): Promise<void> {
+    const p = message.params || {};
+    const reply = (value: string) =>
+      this.rpc!.respond(message.id!, {
+        success: false,
+        contentItems: [{ type: "inputText", text: value }],
+      });
+    if (
+      !this.databasesReady ||
+      !this.options.databases ||
+      !this.state.project ||
+      this.state.mode === "read" ||
+      !this.settings.threads[this.state.threadId!]?.databaseTool ||
+      (p.namespace !== undefined && p.namespace !== null) ||
+      !text(p.turnId)
+    ) {
+      reply(
+        "Importação indisponível. Leitura não cadastra conexões; históricos sem stag_database exigem nova conversa. Use Conexões para cadastro manual, sem enviar senha ao chat.",
+      );
+      return;
+    }
+    const parsed = databaseImportArguments.safeParse(p.arguments);
+    if (!parsed.success) {
+      reply(
+        "Informe somente o caminho relativo da configuração, .env opcional, nome e opção de lembrar senha. Nunca envie credenciais ou conteúdo de arquivos.",
+      );
+      return;
+    }
+    const id = String(message.id);
+    if (this.toolRequests.has(id)) return;
+    this.toolRequests.add(id);
+    if (!this.turnId) this.turnId = text(p.turnId);
+    const args = parsed.data,
+      project = this.state.project.path,
+      connections = this.options.databases.connections;
+    const revision = connections.snapshot(project).revision,
+      epoch = this.toolEpoch;
+    let fingerprint = "",
+      detail = "";
+    await this.executeTool(
+      {
+        message,
+        tool: "database",
+        safety: () =>
+          cyberSafetyReason([args.name || "", args.sourcePath, args.environmentPath || ""]),
+        confirmation: async () => {
+          connections.check(project, revision);
+          const prepared = await inspectDatabaseImport(project, args);
+          fingerprint = prepared.fingerprint;
+          const c = prepared.config;
+          if (args.rememberPassword && !connections.snapshot(project).canRememberPassword)
+            throw new Error(
+              "Proteção de senha indisponível. Tente sem lembrar senha; o cadastro atual foi preservado.",
+            );
+          detail = `Projeto: ${project}\nArquivo: ${args.sourcePath}${args.environmentPath ? `\nVariáveis: ${args.environmentPath}` : ""}\nNome: ${c.name}\nServidor: ${c.server}\n${c.endpoint.kind === "port" ? `Porta: ${c.endpoint.port}` : `Instância: ${c.endpoint.instance}`}\nBanco: ${c.database}\nUsuário: ${c.user}\nTLS: ${c.encrypt ? "ativado" : "desativado"}; certificado: ${c.trustServerCertificate ? "confiar sem validar" : "validar"}${c.certificateHost ? ` (${c.certificateHost})` : ""}\nSenha: ${prepared.password ? (args.rememberPassword ? "lembrar com proteção do sistema" : "somente nesta sessão") : "ausente — completar em Conexões"}\n\nCriar cadastro local preservando os existentes. Não testa o banco, não consulta dados e não autoriza o assistente. Arquivo alterado exige nova solicitação.`;
+          return "Confirmar cadastro importado";
+        },
+        approval: () => ({ title: "Importar conexão do projeto", detail }),
+        execute: async (approved) => {
+          if (!approved) throw new Error("A importação exige confirmação.");
+          const controller = new AbortController();
+          this.databaseImportAbort = controller;
+          try {
+            connections.check(project, revision);
+            const prepared = await inspectDatabaseImport(project, args);
+            if (
+              this.disposed ||
+              this.toolEpoch !== epoch ||
+              this.state.project?.path !== project ||
+              this.state.mode === "read"
+            )
+              controller.abort();
+            controller.signal.throwIfAborted();
+            if (prepared.fingerprint !== fingerprint)
+              throw new Error(
+                "A configuração mudou durante a confirmação. Solicite a importação novamente.",
+              );
+            await connections.save(
+              project,
+              revision,
+              null,
+              prepared.config,
+              prepared.password,
+              !!args.rememberPassword,
+              controller.signal,
+            );
+            this.revokeDatabases();
+            this.refreshDatabases();
+            return {
+              success: true,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text:
+                    "Conexão cadastrada. Abra Conexões para conferir e Autorizar bancos nesta conversa antes de consultar. Nenhuma consulta foi executada. " +
+                    JSON.stringify(
+                      databaseContext(
+                        this.state.projectDatabases,
+                        !!this.settings.threads[this.state.threadId!]?.sqlTool,
+                        true,
+                      ),
+                    ),
+                },
+              ],
+            };
+          } finally {
+            if (this.databaseImportAbort === controller) this.databaseImportAbort = null;
+          }
+        },
+      },
+      null,
+    );
   }
   private async sqlRequest(message: RpcMessage): Promise<void> {
     const p = message.params || {};
@@ -2660,7 +2853,7 @@ export class AssistantService extends EventEmitter {
       !text(p.turnId)
     ) {
       reply(
-        "stag_sql não autorizado nesta conversa. Cadastre a conexão e clique em Conexões > Autorizar bancos nesta conversa. Históricos sem stag_sql precisam de nova conversa. Não obtenha credenciais por JDBC/arquivos nem contorne o bloqueio por outra ferramenta.",
+        "stag_sql não autorizado nesta conversa. Cadastre a conexão e clique em Conexões > Autorizar bancos nesta conversa. Históricos sem stag_sql precisam de nova conversa. Para importar configuração do projeto, use stag_database, se disponível; não leia segredos diretamente por JDBC/arquivos nem contorne o bloqueio por outra ferramenta.",
       );
       return;
     }
@@ -2848,6 +3041,7 @@ export class AssistantService extends EventEmitter {
     this.options.desktop.cancel?.();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
+    this.databaseImportAbort?.abort();
     this.options.browser?.cancel();
     this.rpc?.removeAllListeners();
     this.rpc?.close();
