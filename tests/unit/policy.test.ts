@@ -11,6 +11,7 @@ import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/m
 import {
   engineeringInstructions,
   engineeringToolDescription,
+  developmentProcessInstructions,
 } from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import {
@@ -30,6 +31,27 @@ it("disponibiliza perguntas bloqueantes em todos os modos sem alterar modelo/esf
   expect(userInputCapability(false)).toContain("não está registrada");
   expect(userInputInstructions).toContain("aguarde o resultado");
   expect(userInputInstructions).toContain("não concede consentimento");
+});
+
+it("orienta reinícios locais sem pergunta redundante, preservando Leitura e aprovações reais", () => {
+  for (const mode of ["project", "read", "windows"] as const) {
+    for (const platform of ["win32", "linux"]) {
+      const instructions = assistantInstructions(mode, platform, false, false, "C:\\synthetic");
+      expect(instructions).toContain(developmentProcessInstructions);
+      expect(instructions).toContain(
+        "No modo Leitura, não inicie, pare ou reinicie processos da aplicação",
+      );
+      expect(instructions).toContain("esta orientação não aprova requests automaticamente");
+      expect(instructions).toContain("não exige nova confirmação só por reiniciar");
+      expect(instructions).toContain("não autoriza o assistente a ler, extrair, revelar");
+      expect(instructions).toContain("Não encerre processos só pelo nome Java/Node");
+      expect(threadPolicy(mode, "C:\\synthetic").approvalPolicy).toBe("on-request");
+      expect(turnPolicy(mode, "C:\\synthetic").approvalPolicy).toBe("on-request");
+    }
+  }
+  expect(userInputTool.description).toContain(
+    "Não use para confirmar novamente testes ou reinícios rotineiros",
+  );
 });
 
 describe("contrato de engenharia e escopo de negócio", () => {

@@ -6,7 +6,10 @@ import { AssistantService } from "../../src/main/service";
 import { RpcClient, type RpcMessage } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment, threadPolicy } from "../../src/main/policy";
-import { engineeringInstructions } from "../../src/main/engineering-policy";
+import {
+  engineeringInstructions,
+  developmentProcessInstructions,
+} from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
 import memoryCorpus from "../fixtures/memory-scenarios.json";
 import sourceCorpus from "../fixtures/source-scenarios.json";
@@ -2371,6 +2374,49 @@ describe("memória persistente do projeto", () => {
   });
 });
 describe("engenharia e limite de assuntos", () => {
+  it("reinício rotineiro não dispensa request real de aprovação, recusa ou recuperação", async () => {
+    await ready();
+    const scenario = engineeringCorpus.scenarios.find((s) => s.id === "local-process-restart")!;
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    expect(service.snapshot().approvals).toEqual([]);
+    for (const accept of [false, true]) {
+      await send("aprovar reinício local");
+      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+      expect(service.snapshot().approvals[0]).toMatchObject({
+        kind: "command",
+        detail: expect.stringContaining("request real do sandbox sintético"),
+      });
+      expect(service.snapshot().busy).toBe(true);
+      expect(
+        service
+          .snapshot()
+          .items.filter((i) => i.kind === "command")
+          .at(-1)?.status,
+      ).toBe("inProgress");
+      await approve(accept);
+      expect(
+        service
+          .snapshot()
+          .items.filter((i) => i.kind === "command")
+          .at(-1)?.status,
+      ).toBe(accept ? "completed" : "declined");
+    }
+    const calls = await rpc.call<{ result?: { decision?: string } }[]>("_fixture/readCalls");
+    expect(calls.flatMap((call) => (call.result?.decision ? [call.result.decision] : []))).toEqual([
+      "decline",
+      "accept",
+    ]);
+    await service.request({ type: "connect" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+
   it.each(["read", "project", "windows"] as const)(
     "transmite o contrato e recupera a conversa após redirecionamento no modo %s",
     async (mode) => {
@@ -2389,7 +2435,11 @@ describe("engenharia e limite de assuntos", () => {
         await send(scenario.input);
         await complete();
         const snapshot = service.snapshot();
-        expect(snapshot.items.at(-1)).toMatchObject({ kind: "assistant", text: scenario.response });
+        expect(snapshot.items.at(-1)).toMatchObject({
+          kind: "assistant",
+          text:
+            mode === "read" && scenario.readResponse ? scenario.readResponse : scenario.response,
+        });
         expect(snapshot.items.at(-1)?.text).not.toContain("WRONG_THREAD");
         expect(JSON.stringify(snapshot)).not.toContain("PRIVATE_REASONING");
         expect(snapshot.mode).toBe(mode);
@@ -2408,6 +2458,7 @@ describe("engenharia e limite de assuntos", () => {
       expect(resumed.length).toBeGreaterThan(0);
       for (const call of resumed) {
         expect(call.params.developerInstructions).toContain(engineeringInstructions);
+        expect(call.params.developerInstructions).toContain(developmentProcessInstructions);
         expect(call.params.sandbox).toBe(threadPolicy(mode, dir).sandbox);
         expect(call.params.runtimeWorkspaceRoots).toEqual([dir]);
       }
@@ -2416,6 +2467,11 @@ describe("engenharia e limite de assuntos", () => {
 
   it.each([
     ["especialização", engineeringInstructions],
+    ["reinício local", "Não peça confirmação a cada reinício rotineiro"],
+    ["identidade do processo", "Não encerre processos só pelo nome Java/Node"],
+    ["conexão interna", "não exige nova confirmação só por reiniciar"],
+    ["reinício em Leitura", "No modo Leitura, não inicie, pare ou reinicie processos da aplicação"],
+    ["aprovações reais", "esta orientação não aprova requests automaticamente"],
     [
       "desenvolvimento e homologação",
       "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento ou homologação são permitidas",
@@ -2484,42 +2540,43 @@ describe("engenharia e limite de assuntos", () => {
     expect(browser.execute).not.toHaveBeenCalled();
   });
 
-  it.each(["development-clarified", "development-restore-full-workflow"])(
-    "preserva contexto de %s ao retomar sem transferir a outra conversa",
-    async (id) => {
-      await ready();
-      const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;
-      const missingContext = "Fixture: contexto da solicitação não preservado.";
-      const initial = service.snapshot().metrics;
-      // A terse follow-up alone must not inherit a target or authorization from another thread.
-      await send(scenario.input);
-      await complete();
-      expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
-      await send(scenario.context!);
-      await complete();
-      const threadId = service.snapshot().threadId;
-      await service.request({ type: "connect" });
-      await send(scenario.input);
-      await complete();
-      expect(service.snapshot().threadId).toBe(threadId);
-      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
-      // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
-      expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
-      const snapshot = service.snapshot();
-      expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
-      expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
-      expect(service.snapshot().metrics.failures).toBe(initial.failures);
-      await service.request({ type: "newChat" });
-      await send(scenario.input);
-      await complete();
-      expect(service.snapshot().threadId).not.toBe(threadId);
-      expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
-      expect(service.snapshot().approvals).toEqual([]);
-      expect(service.snapshot().mode).toBe("project");
-      expect(desktop.execute).not.toHaveBeenCalled();
-      expect(browser.execute).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    "development-clarified",
+    "development-restore-full-workflow",
+    "local-process-known-context",
+  ])("preserva contexto de %s ao retomar sem transferir a outra conversa", async (id) => {
+    await ready();
+    const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;
+    const missingContext = "Fixture: contexto da solicitação não preservado.";
+    const initial = service.snapshot().metrics;
+    // A terse follow-up alone must not inherit a target or authorization from another thread.
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    await send(scenario.context!);
+    await complete();
+    const threadId = service.snapshot().threadId;
+    await service.request({ type: "connect" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+    // requests counts all RPC traffic, including reconnect/handshake/history, not just turns.
+    expect(service.snapshot().metrics.requests).toBeGreaterThan(initial.requests);
+    const snapshot = service.snapshot();
+    expect(snapshot.items.filter((item) => item.kind === "user")).toHaveLength(3);
+    expect(snapshot.items.filter((item) => item.kind === "assistant")).toHaveLength(3);
+    expect(service.snapshot().metrics.failures).toBe(initial.failures);
+    await service.request({ type: "newChat" });
+    await send(scenario.input);
+    await complete();
+    expect(service.snapshot().threadId).not.toBe(threadId);
+    expect(service.snapshot().items.at(-1)?.text).toBe(missingContext);
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().mode).toBe("project");
+    expect(desktop.execute).not.toHaveBeenCalled();
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
 });
 describe("proteção contra solicitações maliciosas", () => {
   it.each(["read", "project", "windows"] as const)(

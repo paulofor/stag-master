@@ -99,8 +99,8 @@ describe("recusa local de abuso cibernético explícito", () => {
   );
 
   it("encaminha pedidos de desenvolvimento e esclarecimentos ao modelo sem whitelist", () => {
-    for (const scenario of engineeringCorpus.scenarios.filter((s) =>
-      s.id.startsWith("development-"),
+    for (const scenario of engineeringCorpus.scenarios.filter(
+      (s) => s.id.startsWith("development-") || s.id.startsWith("local-process-"),
     )) {
       // Boundary cases also reach the model for contextual evaluation, never automatic authorization.
       expect(cyberSafetyReason([scenario.input], "request")).toBeNull();
