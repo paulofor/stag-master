@@ -24,6 +24,7 @@ const config: SqlServerConfig = {
 const tester = vi.fn(
   async (_config: SqlServerConfig, _password: string, _signal: AbortSignal) => {},
 );
+const confirmRestore = vi.fn(async () => false);
 const select = vi.fn<() => Promise<string | null>>();
 beforeEach(async () => {
   rpc = null;
@@ -65,6 +66,7 @@ beforeEach(async () => {
       confirmationReason: async () => "synthetic",
     },
     databases: { connections, test: tester },
+    confirmDatabaseRestore: confirmRestore,
   });
   await service.init();
   await service.request({ type: "selectProject" });
@@ -274,4 +276,88 @@ it("falha de persistência e arquivo corrompido preservam outros recursos e não
     }),
   ).rejects.toThrow("indisponíveis");
   expect(service.snapshot().project?.path).toBe(dir);
+});
+
+it("selecionar a mesma raiz e reiniciar preserva todos os cadastros", async () => {
+  await service.request(saveAction());
+  const before = service.snapshot().projectDatabases!.connections;
+  await service.request({ type: "selectProject" });
+  expect(service.snapshot().projectDatabases!.connections).toEqual(before);
+  await service.request({ type: "newChat" });
+  expect(service.snapshot().projectDatabases!.connections).toEqual(before);
+  await service.init();
+  expect(service.snapshot().projectDatabases!.connections).toEqual(before);
+});
+it("recuperação de outra raiz exige confirmação e não concede consultas", async () => {
+  await service.request(saveAction());
+  const target = join(dir, "moved");
+  await mkdir(target);
+  select.mockResolvedValueOnce(target);
+  await service.request({ type: "selectProject" });
+  const state = service.snapshot().projectDatabases!,
+    source = state.recoverySources![0];
+  const action = {
+    type: "restoreDatabases" as const,
+    projectPath: target,
+    revision: state.revision,
+    sourceId: source.id,
+    sourceRevision: source.revision,
+  };
+  await service.request(action);
+  expect(service.snapshot().projectDatabases!.connections).toEqual([]);
+  confirmRestore.mockResolvedValueOnce(true);
+  await service.request(action);
+  expect(service.snapshot().projectDatabases!.connections).toHaveLength(1);
+  expect(service.snapshot().projectDatabases!.authorized).toBe(false);
+  expect(connections.snapshot(dir).connections).toHaveLength(1);
+  expect(tester).not.toHaveBeenCalled();
+});
+
+it("reseleção durante pergunta bloqueante preserva conexão, senha e conversa", async () => {
+  await service.request(saveAction());
+  await service.request({ type: "connect" });
+  await service.request({ type: "login" });
+  await vi.waitFor(() => expect(service.snapshot().models.length).toBeGreaterThan(0));
+  await service.request({ type: "send", text: "perguntar pasta" });
+  await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+  const before = service.snapshot();
+  await service.request({ type: "selectProject" });
+  expect(service.snapshot().projectDatabases).toEqual(before.projectDatabases);
+  expect(service.snapshot().threadId).toBe(before.threadId);
+  expect(service.snapshot().approvals).toEqual(before.approvals);
+  const state = service.snapshot().projectDatabases!;
+  expect(connections.password(dir, state.revision, state.connections[0].id, config, "")).toBe(
+    password,
+  );
+  await service.request({
+    type: "answer",
+    id: before.approvals[0].id,
+    answers: { folder: "Pasta selecionada novamente" },
+  });
+  await vi.waitFor(() => expect(service.snapshot().busy).toBe(false));
+});
+it("parar recuperação enfileirada não apresenta confirmação antiga", async () => {
+  await service.request(saveAction());
+  const target = join(dir, "moved");
+  await mkdir(target);
+  select.mockResolvedValueOnce(target);
+  await service.request({ type: "selectProject" });
+  const state = service.snapshot().projectDatabases!,
+    source = state.recoverySources![0];
+  let release!: () => void;
+  (service as unknown as { toolQueue: Promise<void> }).toolQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const operation = service.request({
+    type: "restoreDatabases",
+    projectPath: target,
+    revision: state.revision,
+    sourceId: source.id,
+    sourceRevision: source.revision,
+  });
+  const stop = service.request({ type: "stop" });
+  release();
+  await Promise.all([operation, stop]);
+  expect(confirmRestore).not.toHaveBeenCalled();
+  expect(service.snapshot().projectDatabases?.connections).toEqual([]);
 });

@@ -70,6 +70,7 @@ export interface DatabaseConnectionTest {
 }
 export interface ProjectDatabases {
   revision: string;
+  recoverySources?: { id: string; projectPath: string; count: number; revision: string }[];
   connections: DatabaseConnectionProfile[];
   canRememberPassword: boolean;
   authorized: boolean;

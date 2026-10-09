@@ -1,4 +1,28 @@
-# Matriz de homologação da versão 0.4.43
+# Matriz de homologação da versão 0.4.44
+
+## Conexões preservadas e importação do projeto — versão 0.4.44
+
+Matriz definida antes dos testes. A captura mostra Nova conexão, não a lista aberta ou os cadastros privados; não comprova exclusão. O diálogo sempre inicializava vazio, mesmo com conexões existentes. Mostrar cadastro, quantidade e raiz; preservar cadastros ao selecionar novamente/reiniciar e reconhecer caminhos Windows equivalentes. Recuperar de outra raiz exige confirmação nativa e cópia atômica, preservando a origem. Não transferir automaticamente credenciais/consentimentos.
+
+stag_database_config importa SQL Server de properties Spring/JDBC ou .env dentro do projeto. O main lê arquivos limitados sem links/junctions, ambiente do processo ou execução de configuração; resolve placeholders somente pelo .env indicado. Confirmação bloqueante mostra arquivo, destino, usuário, TLS e persistência. Revalidar arquivo/cadastro/contexto após aprovação. Senha nunca retorna ao modelo. Importar não testa nem autoriza consultas; Leitura não cadastra pelo modelo, históricos sem tool exigem nova conversa.
+
+| Área                     | Cenário e aceite                                                                                                                                      | Evidência prevista                           |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Persistência             | Seleção repetida, nova conversa, reinício e caminhos Windows equivalentes preservam ids/configuração/credencial; diálogo seleciona cadastro existente | Store, serviço, Electron e Windows           |
+| Recuperação              | Outra raiz somente na interface; confirmação, id/revisões atuais; origem intacta; colisão/falha sem perda parcial                                     | Store, IPC e Electron sintéticos             |
+| Importação               | Properties/.env, credencial direta/referenciada, persistência opcional protegida, fila compartilhada, aprovação e cadastro visível                    | Parser, serviço bidirecional e Codex real    |
+| Validações               | Arquivo ausente/alterado, limite/encoding/duplicatas, placeholders, links/travessia, TLS e ambiguidades; erro sem conteúdo privado                    | Arquivos sintéticos                          |
+| Recuperação e isolamento | Recusa, interrupção/desconexão, turn/thread antigos, Leitura, histórico sem tool, duplicados, revisão/gravação falhas                                 | Harness existente                            |
+| Observabilidade e dados  | Raiz/quantidade, aprovação bloqueante e avisos, snapshots/RPC sem senha/cifra; apenas perfis sintéticos                                               | Chromium desktop/compacto/Pixel 7 e Electron |
+| Entrega                  | check, test:desktop, format:check e diff locais; CI PR/main e instalador conferidos                                                                   | Workflow versionado, sem deploy web          |
+
+Lacunas concretas: o harness não verificava seleção inicial do cadastro, recuperação entre raízes nem importação pelo assistente. Reutilizar os mecanismos existentes. Linux não comprova DPAPI/Windows nativo: job Windows obrigatório. Testes determinísticos não garantem obediência semântica absoluta. Nenhum arquivo, cadastro ou banco do cliente é acessado.
+
+A rodada local revelou uma falha do harness de interface: porta 5173 fixa e reuseExistingServer permitiam usar servidor de outro checkout/job, que terminou durante a execução (ERR_CONNECTION_REFUSED). Playwright agora reserva porta por processo e a transmite aos workers, inicia seu próprio Vite com strictPort e proíbe reutilização. Regressão usa porta ocupada e processos Node reais, verificando outra execução e herança para workers. Reexecutar a interface completa, pois a rodada anterior não comprova o checkout correto. O Electron também encontrou falha ao iniciar subprocesso enquanto o cgroup compartilhado atingia o limite de 512 tarefas; separar execuções gráficas e limitar afinidade de CPU somente no comando local, sem modificar políticas ou encerrar outros jobs.
+
+A rodada isolada aprovou 143 cenários e expôs uma corrida prévia do relógio no teste de movimento: clock.install começa a avançar, então pauseAt no mesmo instante já pode estar no passado. A regressão agora instala um minuto antes, avança explicitamente um segundo após a prontidão e pausa no instante desejado, verificando Date.now e reload. Revalidar apenas esse cenário e o novo layout de recuperação em desktop/Pixel 7; sem alterar temporização ou produção do movimento.
+
+Validação local em 2026-10-09: typecheck, contratos da rodada inicial e regressões focais aprovados; build, decoder/ASR, schema/despacho no Codex fixado com provedor loopback, 146 cenários de interface (incluindo as repetições focais após os ajustes) e Electron real aprovados. SQL Server Developer sintético validou a importação de .env seguida de consulta parametrizada, erros/TLS, escrita confirmada, Leitura e encerramento; topologia/volumes removidos. Electron conferiu recuperação cancelada/aprovada, origem preservada, senha de sessão, importação pelo main e ausência de segredo em snapshots. Ajustados nome acessível do seletor e a contagem dos dois logins sintéticos usados pelo novo fluxo. Formatação, sintaxe JavaScript, screenshots e diff revisados. Node 22 apenas no workspace, executáveis compartilhados preservados. Sem scripts shell alterados. Equivalência de caminhos NTFS exige identidade de diretório com inteiros exatos, não apenas maiúsculas/minúsculas; a regressão nativa e DPAPI permanecem obrigatórios no CI Windows.
 
 ## Reinícios locais durante o desenvolvimento — versão 0.4.43
 

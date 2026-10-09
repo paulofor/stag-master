@@ -695,7 +695,10 @@ try {
     ).toBeVisible();
     await expect(page.getByLabel("Endereço do navegador")).toHaveValue(site.url);
     assert.deepEqual(await application.evaluate(() => global.externalUrls), [
-      ...(databaseConversationFixture ? ["https://auth.openai.com/fixture-login"] : []),
+      // SQL consent and project import each enter/leave their isolated account fixture.
+      ...(databaseConversationFixture
+        ? Array(2).fill("https://auth.openai.com/fixture-login")
+        : []),
       "https://auth.openai.com/fixture-login",
     ]);
     await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);

@@ -30,12 +30,16 @@ export function DatabaseConnectionsDialog({
   close: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [id, setId] = useState<string | null>(null);
+  const initial = data?.connections[0];
+  const initialized = useRef(!!data);
+  const [id, setId] = useState<string | null>(initial?.id || null);
   const [config, setConfig] = useState<SqlServerConfig>(() =>
-    structuredClone(emptySqlServerConfig),
+    structuredClone(initial?.config || emptySqlServerConfig),
   );
   const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(!!initial?.passwordSaved);
+  const [sourceId, setSourceId] = useState("");
+  const [recoveryRevision, setRecoveryRevision] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [validation, setValidation] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -43,6 +47,18 @@ export function DatabaseConnectionsDialog({
   const testing = data?.test?.status === "testing";
   const locked = pending || testing || busy;
   const saved = data?.connections.find((entry) => entry.id === id);
+  useEffect(() => {
+    if (!initialized.current && data) {
+      initialized.current = true;
+      select(data.connections[0]?.id || null);
+    }
+  }, [data]);
+  useEffect(() => {
+    if (data && recoveryRevision && data.revision !== recoveryRevision) {
+      select(data.connections[0]?.id || null);
+      setRecoveryRevision(null);
+    }
+  }, [data, recoveryRevision]);
   useEffect(() => {
     const element = dialog.current!;
     const previous = document.activeElement;
@@ -156,6 +172,11 @@ export function DatabaseConnectionsDialog({
       <p>
         Conexões SQL Server de <strong>{projectName}</strong>.
       </p>
+      <p className="sources-hint" style={{ overflowWrap: "anywhere" }}>
+        Pasta: {projectPath}.{" "}
+        {data ? `${data.connections.length} conexão(ões) salva(s).` : "Carregando cadastros…"}{" "}
+        Selecionar esta pasta novamente preserva os cadastros. Outra pasta tem sua própria lista.
+      </p>
       <p className="sources-hint">
         O assistente consulta os bancos após sua autorização. A senha fica no STAG Plus; resultados
         SQL são enviados ao assistente. Alterações de dados pedem confirmação por operação.
@@ -164,6 +185,53 @@ export function DatabaseConnectionsDialog({
         <p role="alert">{error || "Carregando conexões…"}</p>
       ) : (
         <>
+          {!!data.recoverySources?.length && (
+            <details>
+              <summary>Recuperar conexões de outra pasta</summary>
+              <p className="sources-hint">
+                Se a pasta mudou, copie os cadastros anteriores com confirmação. A origem permanece
+                salva; consultas precisam de nova autorização.
+              </p>
+              <label className="database-saved">
+                Pasta do cadastro anterior
+                <select
+                  aria-label="Pasta do cadastro anterior"
+                  value={sourceId}
+                  disabled={locked}
+                  onChange={(event) => setSourceId(event.target.value)}
+                >
+                  <option value="">Selecione a pasta anterior</option>
+                  {data.recoverySources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.projectPath} ({source.count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="secondary-button"
+                disabled={locked || !sourceId}
+                onClick={async () => {
+                  const source = data.recoverySources?.find((entry) => entry.id === sourceId);
+                  if (source) {
+                    setRecoveryRevision(data.revision);
+                    if (
+                      !(await run({
+                        type: "restoreDatabases",
+                        projectPath,
+                        revision: data.revision,
+                        sourceId,
+                        sourceRevision: source.revision,
+                      }))
+                    )
+                      setRecoveryRevision(null);
+                  }
+                }}
+              >
+                Recuperar conexões
+              </button>
+            </details>
+          )}
           <div className="api-consent">
             <p>
               {data.authorized

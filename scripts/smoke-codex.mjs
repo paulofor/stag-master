@@ -29,6 +29,7 @@ try {
       "src/main/http-tools.ts",
       "src/main/sql-tools.ts",
       "src/main/database-connections.ts",
+      "src/main/database-import.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
       "src/main/project-branches.ts",
@@ -48,6 +49,9 @@ try {
   const { httpTool } = await import(pathToFileURL(join(dir, "http-tools.mjs")).href);
   const { sqlTool, SqlTools, databaseContext } = await import(
     pathToFileURL(join(dir, "sql-tools.mjs")).href
+  );
+  const { databaseImportTool, databaseImportArguments, readDatabaseImport } = await import(
+    pathToFileURL(join(dir, "database-import.mjs")).href
   );
   const { DatabaseConnections } = await import(
     pathToFileURL(join(dir, "database-connections.mjs")).href
@@ -188,7 +192,7 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool],
+    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool, databaseImportTool],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");
@@ -359,6 +363,45 @@ try {
     sqlSecret,
     false,
   );
+  const importArgs = { file: "application.properties", name: "Importada pelo projeto" };
+  await writeFile(
+    join(project, importArgs.file),
+    `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_imported;encrypt=true\nspring.datasource.username=synthetic\nspring.datasource.password=${sqlSecret}\n`,
+  );
+  let importedCalls = 0;
+  const importRequest = async (message) => {
+    if (message.method !== "item/tool/call" || message.params.tool !== databaseImportTool.name) {
+      rpc.rejectRequest(message.id, "Somente importação sintética nesta sonda.");
+      return;
+    }
+    const args = databaseImportArguments.parse(message.params.arguments);
+    const imported = await readDatabaseImport(project, args);
+    assert.equal(imported.password, sqlSecret);
+    assert.equal(imported.config.database, "stag_imported");
+    importedCalls++;
+    // Approval lifecycle/persistence are exercised by AssistantService. This probe
+    // verifies the actual Codex schema/dispatch without sending secrets to the provider.
+    rpc.respond(message.id, {
+      success: true,
+      contentItems: [
+        { type: "inputText", text: "Importação sintética validada sem consulta de rede." },
+      ],
+    });
+  };
+  rpc.on("request", importRequest);
+  try {
+    provider.queueToolCall({ name: databaseImportTool.name, arguments: importArgs });
+    await syntheticTurn(
+      [{ type: "text", text: "Importe a conexão do projeto sintético." }],
+      sources,
+      false,
+      databaseContext(connections.snapshot(project), true, true),
+    );
+    assert.equal(importedCalls, 1);
+    assert.ok(!JSON.stringify(provider.inputs).includes(sqlSecret));
+  } finally {
+    rpc.off("request", importRequest);
+  }
   let sqlCalls = 0;
   const sql = new SqlTools(connections, async (_config, password, args) => {
     assert.equal(password, sqlSecret);

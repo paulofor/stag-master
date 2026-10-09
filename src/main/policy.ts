@@ -13,10 +13,12 @@ import { apiInstructions } from "./http-tools";
 import { sqlInstructions } from "./sql-tools";
 import { modelTrafficConfig, modelTrafficInstructions } from "./model-traffic";
 import { userInputCapability, userInputInstructions } from "./user-input";
+import { databaseImportInstructions } from "./database-import";
 
 const baseInstructions = `${engineeringInstructions}
 ${modelTrafficInstructions}
 ${userInputInstructions}
+${databaseImportInstructions}
 ${apiInstructions}
 ${sqlInstructions}
 ${videoInstructions}

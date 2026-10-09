@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
@@ -10,6 +10,7 @@ import { emptySqlServerConfig } from "../../src/shared/database-connections";
 import { RpcClient } from "../../src/main/rpc";
 import { codexEnvironment } from "../../src/main/policy";
 import { cyberSafetyRefusal } from "../../src/main/cyber-safety";
+import { databaseImportTool, databaseImportInstructions } from "../../src/main/database-import";
 const password = "synthetic-SQL-service-password";
 const config = {
   ...emptySqlServerConfig,
@@ -418,4 +419,166 @@ it("cancelar seleção preserva; projeto/conversa/reinício não herdam consenti
   await service.init();
   await expect(authorize()).rejects.toThrow("histórico não possui stag_sql");
   expect(project().authorized).toBe(false);
+});
+
+const importArgs = { file: "application.properties", name: "Importada" };
+async function importSource() {
+  await writeFile(
+    join(dir, importArgs.file),
+    `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_imported;encrypt=true\nspring.datasource.username=fixture\nspring.datasource.password=${password}\n`,
+  );
+}
+const sendImport = (extra: Record<string, unknown> = {}) =>
+  service.request({
+    type: "send",
+    text: "database import fixture " + JSON.stringify({ args: importArgs, ...extra }),
+  });
+const importApproval = () =>
+  vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1), { timeout: 5000 });
+it("importação sem consentimento SQL aguarda confirmação, salva uma vez e não expõe senha", async () => {
+  await importSource();
+  await sendImport({ duplicate: true });
+  await importApproval();
+  const approval = service.snapshot().approvals[0];
+  expect(service.snapshot().busy).toBe(true);
+  expect(approval.detail).toContain("stag_imported");
+  expect(approval.detail).not.toContain(password);
+  expect(project().connections).toHaveLength(1);
+  const start = calls.find((call) => call.method === "thread/start")!.params as {
+    dynamicTools: unknown[];
+    developerInstructions: string;
+  };
+  expect(start.dynamicTools).toContainEqual(databaseImportTool);
+  expect(start.developerInstructions).toContain(databaseImportInstructions);
+  await service.request({ type: "answer", id: approval.id, accept: true });
+  await done();
+  expect(project().connections).toHaveLength(2);
+  expect(project().authorized).toBe(false);
+  const imported = project().connections.find((entry) => entry.config.name === "Importada")!;
+  expect(imported.passwordAvailable).toBe(true);
+  expect(imported.passwordSaved).toBe(false);
+  expect(runner).not.toHaveBeenCalled();
+  for (const value of [
+    JSON.stringify(service.snapshot()),
+    JSON.stringify(calls),
+    await readFile(join(dir, "fixture-state.json"), "utf8"),
+  ])
+    expect(value).not.toContain(password);
+  await authorize();
+  await send({ args: { connectionId: imported.id } });
+  await done();
+  expect(runner).toHaveBeenCalledWith(
+    expect.objectContaining({ database: "stag_imported" }),
+    password,
+    expect.anything(),
+    expect.any(AbortSignal),
+  );
+});
+it("recusa da importação e erro de persistência recuperam sem perder conexão anterior", async () => {
+  await importSource();
+  await sendImport();
+  await importApproval();
+  await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: false });
+  await done();
+  expect(project().connections).toHaveLength(1);
+  await mkdir(join(dir, "connections.json.tmp"));
+  await sendImport();
+  await importApproval();
+  await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: true });
+  await done();
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().error).toContain("preservados");
+  await rm(join(dir, "connections.json.tmp"), { recursive: true });
+  await sendImport({ args: { ...importArgs, rememberPassword: true } });
+  await importApproval();
+  await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: true });
+  await done();
+  expect(project().connections[1].passwordSaved).toBe(true);
+});
+it.each(["arquivo", "cadastro"])(
+  "revalida %s após aprovação sem importar resultado antigo",
+  async (kind) => {
+    await importSource();
+    await sendImport();
+    await importApproval();
+    if (kind === "arquivo") await writeFile(join(dir, importArgs.file), "changed synthetic");
+    else
+      await store.save(
+        dir,
+        project().revision,
+        project().connections[0].id,
+        { ...config, name: "Alterada" },
+        password,
+        true,
+      );
+    await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: true });
+    await done();
+    expect(store.snapshot(dir).connections).toHaveLength(1);
+    expect(runner).not.toHaveBeenCalled();
+  },
+);
+it("Leitura, namespace/thread/turn antigos e argumentos secretos não importam", async () => {
+  await importSource();
+  await service.request({ type: "preferences", mode: "read" });
+  await sendImport();
+  await done();
+  expect(service.snapshot().approvals).toHaveLength(0);
+  expect(service.snapshot().items.at(-1)?.text).toContain("Leitura");
+  await service.request({ type: "preferences", mode: "project" });
+  for (const overrides of [{ threadId: "other" }, { turnId: "other" }, { namespace: "other" }]) {
+    await sendImport({ overrides });
+    await done();
+  }
+  await sendImport({ args: { ...importArgs, password: "inert synthetic" } });
+  await done();
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().approvals).toHaveLength(0);
+});
+it.each(["stop", "disconnect"])(
+  "%s descarta aprovação de importação e permite recuperação",
+  async (action) => {
+    await importSource();
+    await sendImport();
+    await importApproval();
+    const id = service.snapshot().approvals[0].id;
+    if (action === "stop") await service.request({ type: "stop" });
+    else {
+      rpc!.close();
+      await vi.waitFor(() => expect(service.snapshot().connection).toBe("error"));
+      await service.request({ type: "connect" });
+      if (service.snapshot().busy) await service.request({ type: "stop" });
+    }
+    await done();
+    await expect(service.request({ type: "answer", id, accept: true })).rejects.toThrow();
+    expect(project().connections).toHaveLength(1);
+    await sendImport();
+    await importApproval();
+    await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: true });
+    await done();
+    expect(project().connections).toHaveLength(2);
+  },
+);
+it("importação compartilha fila e histórico sem schema não recebe permissão retroativa", async () => {
+  await importSource();
+  let release!: () => void;
+  (service as unknown as { toolQueue: Promise<void> }).toolQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await sendImport();
+  expect(service.snapshot().approvals).toHaveLength(0);
+  release();
+  await importApproval();
+  await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept: false });
+  await done();
+  const id = service.snapshot().threadId!;
+  const saved = await settings.load();
+  delete saved.threads[id].databaseImportTool;
+  await settings.save(saved);
+  await service.init();
+  await service.request({ type: "resume", threadId: id });
+  await sendImport();
+  await done();
+  expect(service.snapshot().approvals).toHaveLength(0);
+  expect(project().connections).toHaveLength(1);
+  expect(service.snapshot().items.at(-1)?.text).toContain("Nova conversa");
 });

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { createRequire } from "node:module";
 import { randomUUID } from "node:crypto";
@@ -18,7 +18,7 @@ const dir = await mkdtemp(resolve(".local/sqlserver-real-"));
 await build({
   stdin: {
     contents:
-      'export * from "./src/main/sqlserver"; export * from "./src/main/sql-query"; export * from "./src/main/sql-tools"; export * from "./src/main/database-connections";',
+      'export * from "./src/main/sqlserver"; export * from "./src/main/sql-query"; export * from "./src/main/sql-tools"; export * from "./src/main/database-connections"; export * from "./src/main/database-import";',
     resolveDir: process.cwd(),
     loader: "ts",
   },
@@ -28,9 +28,8 @@ await build({
   format: "cjs",
   external: ["tedious"],
 });
-const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections } = createRequire(
-  import.meta.url,
-)(join(dir, "driver.cjs"));
+const { testSqlServer, runSqlQuery, SqlTools, DatabaseConnections, readDatabaseImport } =
+  createRequire(import.meta.url)(join(dir, "driver.cjs"));
 const config = {
   name: "Synthetic only",
   driver: "sqlserver",
@@ -106,13 +105,20 @@ try {
     },
   });
   await connections.init();
-  const toolConfig = { ...config, database, user };
+  await writeFile(
+    join(dir, ".env"),
+    `DB_HOST=127.0.0.1\nDB_PORT=${port}\nDB_DATABASE=${database}\nDB_USER=${user}\nDB_PASSWORD=${password}\nDB_ENCRYPT=true\nDB_TRUST_SERVER_CERTIFICATE=true\n`,
+  );
+  const imported = await readDatabaseImport(dir, { file: ".env", name: config.name });
+  const toolConfig = imported.config;
+  assert.deepEqual(toolConfig, { ...config, database, user });
+  assert.equal(imported.password, password);
   await connections.save(
     dir,
     connections.snapshot(dir).revision,
     null,
     toolConfig,
-    password,
+    imported.password,
     false,
   );
   const sql = new SqlTools(connections, runSqlQuery);

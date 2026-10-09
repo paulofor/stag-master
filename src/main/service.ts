@@ -46,6 +46,13 @@ import { ApiFailure, apiError } from "./api-connections";
 import { apiContext, httpArguments, httpTool, type HttpTools } from "./http-tools";
 import { databaseContext, sqlArguments, sqlTool, type SqlTools } from "./sql-tools";
 import {
+  databaseImportArguments,
+  databaseImportTool,
+  databaseImportDetail,
+  readDatabaseImport,
+  type ImportedDatabase,
+} from "./database-import";
+import {
   ProjectBranchManager,
   projectBranchesContext,
   projectBranchesInstructions,
@@ -102,6 +109,7 @@ interface PendingApproval {
   message: RpcMessage;
   execute?: (approved?: boolean) => Promise<ToolResult>;
   tool?: "desktop" | "browser" | "http" | "sql";
+  databaseConfiguration?: boolean;
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
   safety?: () => string | null;
@@ -114,6 +122,7 @@ interface Options {
   prepareProjectGit?: typeof prepareProjectGit;
   branches?: ProjectBranchManager;
   confirmBranchDeletion?: (project: string, branch: string) => Promise<boolean>;
+  confirmDatabaseRestore?: (source: string, destination: string, count: number) => Promise<boolean>;
   openExternal: (url: string) => Promise<void>;
   desktop: Pick<DesktopTools, "execute" | "confirmationReason"> &
     Partial<Pick<DesktopTools, "cancel">>;
@@ -517,6 +526,7 @@ export class AssistantService extends EventEmitter {
         "selectProject",
         "projectSources",
         "saveDatabase",
+        "restoreDatabases",
         "deleteDatabase",
         "testDatabase",
         "saveApi",
@@ -651,6 +661,53 @@ export class AssistantService extends EventEmitter {
           );
           this.revokeDatabases();
           this.refreshDatabases();
+          break;
+        }
+        case "restoreDatabases": {
+          const database = this.databaseProject(action.projectPath);
+          database.connections.check(action.projectPath, action.revision);
+          const source = database.connections
+            .snapshot(action.projectPath)
+            .recoverySources?.find(
+              (entry) => entry.id === action.sourceId && entry.revision === action.sourceRevision,
+            );
+          if (!source) throw new Error("Cadastro de origem mudou. Reabra Conexões.");
+          const epoch = this.toolEpoch;
+          const execution = this.toolQueue.then(async () => {
+            if (
+              this.disposed ||
+              this.stopping ||
+              this.toolEpoch !== epoch ||
+              this.state.project?.path !== action.projectPath
+            )
+              return;
+            if (
+              !(await this.options.confirmDatabaseRestore?.(
+                source.projectPath,
+                action.projectPath,
+                source.count,
+              ))
+            )
+              return;
+            if (
+              this.disposed ||
+              this.stopping ||
+              this.toolEpoch !== epoch ||
+              this.state.project?.path !== action.projectPath
+            )
+              throw new Error("O contexto mudou durante a confirmação. Reabra Conexões.");
+            await database.connections.restore(
+              action.projectPath,
+              action.revision,
+              action.sourceId,
+              action.sourceRevision,
+            );
+            this.revokeDatabases();
+            this.refreshDatabases();
+          });
+          this.toolQueue = execution.catch(() => {});
+          this.sqlWork = execution;
+          await execution;
           break;
         }
         case "deleteDatabase": {
@@ -1929,7 +1986,9 @@ export class AssistantService extends EventEmitter {
           ...(this.state.mode === "windows" ? [desktopTool] : []),
           ...(this.options.browser ? [browserTool] : []),
           ...(this.apisReady ? [httpTool] : []),
-          ...(this.databasesReady && this.options.databases?.tools ? [sqlTool] : []),
+          ...(this.databasesReady && this.options.databases?.tools
+            ? [sqlTool, databaseImportTool]
+            : []),
         ],
       });
       this.state.threadId = result.thread.id;
@@ -1944,6 +2003,7 @@ export class AssistantService extends EventEmitter {
         browserTool: !!this.options.browser,
         httpTool: this.apisReady,
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
+        databaseImportTool: this.databasesReady && !!this.options.databases?.tools,
         userInputTool: true,
       };
       await this.options.store.save(this.settings);
@@ -2042,6 +2102,7 @@ export class AssistantService extends EventEmitter {
           ...databaseContext(
             this.state.projectDatabases,
             !!this.settings.threads[this.state.threadId!]?.sqlTool,
+            !!this.settings.threads[this.state.threadId!]?.databaseImportTool,
           ),
           ...apiContext(
             this.state.projectApis,
@@ -2386,6 +2447,10 @@ export class AssistantService extends EventEmitter {
         await this.sqlRequest(message);
         return;
       }
+      if (p.tool === databaseImportTool.name) {
+        await this.databaseImportRequest(message);
+        return;
+      }
       if (p.tool === "stag_http") {
         await this.httpRequest(message);
         return;
@@ -2547,15 +2612,18 @@ export class AssistantService extends EventEmitter {
       this.toolEpoch === epoch;
     const ownsTurn = () =>
       ownsRequest() &&
-      (waiting.tool === "http"
-        ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
-        : waiting.tool === "sql"
-          ? !!this.state.projectDatabases?.authorized && this.databaseConsentThread === ownerThread
-          : waiting.tool === "browser"
-            ? this.state.browser.authorized && this.browserConsentThread === ownerThread
-            : this.state.mode === "windows" &&
-              this.windowsConsent &&
-              this.windowsConsentThread === ownerThread);
+      (waiting.databaseConfiguration
+        ? this.state.mode !== "read" && !!this.settings.threads[ownerThread!]?.databaseImportTool
+        : waiting.tool === "http"
+          ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
+          : waiting.tool === "sql"
+            ? !!this.state.projectDatabases?.authorized &&
+              this.databaseConsentThread === ownerThread
+            : waiting.tool === "browser"
+              ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+              : this.state.mode === "windows" &&
+                this.windowsConsent &&
+                this.windowsConsentThread === ownerThread);
     const noAuthority: ToolResult = {
       success: false,
       contentItems: [
@@ -2641,6 +2709,116 @@ export class AssistantService extends EventEmitter {
     this.toolQueue = execution.catch(() => {});
     if (waiting.tool === "sql") this.sqlWork = execution;
     await execution;
+  }
+  private async databaseImportRequest(message: RpcMessage): Promise<void> {
+    const p = message.params || {};
+    const reply = (text: string) =>
+      this.rpc!.respond(message.id!, {
+        success: false,
+        contentItems: [{ type: "inputText", text }],
+      });
+    if (
+      !this.databasesReady ||
+      !this.state.project ||
+      !this.settings.threads[this.state.threadId!]?.databaseImportTool ||
+      this.state.mode === "read" ||
+      (p.namespace !== undefined && p.namespace !== null) ||
+      !text(p.turnId)
+    ) {
+      reply(
+        "Cadastro pelo assistente indisponível em Leitura ou neste histórico. Use Nova conversa em Projeto/Windows para stag_database_config, ou a tela Conexões. Não leia nem envie senhas pela conversa.",
+      );
+      return;
+    }
+    const parsed = databaseImportArguments.safeParse(p.arguments);
+    if (!parsed.success) {
+      reply(
+        "Informe somente arquivo relativo, nome e opções de importação; nunca envie senha ou conteúdo do arquivo.",
+      );
+      return;
+    }
+    const id = String(message.id);
+    if (this.toolRequests.has(id)) return;
+    this.toolRequests.add(id);
+    if (!this.turnId) this.turnId = text(p.turnId);
+    const args = parsed.data,
+      project = this.state.project.path,
+      epoch = this.toolEpoch,
+      owner = this.rpc,
+      thread = this.state.threadId;
+    const connections = this.options.databases!.connections;
+    const revision = connections.snapshot(project).revision;
+    let imported: ImportedDatabase | undefined;
+    const current = () =>
+      !this.disposed &&
+      !this.stopping &&
+      this.state.busy &&
+      this.toolEpoch === epoch &&
+      this.rpc === owner &&
+      this.state.project?.path === project &&
+      this.state.threadId === thread &&
+      this.turnId === text(p.turnId) &&
+      this.state.mode !== "read";
+    await this.executeTool(
+      {
+        message,
+        tool: "sql",
+        databaseConfiguration: true,
+        safety: () => cyberSafetyReason([args.name, args.file]),
+        confirmation: async () => {
+          imported = await readDatabaseImport(project, args);
+          if (args.rememberPassword && !connections.snapshot(project).canRememberPassword)
+            throw new Error(
+              "Armazenamento protegido indisponível. Solicite importação sem lembrar a senha.",
+            );
+          connections.check(project, revision);
+          return "Importar conexão SQL Server do projeto";
+        },
+        approval: () => ({
+          title: "Importar conexão SQL Server",
+          detail: databaseImportDetail(args, imported!),
+        }),
+        execute: async () => {
+          const fresh = await readDatabaseImport(project, args);
+          if (!current() || !imported || fresh.fingerprint !== imported.fingerprint)
+            throw new Error(
+              "O contexto ou arquivo mudou após a confirmação. Solicite uma nova importação.",
+            );
+          await connections.save(
+            project,
+            revision,
+            null,
+            fresh.config,
+            fresh.password,
+            !!args.rememberPassword,
+          );
+          imported = undefined;
+          this.revokeDatabases();
+          this.refreshDatabases();
+          const data = connections.snapshot(project);
+          const connection = data.connections.find(
+            (entry) => entry.config.name === fresh.config.name,
+          )!;
+          return {
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  kind: "untrusted",
+                  message:
+                    "Conexão cadastrada. Consultas requerem Conexões > Autorizar bancos nesta conversa; nenhuma conexão de rede foi aberta.",
+                  connectionId: connection.id,
+                  revision: data.revision,
+                  credentialAvailable: connection.passwordAvailable,
+                }),
+              },
+            ],
+          };
+        },
+      },
+      null,
+    );
   }
   private async sqlRequest(message: RpcMessage): Promise<void> {
     const p = message.params || {};

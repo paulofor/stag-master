@@ -103,7 +103,7 @@ function desktopCall(
       response(
         thread,
         turn,
-        `${tool === "stag_sql" ? "SQL" : tool === "stag_http" ? "API" : tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}. ${tool === "stag_sql" ? JSON.stringify(answer.result?.contentItems || []) : ""}`.trim(),
+        `${["stag_sql", "stag_database_config"].includes(tool) ? "SQL" : tool === "stag_http" ? "API" : tool === "stag_browser" ? "Navegador" : "Desktop"}: ${success ? "executado" : "recusado"}. ${["stag_sql", "stag_database_config"].includes(tool) ? JSON.stringify(answer.result?.contentItems || []) : ""}`.trim(),
       );
   });
   const request = {
@@ -396,6 +396,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       if (input === "sonda fila sem resposta") break;
       if (!input.includes("rápido") && !input.includes("desktop sem início"))
         reply(id, { turn: { ...turn, items: [] } });
+      if (input.startsWith("database import fixture ")) {
+        const request = JSON.parse(input.slice("database import fixture ".length));
+        desktopCall(
+          thread,
+          turn,
+          request.args,
+          (answer) => response(thread, turn, JSON.stringify(answer.result)),
+          request.overrides || {},
+          !!request.duplicate,
+          "stag_database_config",
+        );
+        break;
+      }
       if (input.startsWith("sql fixture ")) {
         const request = JSON.parse(input.slice("sql fixture ".length));
         const context = JSON.parse(p.additionalContext?.stag_databases?.value || "{}");

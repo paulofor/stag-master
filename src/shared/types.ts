@@ -192,6 +192,13 @@ export type Action =
   | { type: "projectSources"; projectPath: string; sources: DocumentationSource[] }
   | { type: "listBranches"; projectPath: string }
   | { type: "listDatabases"; projectPath: string }
+  | {
+      type: "restoreDatabases";
+      projectPath: string;
+      revision: string;
+      sourceId: string;
+      sourceRevision: string;
+    }
   | { type: "databaseConsent"; projectPath: string; revision: string; allow: boolean }
   | {
       type: "saveDatabase";

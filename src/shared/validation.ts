@@ -12,6 +12,15 @@ export const actionSchema = z.discriminatedUnion("type", [
   ...apiActionSchemas,
   z
     .object({
+      type: z.literal("restoreDatabases"),
+      projectPath: z.string().min(1).max(32768),
+      revision: z.uuid(),
+      sourceId: z.uuid(),
+      sourceRevision: z.uuid(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("databaseConsent"),
       projectPath: z.string().min(1).max(32768),
       revision: z.uuid(),

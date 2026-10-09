@@ -256,3 +256,18 @@ test("janela 360×600 mantém campos e botões acessíveis sem overflow", async 
   await mkdir(".local/screenshots", { recursive: true });
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-databases-360.png` });
 });
+
+test("reabrir seleciona conexão salva e informa raiz; Nova conexão continua explícita", async ({
+  page,
+}) => {
+  let dialog = await form(page);
+  await fill(dialog);
+  await dialog.getByRole("button", { name: "Salvar conexão", exact: true }).click();
+  dialog = await form(page);
+  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("Homologação");
+  await expect(dialog).toContainText("Pasta: C:/fixture");
+  await expect(dialog).toContainText("1 conexão(ões) salva(s)");
+  await expect(dialog.getByLabel("Senha do usuário", { exact: true })).toHaveValue("");
+  await dialog.getByLabel("Conexão salva", { exact: true }).selectOption("");
+  await expect(dialog.getByLabel("Nome da conexão", { exact: true })).toHaveValue("");
+});

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { statSync } from "node:fs";
+import { dirname, win32 } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -43,12 +44,41 @@ function binding(config: SqlServerConfig): string {
 export class DatabaseConnections {
   private data: Stored = { version: 1, projects: {} };
   private revisions = new Map<string, string>();
+  private projectIds = new Map<string, string>();
   private queue: Promise<void> = Promise.resolve();
   private sessionPasswords = new Map<string, { binding: string; password: string }>();
   constructor(
     private file: string,
     private secrets: DatabaseSecretStorage,
+    private platform = process.platform,
   ) {}
+
+  private projectKey(path: string): string {
+    if (this.platform !== "win32") return path;
+    const normalize = (value: string) => win32.normalize(value).replace(/\\+$/, "").toLowerCase();
+    const matches = Object.keys(this.data.projects).filter((key) => {
+      if (key === path) return true;
+      if (normalize(key) !== normalize(path)) return false;
+      try {
+        const a = statSync(key, { bigint: true }),
+          b = statSync(path, { bigint: true });
+        // NTFS can enable case sensitivity per directory. Equal text ignoring case
+        // is insufficient authority to reuse a different project's credential.
+        return a.isDirectory() && b.isDirectory() && a.dev === b.dev && a.ino === b.ino;
+      } catch {
+        return false;
+      }
+    });
+    if (matches.length > 1)
+      throw new Error(
+        "Há cadastros conflitantes para esta pasta. Preserve os dados antes de continuar.",
+      );
+    return matches[0] || path;
+  }
+  private revision(path: string): string {
+    if (!this.revisions.has(path)) this.revisions.set(path, randomUUID());
+    return this.revisions.get(path)!;
+  }
 
   async init(): Promise<void> {
     this.sessionPasswords.clear();
@@ -64,9 +94,20 @@ export class DatabaseConnections {
   }
 
   snapshot(path: string): ProjectDatabases {
-    if (!this.revisions.has(path)) this.revisions.set(path, randomUUID());
+    path = this.projectKey(path);
     return {
-      revision: this.revisions.get(path)!,
+      revision: this.revision(path),
+      recoverySources: Object.entries(this.data.projects)
+        .filter(([key, list]) => key !== path && list.length > 0)
+        .map(([key, list]) => {
+          if (!this.projectIds.has(key)) this.projectIds.set(key, randomUUID());
+          return {
+            id: this.projectIds.get(key)!,
+            projectPath: key,
+            count: list.length,
+            revision: this.revision(key),
+          };
+        }),
       connections: (this.data.projects[path] || []).map(({ id, config, encryptedPassword }) => ({
         id,
         config: structuredClone(config),
@@ -88,6 +129,7 @@ export class DatabaseConnections {
   }
 
   private record(path: string, id: string) {
+    path = this.projectKey(path);
     const record = this.data.projects[path]?.find((entry) => entry.id === id);
     if (!record) throw new Error("Conexão não encontrada neste projeto. Reabra Conexões.");
     return record;
@@ -107,6 +149,7 @@ export class DatabaseConnections {
     config: SqlServerConfig,
     supplied: string,
   ): string {
+    path = this.projectKey(path);
     this.check(path, revision);
     const previous = id ? this.record(path, id) : null;
     const password = databasePasswordSchema.parse(supplied);
@@ -146,6 +189,7 @@ export class DatabaseConnections {
     remember: boolean,
   ): Promise<void> {
     return this.enqueue(async () => {
+      path = this.projectKey(path);
       this.check(path, revision);
       const config = sqlServerConfigSchema.parse(raw);
       databasePasswordSchema.parse(password);
@@ -210,6 +254,7 @@ export class DatabaseConnections {
 
   remove(path: string, revision: string, id: string): Promise<void> {
     return this.enqueue(async () => {
+      path = this.projectKey(path);
       this.check(path, revision);
       this.record(path, id);
       await this.persist(
@@ -217,6 +262,61 @@ export class DatabaseConnections {
         this.data.projects[path].filter((entry) => entry.id !== id),
       );
       this.sessionPasswords.delete(this.key(path, id));
+    });
+  }
+
+  restore(path: string, revision: string, sourceId: string, sourceRevision: string): Promise<void> {
+    return this.enqueue(async () => {
+      path = this.projectKey(path);
+      this.check(path, revision);
+      const source = [...this.projectIds].find(([, id]) => id === sourceId)?.[0];
+      if (!source || source === path)
+        throw new Error("Cadastro de origem indisponível. Reabra Conexões.");
+      this.check(source, sourceRevision);
+      const previous = this.data.projects[path] || [];
+      const additions: Stored["projects"][string] = [];
+      const sessions: { id: string; config: SqlServerConfig; password: string }[] = [];
+      for (const record of this.data.projects[source] || []) {
+        const duplicate = previous.find(
+          (entry) =>
+            entry.config.name.toLocaleLowerCase() === record.config.name.toLocaleLowerCase(),
+        );
+        if (duplicate) {
+          if (JSON.stringify(duplicate.config) === JSON.stringify(record.config)) continue;
+          throw new Error(
+            "Já existe uma conexão diferente com esse nome. Renomeie-a antes de recuperar.",
+          );
+        }
+        const id = randomUUID(),
+          config = structuredClone(record.config);
+        let encryptedPassword: string | undefined;
+        if (record.encryptedPassword) {
+          const password = this.password(source, sourceRevision, record.id, record.config, "");
+          try {
+            encryptedPassword = this.secrets
+              .encrypt(JSON.stringify({ project: path, id, binding: binding(config), password }))
+              .toString("base64");
+          } catch {
+            throw new Error(
+              "Não foi possível proteger a senha recuperada. Cadastros anteriores preservados.",
+            );
+          }
+        } else {
+          const session = this.sessionPasswords.get(this.key(source, record.id));
+          if (session && session.binding === binding(config))
+            sessions.push({ id, config, password: session.password });
+        }
+        additions.push({ id, config, ...(encryptedPassword ? { encryptedPassword } : {}) });
+      }
+      if (previous.length + additions.length > maxDatabaseConnections)
+        throw new Error("A recuperação excede 20 conexões. Os cadastros foram preservados.");
+      if (!additions.length) return;
+      await this.persist(path, [...previous, ...additions]);
+      for (const entry of sessions)
+        this.sessionPasswords.set(this.key(path, entry.id), {
+          binding: binding(entry.config),
+          password: entry.password,
+        });
     });
   }
 
