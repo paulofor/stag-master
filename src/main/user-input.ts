@@ -28,7 +28,12 @@ export const userInputTool = {
           additionalProperties: false,
           required: ["id", "question", "options"],
           properties: {
-            id: { type: "string", minLength: 1, maxLength: 100 },
+            id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 100,
+              pattern: "^(?!__proto__$)[\\s\\S]+$",
+            },
             question: { type: "string", minLength: 1, maxLength: 4000 },
             options: {
               type: "array",
@@ -57,7 +62,7 @@ export const userInputQuestions = z
         .string()
         .min(1)
         .max(100)
-        .refine((value) => !!value.trim()),
+        .refine((value) => !!value.trim() && value !== "__proto__"),
       question: z.string().trim().min(1).max(4000),
       isSecret: z.boolean().default(false),
       options: z

@@ -400,6 +400,10 @@ describe("perguntas bloqueantes no modo normal", () => {
         ...received!.params,
         arguments: { questions: [...before[0].questions!, ...before[0].questions!] },
       },
+      {
+        ...received!.params,
+        arguments: { questions: [{ ...before[0].questions![0], id: "__proto__" }] },
+      },
       { ...received!.params, threadId: "outro-thread" },
       { ...received!.params, turnId: "outro-turno" },
     ].entries())
