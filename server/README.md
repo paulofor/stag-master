@@ -58,6 +58,8 @@ npm run test:server
 
 O harness precisa de Docker, Node e ShellCheck. Cria um projeto Compose exclusivo, credenciais aleatórias, dois projetos Langfuse e volumes descartáveis. Não lê `server/.env`, configurações do Codex ou contas reais. Valida o Compose de produção e o Caddy real; usa HTTP privado no teste para não emitir certificados públicos. Ao terminar ou falhar, aguarda `down --volumes --remove-orphans`. Recusa namespaces com containers/volumes preexistentes. `STAG_TEST_COMPOSE_PROJECT` permite informar o namespace exclusivo fornecido pela sandbox.
 
+Somente no teste, imagens do Docker Hub são obtidas pelo [espelho público do Google](https://docs.cloud.google.com/artifact-registry/docs/pull-cached-dockerhub-images), preservando o digest definido no Compose/Dockerfile. O harness deriva esse overlay dos arquivos versionados, sem duplicar versões ou alterar a configuração do daemon e da produção; outros registros permanecem iguais. Isso evita o limite anônimo do Docker Hub observado no CI. O espelho não garante disponibilidade permanente: imagem ausente ou divergente falha explicitamente, sem trocar versão ou remover a verificação por digest.
+
 O job **Trace server contracts** usa o mesmo harness no PR e na main. O probe testa a página de login por HTTP; não homologa a experiência móvel do painel de terceiros. O aplicativo STAG Plus mantém sua suíte Chromium/Pixel 7/Electron. Certificado público, backup restaurado e capacidade da VPS exigem homologação no destino escolhido.
 
 ## Homologação definida antes dos testes

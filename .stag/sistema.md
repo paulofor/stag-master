@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-09 — Navegador 0.4.47: captura recupera UnknownVizError/bitmap vazio com até três tentativas na mesma página, renderização temporariamente ativa e restauração ao terminar. Ocultação/minimização recusa a imagem com mensagem fixa, sem impedir leitura HTML; parar/navegar/reset/fechar cancela resultados antigos. PDF HTTP(S) identificado por headers admite somente o visualizador Chromium embutido e seus recursos no frame atual, sem liberar protocolos internos como destinos. Snapshot explicita que não extrai texto do PDF; rolagem/troca de páginas manual. Fonte: imagem do cliente, código do Electron e reprodução local com PDF/pixels sintéticos; não confirma o gatilho gráfico no Windows do cliente.
+
 2026-10-09 — Navegador 0.4.46: preserva limites aceitos durante redução nativa temporária; resize/restore/show reaplicam a área. Interface oferece Restaurar visualização durante a tarefa pelo IPC existente, sem navegação ou novo consentimento. Timeout também aparece na aba; crash invalida leituras. Fonte: reprodução local no Electron e implementação desta solicitação; sessão Windows do cliente não acessada.
 
 2026-10-09 — Versão final 0.4.45 reforça a importação: compara os valores originais dos campos públicos com a senha, recusando ecos com aspas/barras antes de cards ou cadastro. Recusa também auth.json na raiz e diretórios .ssh/.aws. Regressões sintéticas, serviço, build, Codex/loopback e Electron aprovados; mesmas conexões recuperáveis da 0.4.44. Fonte: revisão final e testes desta entrega.

@@ -7,6 +7,7 @@ import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 import { validateBrowserCertificates } from "./test-browser-certificates.mjs";
 import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
 import { validateBrowserVisibility } from "./test-browser-visibility.mjs";
+import { validateBrowserCapture } from "./test-browser-capture.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
@@ -449,6 +450,7 @@ export async function validateBrowser(application, dir, site, page) {
     await validateBrowserSessions({ application, site, execute, reason, snapshot, dom, target });
     await validateBrowserCertificates({ application, site, execute, snapshot, state, page });
     await validateBrowserVisibility({ application, site, execute, snapshot, state, dom });
+    await validateBrowserCapture({ application, site, execute, snapshot, state, dom });
     await validateBrowserTabs({
       application,
       site,

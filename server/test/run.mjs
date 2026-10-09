@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createEnvironment, writeEnvironment } from "../scripts/init-env.mjs";
+import { testImageOverlay } from "./images.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const project =
@@ -37,7 +38,8 @@ const base = [
   join(root, "server/compose.yaml"),
 ];
 const https = [...base, "-f", join(root, "server/compose.https.yaml")];
-const compose = [...https, "-f", join(root, "server/test/compose.yaml")];
+const mirrorFile = join(dir, "mirrors.json");
+const compose = [...https, "-f", join(root, "server/test/compose.yaml"), "-f", mirrorFile];
 let ownsStack = false;
 let interrupted = false;
 let activeChild;
@@ -95,6 +97,17 @@ const run = (args, options) => docker([...compose, ...args], options);
 try {
   console.log("Servidor: validando configuracao, segredos obrigatorios e isolamento de rede.");
   const normal = JSON.parse((await docker([...base, "config", "--format", "json"])).output);
+  await writeFile(
+    mirrorFile,
+    JSON.stringify(
+      testImageOverlay(
+        normal.services,
+        await readFile(join(root, "server/Dockerfile.proxy"), "utf8"),
+        await readFile(join(root, "server/test/Dockerfile"), "utf8"),
+      ),
+    ),
+    { mode: 0o600 },
+  );
   for (const [name, service] of Object.entries(normal.services)) {
     assert.ok(service.image.includes("@sha256:"), "imagem fixada");
     assert.notEqual(service.network_mode, "host");

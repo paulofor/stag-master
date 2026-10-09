@@ -4,6 +4,44 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createEnvironment, writeEnvironment } from "../scripts/init-env.mjs";
+import { testImage, testImageOverlay } from "./images.mjs";
+
+test("espelho do harness preserva digests e registros externos sem duplicar versoes", async () => {
+  const digest = `@sha256:${"a".repeat(64)}`;
+  for (const [source, target] of [
+    ["node:22-alpine", "mirror.gcr.io/library/node:22-alpine"],
+    ["docker.io/library/caddy:2-alpine", "mirror.gcr.io/library/caddy:2-alpine"],
+    ["clickhouse/clickhouse-server:25.12", "mirror.gcr.io/clickhouse/clickhouse-server:25.12"],
+    [
+      "docker.langfuse.com/langfuse/langfuse:4.50.0",
+      "docker.langfuse.com/langfuse/langfuse:4.50.0",
+    ],
+    ["cgr.dev/chainguard/minio", "cgr.dev/chainguard/minio"],
+  ])
+    assert.equal(testImage(source + digest), target + digest);
+  for (const value of ["node:latest", "node@sha256:abc", "node:22\nmalformed" + digest])
+    assert.throws(() => testImage(value));
+  const proxy = await readFile(new URL("../Dockerfile.proxy", import.meta.url), "utf8");
+  const probe = await readFile(new URL("./Dockerfile", import.meta.url), "utf8");
+  const overlay = testImageOverlay(
+    { postgres: { image: "postgres:17-alpine" + digest } },
+    proxy,
+    probe,
+  );
+  assert.equal(
+    overlay.services.postgres.image,
+    "mirror.gcr.io/library/postgres:17-alpine" + digest,
+  );
+  for (const [name, source, key] of [
+    ["proxy", proxy, "CADDY_IMAGE"],
+    ["probe", probe, "NODE_IMAGE"],
+  ]) {
+    const original = source.match(new RegExp(`^ARG ${key}=(\\S+)$`, "m"))[1];
+    assert.equal(overlay.services[name].build.args[key].split("@")[1], original.split("@")[1]);
+    assert.ok(source.includes(`FROM \${${key}}`));
+  }
+  assert.throws(() => testImageOverlay({}, "FROM caddy:latest", probe));
+});
 
 test("ambiente isolado, segredos aleatorios e URL de producao HTTPS", () => {
   const first = createEnvironment();

@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { installBridge } from "../fixtures/browser-bridge";
 import { emptySnapshot, type Action } from "../../src/shared/types";
+import { browserCaptureError } from "../../src/main/browser-capture";
 
 test.beforeEach(async ({ page }) => {
   await installBridge(page);
@@ -19,11 +20,15 @@ test("restaurar visualização durante execução só atualiza a área, preserva
     visible: true,
     authorized: true,
     url: "https://fixture.invalid/docs",
+    error: browserCaptureError,
   });
   browser.tabs.documentation.url = browser.url;
   await installBridge(page, { busy: true, browser });
   await page.reload();
   await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Navegador do assistente" }).getByRole("alert"),
+  ).toContainText(browserCaptureError);
   await page.evaluate(() => {
     const fixture = window as typeof window & { browserActions: Action[] };
     fixture.browserActions = [];

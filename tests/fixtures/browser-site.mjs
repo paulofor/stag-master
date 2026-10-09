@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { build } from "esbuild";
+import { syntheticBrowserPdf } from "./browser-pdf.mjs";
 
 // Every page and field is synthetic. Only loopback traffic, with no account or external service.
 export async function startBrowserSite() {
@@ -16,6 +17,16 @@ export async function startBrowserSite() {
   ).outputFiles[0].text;
   const effects = { submissions: 0, downloads: 0, hangs: 0 };
   const server = createServer((request, response) => {
+    if (["/manual.pdf/@@display-file/file", "/download-pdf"].includes(request.url)) {
+      response.writeHead(200, {
+        "Content-Type": "application/pdf",
+        ...(request.url === "/download-pdf"
+          ? { "Content-Disposition": 'attachment; filename="synthetic.pdf"' }
+          : {}),
+      });
+      response.end(syntheticBrowserPdf());
+      return;
+    }
     if (request.url === "/wide") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>Página larga sintética</title>
