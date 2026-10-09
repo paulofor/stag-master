@@ -153,6 +153,50 @@ test("pergunta obrigatória e interrupção", async ({ page }) => {
   await page.getByRole("button", { name: "Parar execução" }).click();
   await expect(page.getByText("Execução interrompida.")).toBeVisible();
 });
+test("ação manual mantém espera, pasta, rascunho e fila até a resposta", async ({ page }, info) => {
+  await ready(page);
+  const input = page.getByLabel("Mensagem para o assistente");
+  await input.fill("perguntar pasta");
+  await page.getByRole("button", { name: "Enviar mensagem" }).click();
+  const card = page.getByRole("region", { name: "Solicitação do assistente" });
+  await expect(card).toContainText("Selecione novamente a pasta sintética");
+  await expect(
+    page.getByText("Aguardando sua resposta ou autorização", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Assistente trabalhando", { exact: false })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Responder", exact: true })).toBeDisabled();
+  await input.fill("Rascunho independente");
+  const threadId = await page.evaluate(async () => (await window.stag!.getSnapshot()).threadId);
+  await page.getByRole("button", { name: "Selecionar pasta do projeto", exact: true }).click();
+  expect(await page.evaluate(async () => (await window.stag!.getSnapshot()).threadId)).toBe(
+    threadId,
+  );
+  await expect(input).toHaveValue("Rascunho independente");
+  await expect(card).toBeVisible();
+  await page.locator(".project-button").click();
+  expect(await page.evaluate(async () => (await window.stag!.getSnapshot()).threadId)).toBe(
+    threadId,
+  );
+  await expect(input).toHaveValue("Rascunho independente");
+  await expect(card).toBeVisible();
+  await page.getByRole("button", { name: "Adicionar texto à fila" }).click();
+  const snapshot = await page.evaluate(() => window.stag!.getSnapshot());
+  expect(snapshot.busy).toBe(true);
+  expect(snapshot.queuedMessages).toHaveLength(1);
+  await expect(page.getByRole("button", { name: "Enviar mensagem" })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await mkdir(".local/screenshots", { recursive: true });
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-waiting-question.png` });
+  await card
+    .getByLabel("Selecione novamente a pasta sintética no STAG Plus. Avise quando terminar.", {
+      exact: true,
+    })
+    .selectOption("Não consigo agora");
+  await card.getByRole("button", { name: "Responder", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.getByText("Resposta recebida. Fluxo concluído.")).toBeVisible();
+  await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
+});
 test("modo Windows exige consentimento e cancelamento preserva modo", async ({ page }) => {
   await ready(page);
   const mode = page.getByLabel("Acesso", { exact: true });

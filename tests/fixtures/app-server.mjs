@@ -917,6 +917,43 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         });
         break;
       }
+      if (input.includes("perguntar pasta")) {
+        if (
+          !thread.dynamicTools.some((tool) => tool.name === "stag_ask_user") &&
+          !input.includes("forçar")
+        ) {
+          response(thread, turn, "Abra uma nova conversa para perguntas bloqueantes.");
+          break;
+        }
+        desktopCall(
+          thread,
+          turn,
+          {
+            questions: [
+              {
+                id: "folder",
+                question:
+                  "Selecione novamente a pasta sintética no STAG Plus. Avise quando terminar.",
+                options: [
+                  { label: "Pasta selecionada novamente", description: "Conferir o Git" },
+                  { label: "Não consigo agora", description: "Informar o impedimento" },
+                ],
+              },
+            ],
+          },
+          (answer) =>
+            response(
+              thread,
+              turn,
+              "Resposta recebida: " +
+                JSON.parse(answer.result.contentItems[0].text).answers.folder.answers[0],
+            ),
+          {},
+          input.includes("duplicado"),
+          "stag_ask_user",
+        );
+        break;
+      }
       if (input.includes("perguntar")) {
         const requestId = ++serverId;
         waiting.set(requestId, () => {
@@ -941,7 +978,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
                 ],
               },
             ],
-            isBlocking: true,
+            isBlocking: !input.includes("assíncrona"),
             autoResolutionMs: null,
           },
         });

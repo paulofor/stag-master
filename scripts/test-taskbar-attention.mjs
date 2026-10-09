@@ -237,6 +237,35 @@ export async function validateTaskbarService(application, page) {
   await expect
     .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
     .toBe(false);
+  await request({ type: "send", text: "perguntar pasta sintética novamente" });
+  await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
+  snapshot = await page.evaluate(() => window.stag.getSnapshot());
+  const threadId = snapshot.threadId;
+  const questionId = snapshot.approvals[0].id;
+  const card = page.getByRole("region", { name: "Solicitação do assistente" });
+  await expect(card).toContainText("Selecione novamente a pasta sintética");
+  await page.getByRole("button", { name: "Selecionar pasta do projeto", exact: true }).click();
+  snapshot = await page.evaluate(() => window.stag.getSnapshot());
+  assert.equal(snapshot.threadId, threadId);
+  assert.equal(snapshot.busy, true);
+  assert.equal(snapshot.approvals[0].id, questionId);
+  await page.locator(".project-button").click();
+  snapshot = await page.evaluate(() => window.stag.getSnapshot());
+  assert.equal(snapshot.threadId, threadId);
+  assert.equal(snapshot.approvals[0].id, questionId);
+  await page.reload();
+  await expect(card).toBeVisible();
+  await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
+  await card
+    .getByLabel("Selecione novamente a pasta sintética no STAG Plus. Avise quando terminar.", {
+      exact: true,
+    })
+    .selectOption("Pasta selecionada novamente");
+  await card.getByRole("button", { name: "Responder", exact: true }).click();
+  await expect.poll(title).toBe("STAG Plus");
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+    .toBe(false);
   for (const accept of [false, true]) {
     await request({ type: "send", text: "aprovar validação sintética do projeto" });
     await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");

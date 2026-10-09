@@ -13,6 +13,24 @@ import {
   engineeringToolDescription,
 } from "../../src/main/engineering-policy";
 import engineeringCorpus from "../fixtures/engineering-scenarios.json";
+import {
+  userInputTool,
+  userInputInstructions,
+  userInputCapability,
+} from "../../src/main/user-input";
+
+it("disponibiliza perguntas bloqueantes em todos os modos sem alterar modelo/esforço ou aprovações", () => {
+  for (const mode of ["project", "read", "windows"] as const) {
+    expect(assistantInstructions(mode, "win32")).toContain(userInputInstructions);
+    expect(turnPolicy(mode, "C:\\synthetic").approvalPolicy).toBe("on-request");
+  }
+  expect(userInputTool.description).toContain("bloqueante");
+  expect(userInputTool.description).toContain(engineeringToolDescription);
+  expect(userInputTool.description).toContain(cyberToolSafetyDescription);
+  expect(userInputCapability(false)).toContain("não está registrada");
+  expect(userInputInstructions).toContain("aguarde o resultado");
+  expect(userInputInstructions).toContain("não concede consentimento");
+});
 
 describe("contrato de engenharia e escopo de negócio", () => {
   it("mantém especialização e limites em todos os modos, plataformas e estados do navegador", () => {

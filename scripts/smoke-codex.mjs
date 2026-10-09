@@ -35,6 +35,7 @@ try {
       "src/main/project-sources.ts",
       "src/main/request-video.ts",
       "src/main/model-traffic.ts",
+      "src/main/user-input.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -65,6 +66,9 @@ try {
   );
   const { modelTrafficArguments } = await import(
     pathToFileURL(join(dir, "model-traffic.mjs")).href
+  );
+  const { userInputTool, userInputInstructions, userInputToolArguments } = await import(
+    pathToFileURL(join(dir, "user-input.mjs")).href
   );
   const binary = resolve(".local/codex/bin", process.platform === "win32" ? "codex.exe" : "codex");
   const { prepareProjectGit, createGitRunner, projectGitInstructions } = await import(
@@ -184,7 +188,7 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [desktopTool, browserTool, httpTool, sqlTool],
+    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");
@@ -226,6 +230,104 @@ try {
     { type: "text", text: "Analise a imagem sintética do sistema." },
     { type: "image", url: imageFixture.dataUrl },
   ]);
+  // Exercise the production question tool in Default mode; a fixture-generated request alone
+  // cannot detect a tool that is unavailable to the model.
+  const questionArgs = {
+    questions: [
+      {
+        id: "folder",
+        question: "Selecione novamente a pasta sintética no STAG Plus. Pode fazer isso agora?",
+        options: [
+          {
+            label: "Pasta selecionada novamente",
+            description: "Conferir o Git antes de continuar",
+          },
+          { label: "Não consigo agora", description: "Informar o impedimento" },
+        ],
+      },
+    ],
+  };
+  let questionReply;
+  let receivedQuestion;
+  let failedQuestion;
+  const questionRequest = (message) => {
+    try {
+      assert.equal(message.method, "item/tool/call");
+      assert.equal(message.params.tool, userInputTool.name);
+      assert.equal(message.params.threadId, started.thread.id);
+      assert.ok(message.params.turnId);
+      assert.deepEqual(
+        userInputToolArguments.parse(message.params.arguments).questions,
+        userInputToolArguments.parse(questionArgs).questions,
+      );
+      questionReply = (value) =>
+        rpc.respond(message.id, {
+          success: true,
+          contentItems: [
+            {
+              type: "inputText",
+              text: JSON.stringify({ answers: { folder: { answers: [value] } } }),
+            },
+          ],
+        });
+      receivedQuestion();
+    } catch (error) {
+      rpc.rejectRequest(message.id, "Pergunta sintética incompatível com o contrato.");
+      failedQuestion(error);
+    }
+  };
+  rpc.on("request", questionRequest);
+  try {
+    for (const value of ["Pasta selecionada novamente", "Não consigo agora"]) {
+      let timer;
+      const waiting = new Promise((resolve, reject) => {
+        receivedQuestion = resolve;
+        failedQuestion = reject;
+        timer = setTimeout(() => reject(new Error("Pergunta bloqueante não chegou.")), 30000);
+      });
+      provider.queueToolCall({ name: userInputTool.name, arguments: questionArgs });
+      let finished = false;
+      const turn = syntheticTurn([{ type: "text", text: "Aguarde a ação manual sintética." }])
+        .then(
+          () => ({ error: null }),
+          (error) => ({ error }),
+        )
+        .finally(() => {
+          finished = true;
+        });
+      try {
+        await waiting;
+        // A round trip after delivery proves the server is live while the turn waits.
+        await rpc.call("thread/loaded/list");
+        assert.equal(finished, false, "O turno deve aguardar a resposta explícita.");
+        assert.ok(JSON.stringify(provider.inputs.at(-1)).includes(userInputTool.name));
+        questionReply(value);
+        const result = await turn;
+        if (result.error) throw result.error;
+        assert.ok(JSON.stringify(provider.inputs.at(-1)).includes(value));
+      } finally {
+        clearTimeout(timer);
+      }
+      const resumedQuestion = await rpc.call("thread/resume", {
+        threadId: started.thread.id,
+        cwd: project,
+        ...threadPolicy("project", project),
+        developerInstructions:
+          assistantInstructions("project", process.platform, false, true, project, sources) +
+          "\n" +
+          projectGitInstructions(gitReport) +
+          "\n" +
+          projectBranchesInstructions,
+      });
+      assert.equal(resumedQuestion.sandbox.type, started.sandbox.type);
+      assert.ok(assistantInstructions("read", process.platform).includes(userInputInstructions));
+    }
+    console.log(
+      "Codex real/provedor loopback: stag_ask_user no modo normal, espera, resposta, impedimento e retomada aprovados.",
+    );
+  } finally {
+    rpc.off("request", questionRequest);
+  }
   const sqlSecret = "synthetic-smoke-sql-password";
   const connections = new DatabaseConnections(join(dir, "sql-connections.json"), {
     available: () => false,
