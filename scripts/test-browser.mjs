@@ -6,6 +6,7 @@ import { validateBrowserCombos } from "./test-browser-combos.mjs";
 import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 import { validateBrowserCertificates } from "./test-browser-certificates.mjs";
 import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
+import { validateBrowserVisibility } from "./test-browser-visibility.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
@@ -187,6 +188,30 @@ async function validateBrowserTabs({
     );
     await page.getByRole("tab", { name: "Sistema do projeto", exact: true }).click();
     await expect(page.getByLabel("Endereço do navegador")).toHaveValue(`${site.url}next`);
+    const mainPageId = await application.evaluate(({ BrowserWindow }) => {
+      const main = BrowserWindow.getAllWindows().find((window) =>
+        window.webContents.getURL().startsWith("stag://app/"),
+      );
+      const view = main.contentView.children.find((view) =>
+        view.webContents?.getURL().endsWith("/next"),
+      );
+      // Simulate a lost native presentation without losing the document or session.
+      view.setVisible(false);
+      return view.webContents.id;
+    });
+    await page.getByRole("button", { name: "Restaurar visualização", exact: true }).click();
+    await expect
+      .poll(() =>
+        application.evaluate(({ BrowserWindow }, id) => {
+          const main = BrowserWindow.getAllWindows().find((window) =>
+            window.webContents.getURL().startsWith("stag://app/"),
+          );
+          return main.contentView.children
+            .find((view) => view.webContents?.id === id)
+            ?.getVisible();
+        }, mainPageId),
+      )
+      .toBe(true);
     await expect
       .poll(() =>
         application.evaluate(
@@ -423,6 +448,7 @@ export async function validateBrowser(application, dir, site, page) {
     );
     await validateBrowserSessions({ application, site, execute, reason, snapshot, dom, target });
     await validateBrowserCertificates({ application, site, execute, snapshot, state, page });
+    await validateBrowserVisibility({ application, site, execute, snapshot, state, dom });
     await validateBrowserTabs({
       application,
       site,

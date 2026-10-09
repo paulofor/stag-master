@@ -14,7 +14,7 @@ export async function startBrowserSite() {
       jsx: "automatic",
     })
   ).outputFiles[0].text;
-  const effects = { submissions: 0, downloads: 0 };
+  const effects = { submissions: 0, downloads: 0, hangs: 0 };
   const server = createServer((request, response) => {
     if (request.url === "/wide") {
       response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -81,7 +81,10 @@ export async function startBrowserSite() {
       response.end("synthetic download");
       return;
     }
-    if (request.url === "/hang") return;
+    if (request.url === "/hang") {
+      effects.hangs++;
+      return;
+    }
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     if (request.url === "/next") {
       response.end(

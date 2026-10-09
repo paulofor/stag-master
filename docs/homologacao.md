@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.45
+# Matriz de homologação da versão 0.4.46
+
+## Recuperação da visualização do navegador — versão 0.4.46
+
+Matriz definida antes dos testes. Relato/imagem: página branca enquanto stag_browser continua, com aviso de timeout na conversa. A inspeção identificou descarte permanente dos limites aceitos quando a janela nativa fica temporariamente menor; o renderer só reenviava limites ao mudar de tamanho. Timeout também não aparecia no estado da aba. Reproduzir essas condições sem acessar sites, sessões ou dados do cliente; não afirmar que a causa no Windows do cliente foi comprovada.
+
+Lacuna concreta do harness: os testes de redimensionamento só verificavam ocultação e restauravam os limites manualmente, sem exigir recuperação após restaurar a janela. Acrescentar a recuperação real, preservação de formulário/sessão, timeout após handshake, falha do renderer e isolamento das abas ao harness Electron existente.
+
+| Área                    | Cenário e aceite                                                                                                                                   | Evidência prevista                                    |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Caminho feliz           | Reduzir/restaurar/ocultar/mostrar durante operações do modelo recupera a página; mesma URL, documento, formulário e sessão                         | Driver de produção e Electron real, páginas loopback  |
+| Validações              | Limites externos inválidos continuam recusados; aba inativa, diálogo e conversa compacta continuam ocultando a página                              | Electron, IPC e Chromium                              |
+| Recuperação             | Timeout aparece na aba; leitura posterior recupera; crash recusa leitura e exige nova navegação; sem repetir envios nem recarregar automaticamente | Relógio controlado após prontidão e falhas sintéticas |
+| Integrações             | Fila, aprovações, revogação, duas abas e reinício preservados; restaurar visualização não navega nem amplia consentimento                          | Harness existente de serviço/Electron                 |
+| Observabilidade e dados | Avisos fixos sem payload/URL secreta; métricas existentes; apenas projetos e credenciais sintéticos                                                | Estado da aba e contadores existentes                 |
+| Interface               | Desktop amplo/compacto e Pixel 7, diálogo, foco e recuperação acessíveis durante execução                                                          | Playwright, screenshots e Electron                    |
+| Entrega                 | check, test:desktop, format:check e diff locais; Windows nativo e instalador nos jobs PR/main                                                      | Workflow versionado, sem deploy web                   |
+
+Linux não comprova a sessão Windows do cliente. Preservar sessões, validação TLS, consentimentos e confirmações; nenhum fallback para automação externa.
+
+Evidência local: regressão falhou com o driver anterior, que zerava os limites e mantinha a página invisível após restaurar a janela; passou com a correção, preservando documento/formulário e pixels renderizados. `npm run check` aprovado com 747 contratos, build, FFmpeg/Whisper reais, Codex isolado/loopback e 146 cenários Chromium/Pixel 7. `xvfb-run -a npm run test:desktop` aprovado com driver, IPC/preload e interface reais, botão de recuperação, duas abas, timeout após handshake HTTP, captura interrompida, crash real, sessões/reinício e fila/aprovações. Formatação, sintaxe JavaScript, screenshots e diff conferidos. Node 22.23.3 instalado somente no workspace; ferramentas de compilação preparadas na sandbox. Nenhum script shell ou driver Windows alterado. O smoke continua declarando a limitação de namespaces bwrap do Linux; Windows nativo/instalador precisam dos jobs do PR/main. Nenhum site ou perfil do cliente foi acessado.
 
 ## Ecos de senha em configurações importadas — versão 0.4.45
 
