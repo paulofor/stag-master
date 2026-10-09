@@ -1,8 +1,18 @@
-# Matriz de homologação da versão 0.4.44
+# Matriz de homologação da versão 0.4.45
 
-## Isolamento da homologação de interface — complemento da versão 0.4.44
+## Ecos de senha em configurações importadas — versão 0.4.45
 
-Durante a validação local das conexões, o Playwright reutilizou o servidor de outro checkout na porta fixa; o encerramento daquela execução interrompeu os testes com conexão recusada. Cada execução passa a escolher uma porta loopback livre, compartilhada apenas com seus workers, iniciar seu próprio servidor com porta estrita e recusar reutilização. Outra falha observada ocorreu ao pausar o relógio no mesmo instante usado para instalá-lo: o relógio já podia ter avançado entre as chamadas. A regressão instala o relógio antes do alvo e exercita explicitamente esse intervalo antes de pausar.
+Na conferência final da entrega 0.4.44, a comparação da senha com o JSON serializado da configuração não detectou a repetição em campos públicos quando a senha continha aspas ou barras. Dois testes sintéticos reproduziram a falha antes da correção. Comparar agora os valores originais antes de qualquer card ou cadastro; credencial escapável que não aparece em campos públicos continua sendo aceita e preservada.
+
+Matriz focal: recusar ecos com aspas/barras, preservar senha válida, não produzir card/cadastro/RPC com segredo, recuperar com arquivo corrigido e manter importação/consulta anteriores. Revalidar parser/store/serviço, typecheck, build, Codex real/loopback, Electron e formatação; Windows e instalador na CI. Nenhuma senha ou conexão do cliente é usada. O ajuste é publicado por PR de correção porque o PR #54 já foi integrado; a versão final avança para 0.4.45.
+
+Validação local da correção: 80 contratos focalizados de importação/store/serviço/empacotamento aprovados; após acrescentar recusa explícita de auth.json e diretórios privados, os 38 testes do parser passaram. Total final: 746 contratos no harness. Typecheck, build, Codex real/loopback e Electron de produção aprovados novamente, incluindo importação e recuperação nativa. Formatação e diff conferidos. Os 144 cenários de interface da entrega anterior permanecem válidos para o layout, que não mudou nesta correção; Windows/DPAPI e pacote 0.4.45 exigem os novos jobs PR/main.
+
+A CI da main 37962699308 identificou corrida no relógio do cenário de mouse após reload: o tempo avançava entre install e pauseAt, deixando o alvo no passado. Avançar um segundo pelo relógio controlado após a interface pronta reproduziu a falha em desktop e Pixel 7, sem sleep ou redução de prazos. Fixar Date antes de pausar e restaurar seu avanço com os timers já pausados remove a dependência da latência entre comandos. Os dois cenários passaram localmente mantendo as asserções de tempo exato, reload, fila, execução e rascunho. O ajuste do harness integra o mesmo PR de correção 0.4.45, sem mudar o movimento do mouse em produção.
+
+## Isolamento da homologação de interface — complemento da versão 0.4.45
+
+Durante a validação local das conexões, o Playwright reutilizou o servidor de outro checkout na porta fixa; o encerramento daquela execução interrompeu os testes com conexão recusada. Cada execução passa a escolher uma porta loopback livre, compartilhada apenas com seus workers, iniciar seu próprio servidor com porta estrita e recusar reutilização. A consolidação utiliza a sincronização definitiva do relógio descrita acima, sem manter duas correções concorrentes.
 
 | Área       | Aceite                                                                                                                | Evidência prevista                                                      |
 | ---------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -11,11 +21,11 @@ Durante a validação local das conexões, o Playwright reutilizou o servidor de
 | Relógio    | Instalação, avanço e pausa não tentam voltar no tempo; reload preserva o prazo do main                                | Cenário existente em Chromium desktop e Pixel 7                         |
 | Integração | Fluxos de conexão, importação, aprovação, recuperação e isolamento permanecem aprovados                               | check, Electron e formatação locais; jobs PR/main e instalador Windows  |
 
-O complemento preserva a implementação de conexões integrada pelo PR #54. Não altera o produto nem os contratos do agente; os dados continuam sintéticos e a execução Windows permanece dependente do job nativo.
+O complemento preserva a implementação de conexões do PR #54 e as correções de credenciais/relógio do PR #56. Acrescenta somente isolamento do harness; os dados continuam sintéticos e a execução Windows permanece dependente do job nativo.
 
-A execução 37962699308 da main também reproduziu a falha `Cannot fast-forward to the past` no cenário mobile do relógio. A correção já havia sido reproduzida e preparada localmente; não se trata de reexecução cega da CI. Os demais jobs dessa execução passaram.
+Rodada local inicial em 2026-10-09: `npm run check` aprovado com 740 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 144 cenários Chromium desktop/Pixel 7. O teste do relógio passou nas duas telas, e o contrato carrega a configuração real em subprocessos isolados. `xvfb-run -a npm run test:desktop` aprovado, incluindo recuperação nativa recusada/aprovada, reinício e reseleção sem perda de conexões. `format:check` e diff aprovados; nenhum script shell alterado. Node 22 somente no workspace, instalação compartilhada verificada. A limitação de namespaces bwrap no Linux permanece explícita; execução nativa Windows e instalador exigem os jobs correspondentes. Nenhum dado do cliente foi usado.
 
-Validação local consolidada em 2026-10-09: `npm run check` aprovado com 740 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 144 cenários Chromium desktop/Pixel 7. O teste do relógio passou nas duas telas, e o contrato carrega a configuração real em subprocessos isolados. `xvfb-run -a npm run test:desktop` aprovado, incluindo recuperação nativa recusada/aprovada, reinício e reseleção sem perda de conexões. `format:check` e diff aprovados; nenhum script shell alterado. Node 22 somente no workspace, instalação compartilhada verificada. A limitação de namespaces bwrap no Linux permanece explícita; execução nativa Windows e instalador exigem os jobs correspondentes. Nenhum dado do cliente foi usado.
+Consolidação com o PR #56: 747 contratos, typecheck, build, Codex real/loopback e Electron aprovados. Os dois cenários desktop/Pixel 7 do relógio foram revalidados com a implementação definitiva, mantendo a porta isolada; os demais 142 cenários da rodada completa não tiveram mudanças relacionadas. Formatação e diff final aprovados. O complemento acrescenta somente o isolamento ao resultado do PR #56.
 
 ## Conexões preservadas e importação pelo assistente — versão 0.4.44
 

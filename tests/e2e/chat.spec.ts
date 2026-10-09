@@ -399,11 +399,14 @@ test("prazo do main sobrevive ao reload e distingue temporizador, fila e movimen
 }) => {
   await ready(page);
   const now = new Date("2026-10-08T12:00:00.000Z");
-  // install starts a running clock: pausing at that same instant can be in the
-  // past by the next IPC. Start before the target and exercise that gap explicitly.
-  await page.clock.install({ time: new Date(now.getTime() - 60000) });
+  await page.clock.install({ time: now });
+  // Reproduce time passing between protocol calls without a wall-clock sleep.
   await page.clock.runFor(1000);
+  // Freeze Date before pausing so protocol latency cannot put the target in the past.
+  await page.clock.setFixedTime(now);
   await page.clock.pauseAt(now);
+  // Restore advancing Date while timers stay paused, including across reloads.
+  await page.clock.setSystemTime(now);
   await installBridge(page, {
     account: { email: "fixture@example.invalid", plan: "teste" },
     project: { path: "C:/Projetos/exemplo", name: "exemplo" },

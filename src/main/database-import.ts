@@ -30,7 +30,7 @@ const localPath = z
             part !== "." &&
             part !== ".." &&
             !/[. ]$/.test(part) &&
-            !/^(?:\.git|\.codex|\.stag|node_modules)$/i.test(part),
+            !/^(?:\.git|\.codex|\.stag|\.ssh|\.aws|node_modules|auth\.json)$/i.test(part),
         ),
   );
 export const databaseImportArguments = z
@@ -322,7 +322,10 @@ function convert(fields: Fields, env: Fields, name?: string) {
     timeoutSeconds: Number(choose(props.get("logintimeout"), get("db_timeout_seconds")) || 15),
   });
   databasePasswordSchema.parse(password);
-  if (password && JSON.stringify(config).includes(password)) throw invalid();
+  const publicValues = Object.values(config).flatMap((value) =>
+    typeof value === "object" ? Object.values(value) : [value],
+  );
+  if (password && publicValues.some((value) => String(value).includes(password))) throw invalid();
   return { config, password };
 }
 export async function inspectDatabaseImport(root: string, raw: DatabaseImportArguments) {

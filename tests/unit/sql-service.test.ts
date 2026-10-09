@@ -179,6 +179,34 @@ it("recusa e arquivo alterado durante aprovação não cadastram; nova tentativa
   await approveImport();
   expect(project().connections).toHaveLength(2);
 });
+it.each(['synthetic"echo', "synthetic\\echo"])(
+  "não publica card ou resultado com eco escapável da senha (%#)",
+  async (secret) => {
+    await writeFile(
+      join(dir, "application.json"),
+      JSON.stringify({
+        spring: {
+          datasource: {
+            url: "jdbc:sqlserver://localhost;databaseName=echo_fixture",
+            username: secret,
+            password: secret,
+          },
+        },
+      }),
+    );
+    await importConnection({ args: { sourcePath: "application.json" } });
+    await done();
+    expect(project().connections).toHaveLength(1);
+    expect(service.snapshot().approvals).toHaveLength(0);
+    for (const value of [
+      JSON.stringify(service.snapshot()),
+      JSON.stringify(calls),
+      await readFile(join(dir, "fixture-state.json"), "utf8"),
+    ])
+      expect(value).not.toContain(JSON.stringify(secret).slice(1, -1));
+    expect(service.snapshot().error).toContain("não suportada");
+  },
+);
 it("falha de gravação preserva conexões e permite nova tentativa; parar não aplica aprovação antiga", async () => {
   await writeFile(join(dir, sourcePath), importText());
   await importConnection();
