@@ -1,4 +1,25 @@
-# Matriz de homologação da versão 0.4.46
+# Matriz de homologação da versão 0.4.47
+
+## Captura do navegador e UnknownVizError — versão 0.4.47
+
+Matriz definida antes dos testes. A imagem do cliente mostra UnknownVizError ao acessar um PDF. O [código do Electron](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc) identifica esse erro na cópia da superfície gráfica; o STAG propagava a mensagem nativa sem recuperação ou estado na aba. Isso não comprova o gatilho na máquina Windows do cliente. Reproduzir falhas de captura com páginas/PDFs sintéticos locais, sem acessar sessões ou documentos do cliente.
+
+Lacuna concreta do harness: cobre captura normal, timeout e crash, mas não superfície temporariamente indisponível, imagem vazia, cancelamento durante recuperação ou captura em segundo plano. Ampliar o driver/harness existente, mantendo a fila e sem repetir navegação, cliques ou envios.
+
+| Área                      | Cenário e aceite                                                                                                            | Evidência prevista                               |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| Caminho feliz             | Captura transitória recupera pixels reais, formulário e sessão, sem recarregar                                              | Electron real e falhas sintéticas                |
+| Limites                   | Tentativas finitas somente para falhas gráficas conhecidas; imagem vazia não é sucesso; erro desconhecido não expõe payload | Contratos e driver                               |
+| Recuperação               | Erro persistente aparece na aba/ferramenta; leitura textual permanece disponível; captura posterior limpa o aviso           | Electron e interface                             |
+| Cancelamento e isolamento | Parar, navegar, trocar sessão ou encerrar impede tentativas/resultados antigos; outra aba não recebe o erro                 | Driver e fila existentes                         |
+| Segurança                 | Nenhum acesso ao desktop, rede alternativa, download ou relaxamento TLS; nenhuma repetição de efeito crítico                | Harness de aprovações, protocolos e certificados |
+| Interface e plataformas   | Oculto, minimizado, diálogo e conversa compacta preservam visibilidade/foco; HTML e PDF sintéticos no Electron              | Linux local; Windows no CI; Chromium/Pixel 7     |
+| Observabilidade           | Mensagem fixa, métricas existentes, sem URL/payload nativo; imagens e perfis exclusivamente sintéticos                      | Estado da aba, serviço e screenshots             |
+| Entrega                   | check, test:desktop, format:check e diff locais; jobs PR/main e instalador conferidos                                       | Workflow versionado, sem deploy web              |
+
+Evidência local: o harness focal falhou com UnknownVizError no driver anterior e passou com recuperação. PDF sintético ficou branco com o filtro anterior e produziu pixels vermelhos/texto com o visualizador corrigido. Captura com área e janela ocultas reproduziu espera sem superfície disponível; agora recusa imediatamente, preserva foco/visibilidade e recupera ao exibir novamente. `npm run check` passou com 777 contratos, build, decoder/ASR reais, Codex isolado/loopback e 146 cenários Chromium/Pixel 7. `xvfb-run -a npm run test:desktop` passou com PDF/captura, filas, aprovações, duas abas, sessão/reinício, TLS, crash e recuperação. Formatação, sintaxe dos scripts JavaScript, diff e capturas de interface conferidos. Node 22.23.3 somente no workspace, instalação compartilhada saudável; nenhum script shell alterado.
+
+Linux não comprova a GPU nem a sessão Windows do cliente. O smoke mantém explícita a limitação de namespaces bwrap para operações nativas de arquivos; Windows nativo, minimização e instalador exigem os jobs do PR/main. Nenhum site, documento, credencial ou perfil do cliente foi acessado.
 
 ## Recuperação da visualização do navegador — versão 0.4.46
 

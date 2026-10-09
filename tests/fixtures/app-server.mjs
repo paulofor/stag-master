@@ -1285,6 +1285,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             call({ action: "snapshot", tab: "system" }, () =>
               call({ action: "snapshot", tab: "documentation" }),
             );
+        } else if (input.includes("captura")) {
+          call({ action: "screenshot" }, null, input.includes("duplicado"));
         } else if (input.includes("sequência")) {
           const operations = [
             {

@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile, appendFile, readdir } from "no
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
+import { browserCaptureError } from "../../src/main/browser-capture";
 import { RpcClient, type RpcMessage } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment, threadPolicy } from "../../src/main/policy";
@@ -3241,6 +3242,29 @@ describe("fluxo local do assistente", () => {
     await complete();
     expect(service.snapshot().metrics.failures).toBe(2);
     await send("navegador duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("falha de captura responde ao agente uma vez, registra falha e permite recuperação", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    const reply = vi.spyOn(rpc, "respond");
+    browser.execute.mockRejectedValueOnce(new Error(browserCaptureError));
+    await send("navegador captura duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(browser.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "screenshot" }),
+    );
+    expect(reply).toHaveBeenCalledWith(expect.anything(), {
+      success: false,
+      contentItems: [{ type: "inputText", text: browserCaptureError }],
+    });
+    expect(service.snapshot().error).toBe(browserCaptureError);
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().approvals).toEqual([]);
+    await send("navegador captura");
     await complete();
     expect(browser.execute).toHaveBeenCalledTimes(2);
     expect(service.snapshot().error).toBeNull();

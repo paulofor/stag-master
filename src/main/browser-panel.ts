@@ -9,6 +9,8 @@ import {
 } from "./browser-tools";
 import { browserDocument } from "./browser-document";
 import { browserLoadError } from "./browser-errors";
+import { browserCaptureError, browserCaptureHidden, captureBrowserPage } from "./browser-capture";
+import { browserPdfResource, pdfSnapshotNote } from "./browser-pdf";
 import {
   browserTabs,
   browserTabLabels,
@@ -39,6 +41,9 @@ class BrowserPage extends EventEmitter {
   private info = blankInfo();
   private loadFailure: string | null = null;
   private timedOut = false;
+  private captureController: AbortController | null = null;
+  private pdfUrl: string | null = null;
+  private mainRequestId: number | null = null;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
   private visible = true;
   private pageId: string | null = null;
@@ -55,6 +60,8 @@ class BrowserPage extends EventEmitter {
     this.window.on("resize", this.restoreBounds);
     this.window.on("restore", this.restoreBounds);
     this.window.on("show", this.restoreBounds);
+    this.window.on("hide", this.cancelCapture);
+    this.window.on("minimize", this.cancelCapture);
   }
   snapshot(): BrowserPageInfo {
     return { ...this.info };
@@ -63,6 +70,7 @@ class BrowserPage extends EventEmitter {
     if (!this.disposed) this.emit("state", this.snapshot());
   }
   reset(profileId = this.profileId): void {
+    this.captureController?.abort();
     this.generation++;
     this.pageId = null;
     if (this.view) {
@@ -82,6 +90,8 @@ class BrowserPage extends EventEmitter {
     this.info = blankInfo();
     this.loadFailure = null;
     this.timedOut = false;
+    this.pdfUrl = null;
+    this.mainRequestId = null;
     const browserSession = session.fromPartition(
       profileId
         ? `persist:stag-project-${profileId}${this.tab === "system" ? "-system" : ""}`
@@ -104,6 +114,13 @@ class BrowserPage extends EventEmitter {
     }
     // Subframes and redirects cannot reach local protocols/files or launch external applications.
     browserSession.webRequest.onBeforeRequest((details, callback) => {
+      if (
+        details.resourceType === "mainFrame" &&
+        details.webContentsId === this.view?.webContents.id
+      ) {
+        this.pdfUrl = null;
+        this.mainRequestId = details.id;
+      }
       let permitted =
         details.url === "about:blank" ||
         (!["mainFrame", "subFrame"].includes(details.resourceType) &&
@@ -118,6 +135,8 @@ class BrowserPage extends EventEmitter {
         const url = new URL(details.url);
         permitted = ["ws:", "wss:"].includes(url.protocol) && !url.username && !url.password;
       }
+      if (!permitted && this.view)
+        permitted = browserPdfResource(details, this.pdfUrl, this.view.webContents.id);
       callback({ cancel: !permitted });
     });
     this.view = new WebContentsView({
@@ -137,6 +156,27 @@ class BrowserPage extends EventEmitter {
     this.view.setBackgroundColor("#ffffff");
     this.window.contentView.addChildView(this.view);
     const contents = this.view.webContents;
+    browserSession.webRequest.onHeadersReceived((details, callback) => {
+      if (
+        contents === this.view.webContents &&
+        details.webContentsId === contents.id &&
+        details.resourceType === "mainFrame" &&
+        details.id === this.mainRequestId
+      ) {
+        const headers = Object.entries(details.responseHeaders || {});
+        const type = headers.find(([name]) => name.toLowerCase() === "content-type")?.[1][0] || "";
+        const disposition =
+          headers.find(([name]) => name.toLowerCase() === "content-disposition")?.[1][0] || "";
+        this.pdfUrl =
+          details.statusCode >= 200 &&
+          details.statusCode < 300 &&
+          /^application\/pdf(?:\s*;|$)/i.test(type.trim()) &&
+          !/^attachment(?:\s*;|$)/i.test(disposition.trim())
+            ? details.url
+            : null;
+      }
+      callback({});
+    });
     contents.setWindowOpenHandler(() => {
       if (contents !== this.view.webContents) return { action: "deny" };
       this.info.error = "Nova janela bloqueada. Abra o endereço nesta barra do navegador.";
@@ -157,6 +197,7 @@ class BrowserPage extends EventEmitter {
     contents.on("will-redirect", guard);
     contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && contents === this.view.webContents) {
+        this.captureController?.abort();
         this.pageId = null;
         if (!inPlace) {
           this.loadFailure = null;
@@ -189,6 +230,7 @@ class BrowserPage extends EventEmitter {
     });
     contents.on("render-process-gone", () => {
       if (contents !== this.view.webContents) return;
+      this.captureController?.abort();
       this.generation++;
       this.pageId = null;
       this.loadFailure =
@@ -204,6 +246,9 @@ class BrowserPage extends EventEmitter {
     this.visible = visible;
     this.restoreBounds();
   }
+  private cancelCapture = (): void => {
+    this.captureController?.abort();
+  };
   private restoreBounds = (): void => {
     if (this.disposed || this.window.isDestroyed() || this.view.webContents.isDestroyed()) return;
     const size = this.window.getContentSize();
@@ -220,6 +265,7 @@ class BrowserPage extends EventEmitter {
         : { x: 0, y: 0, width: Math.min(640, width), height: Math.min(720, height) },
     );
     this.view.setVisible(this.visible && !!this.info.url && bounds.width > 0 && bounds.height > 0);
+    if (!this.view.getVisible()) this.cancelCapture();
     if (this.view.getVisible()) this.view.webContents.invalidate();
   };
   setBounds(bounds: BrowserBounds): void {
@@ -229,6 +275,7 @@ class BrowserPage extends EventEmitter {
     this.restoreBounds();
   }
   cancel(): void {
+    this.captureController?.abort();
     this.generation++;
     this.pageId = null;
     if (!this.view.webContents.isDestroyed()) this.view.webContents.stop();
@@ -355,9 +402,43 @@ class BrowserPage extends EventEmitter {
     } else if (input.action === "snapshot") {
       this.pageId = randomUUID();
       result = await this.document({ action: "snapshot", pageId: this.pageId });
+      if (this.pdfUrl)
+        result = { ...(result as object), documentType: "pdf", note: pdfSnapshotNote };
     } else if (input.action === "screenshot") {
       this.checkReadable();
-      const image = await this.bounded(this.view.webContents.capturePage());
+      if (!this.view.getVisible() || !this.window.isVisible() || this.window.isMinimized()) {
+        this.info.error = browserCaptureHidden;
+        this.publish();
+        throw new Error(browserCaptureHidden);
+      }
+      const controller = new AbortController();
+      this.captureController?.abort();
+      this.captureController = controller;
+      let image: Electron.NativeImage;
+      try {
+        image = await this.bounded(
+          captureBrowserPage(this.view.webContents, controller.signal, () => this.checkReadable()),
+        );
+        if (controller.signal.aborted) throw new Error("Captura cancelada.");
+        if (this.info.error === browserCaptureError || this.info.error === browserCaptureHidden) {
+          this.info.error = null;
+          this.publish();
+        }
+      } catch (error) {
+        if (
+          !controller.signal.aborted &&
+          generation === this.generation &&
+          error instanceof Error &&
+          error.message === browserCaptureError
+        ) {
+          this.info.error = browserCaptureError;
+          this.publish();
+        }
+        throw error;
+      } finally {
+        controller.abort();
+        if (this.captureController === controller) this.captureController = null;
+      }
       if (generation !== this.generation) throw new Error("Captura cancelada.");
       this.checkReadable();
       const size = image.getSize();
@@ -371,7 +452,11 @@ class BrowserPage extends EventEmitter {
           { type: "inputImage", imageUrl: image.toDataURL() },
         ],
       };
-    } else if (input.action === "scroll")
+    } else if (input.action === "scroll" && this.pdfUrl)
+      throw new Error(
+        "Role o PDF manualmente no painel integrado e solicite uma nova captura. O snapshot não extrai o texto do PDF.",
+      );
+    else if (input.action === "scroll")
       result = await this.document({ action: "scroll", delta: input.delta });
     else {
       this.checkPage(input.pageId);
@@ -403,10 +488,13 @@ class BrowserPage extends EventEmitter {
     };
   }
   dispose(): void {
+    this.captureController?.abort();
     this.disposed = true;
     this.window.removeListener("resize", this.restoreBounds);
     this.window.removeListener("restore", this.restoreBounds);
     this.window.removeListener("show", this.restoreBounds);
+    this.window.removeListener("hide", this.cancelCapture);
+    this.window.removeListener("minimize", this.cancelCapture);
     this.generation++;
     if (!this.view.webContents.isDestroyed()) {
       this.view.webContents.session.webRequest.onBeforeRequest((_details, callback) =>
