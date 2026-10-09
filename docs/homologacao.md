@@ -1,4 +1,14 @@
-# Matriz de homologação da versão 0.4.44
+# Matriz de homologação da versão 0.4.45
+
+## Ecos de senha em configurações importadas — versão 0.4.45
+
+Na conferência final da entrega 0.4.44, a comparação da senha com o JSON serializado da configuração não detectou a repetição em campos públicos quando a senha continha aspas ou barras. Dois testes sintéticos reproduziram a falha antes da correção. Comparar agora os valores originais antes de qualquer card ou cadastro; credencial escapável que não aparece em campos públicos continua sendo aceita e preservada.
+
+Matriz focal: recusar ecos com aspas/barras, preservar senha válida, não produzir card/cadastro/RPC com segredo, recuperar com arquivo corrigido e manter importação/consulta anteriores. Revalidar parser/store/serviço, typecheck, build, Codex real/loopback, Electron e formatação; Windows e instalador na CI. Nenhuma senha ou conexão do cliente é usada. O ajuste é publicado por PR de correção porque o PR #54 já foi integrado; a versão final avança para 0.4.45.
+
+Validação local da correção: 80 contratos focalizados de importação/store/serviço/empacotamento aprovados; após acrescentar recusa explícita de auth.json e diretórios privados, os 38 testes do parser passaram. Total final: 746 contratos no harness. Typecheck, build, Codex real/loopback e Electron de produção aprovados novamente, incluindo importação e recuperação nativa. Formatação e diff conferidos. Os 144 cenários de interface da entrega anterior permanecem válidos para o layout, que não mudou nesta correção; Windows/DPAPI e pacote 0.4.45 exigem os novos jobs PR/main.
+
+A CI da main 37962699308 identificou corrida no relógio do cenário de mouse após reload: o tempo avançava entre install e pauseAt, deixando o alvo no passado. Avançar um segundo pelo relógio controlado após a interface pronta reproduziu a falha em desktop e Pixel 7, sem sleep ou redução de prazos. Fixar Date antes de pausar e restaurar seu avanço com os timers já pausados remove a dependência da latência entre comandos. Os dois cenários passaram localmente mantendo as asserções de tempo exato, reload, fila, execução e rascunho. O ajuste do harness integra o mesmo PR de correção 0.4.45, sem mudar o movimento do mouse em produção.
 
 ## Conexões preservadas e importação pelo assistente — versão 0.4.44
 

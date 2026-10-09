@@ -86,6 +86,9 @@ it.each([
   "\\\\host\\file.properties",
   "a/../../file.properties",
   ".codex/auth.json",
+  "auth.json",
+  ".ssh/.env",
+  ".aws/.env",
   ".stag/secrets.json",
   "a/.git/config.properties",
   "file.properties:stream",
@@ -99,6 +102,41 @@ it("não aceita senhas ou configuração bruta nos argumentos", () => {
     false,
   );
 });
+it.each(['synthetic"quoted', "synthetic\\backslash"])(
+  "recusa eco de senha escapável em campos públicos (%#)",
+  async (password) => {
+    await writeFile(
+      join(dir, "application.json"),
+      JSON.stringify({
+        spring: {
+          datasource: {
+            url: "jdbc:sqlserver://localhost;databaseName=stag_fixture",
+            username: password,
+            password,
+          },
+        },
+      }),
+    );
+    await expect(inspectDatabaseImport(dir, { sourcePath: "application.json" })).rejects.toThrow(
+      "não suportada",
+    );
+    await writeFile(
+      join(dir, "application.json"),
+      JSON.stringify({
+        spring: {
+          datasource: {
+            url: "jdbc:sqlserver://localhost;databaseName=stag_fixture",
+            username: "fixture",
+            password,
+          },
+        },
+      }),
+    );
+    expect((await inspectDatabaseImport(dir, { sourcePath: "application.json" })).password).toBe(
+      password,
+    );
+  },
+);
 it.each([
   properties.replace("databaseName=stag_fixture;", ""),
   properties.replace("jdbc:sqlserver", "jdbc:postgresql"),
