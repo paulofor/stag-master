@@ -72,6 +72,8 @@ import {
   type BrowserArguments,
 } from "./browser-tools";
 import type { BrowserDownloadContext } from "./browser-download";
+import { pdfArguments, pdfTool, pdfCapability } from "./pdf-tools";
+import type { PdfReader } from "./pdf-reader";
 
 interface WireItem {
   id: string;
@@ -103,7 +105,7 @@ interface WireThread {
 interface PendingApproval {
   message: RpcMessage;
   execute?: (approved?: boolean) => Promise<ToolResult>;
-  tool?: "desktop" | "browser" | "http" | "sql" | "database";
+  tool?: "desktop" | "browser" | "http" | "sql" | "database" | "pdf";
   confirmation?: () => Promise<string | null>;
   approval?: (reason: string) => { title: string; detail: string };
   safety?: () => string | null;
@@ -143,6 +145,7 @@ interface Options {
   databases?: { connections: DatabaseConnections; test: SqlServerTester; tools?: SqlTools };
   apis?: HttpTools;
   video?: VideoProcessor;
+  pdf?: Pick<PdfReader, "execute" | "cancel">;
   videoAnalysis?: { store: VideoAnalysisStore; processor: BackgroundVideoProcessor };
 }
 const modelSchema = z.object({
@@ -212,6 +215,7 @@ export class AssistantService extends EventEmitter {
   private apiLoginWork: Promise<void> = Promise.resolve();
   private httpWork: Promise<void> = Promise.resolve();
   private sqlWork: Promise<void> = Promise.resolve();
+  private pdfWork: Promise<void> = Promise.resolve();
   private databaseAbort: AbortController | null = null;
   private databaseImportAbort: AbortController | null = null;
   private databaseWork: Promise<void> = Promise.resolve();
@@ -967,6 +971,7 @@ export class AssistantService extends EventEmitter {
           // End authority immediately, then wait for the shared queue before replacing storage.
           this.toolEpoch++;
           this.options.desktop.cancel?.();
+          this.options.pdf?.cancel();
           this.options.apis?.cancel();
           this.options.databases?.tools?.cancel();
           this.databaseImportAbort?.abort();
@@ -1548,6 +1553,7 @@ export class AssistantService extends EventEmitter {
       this.state.queuePaused = true;
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.pdf?.cancel();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
     this.databaseImportAbort?.abort();
@@ -1557,6 +1563,7 @@ export class AssistantService extends EventEmitter {
     this.rpc?.removeAllListeners();
     await this.rpc?.shutdown();
     await this.sqlWork;
+    await this.pdfWork;
     this.pending.clear();
     this.state.approvals = [];
     this.state.busy = false;
@@ -1589,6 +1596,7 @@ export class AssistantService extends EventEmitter {
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
+      this.options.pdf?.cancel();
       this.options.apis?.cancel();
       this.options.databases?.tools?.cancel();
       this.databaseImportAbort?.abort();
@@ -1780,6 +1788,7 @@ export class AssistantService extends EventEmitter {
     this.analysis?.detach();
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.pdf?.cancel();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
     this.databaseImportAbort?.abort();
@@ -1823,6 +1832,7 @@ export class AssistantService extends EventEmitter {
       );
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.pdf?.cancel();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
     this.databaseImportAbort?.abort();
@@ -1916,6 +1926,7 @@ export class AssistantService extends EventEmitter {
       this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
+      this.options.pdf?.cancel();
       this.options.apis?.cancel();
       this.options.databases?.tools?.cancel();
       this.databaseImportAbort?.abort();
@@ -1996,6 +2007,7 @@ export class AssistantService extends EventEmitter {
         serviceName: "stag_desktop",
         dynamicTools: [
           userInputTool,
+          ...(this.options.pdf ? [pdfTool] : []),
           ...(this.state.mode === "windows" ? [desktopTool] : []),
           ...(this.options.browser ? [browserTool] : []),
           ...(this.apisReady ? [httpTool] : []),
@@ -2018,6 +2030,7 @@ export class AssistantService extends EventEmitter {
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
         databaseTool: this.databasesReady,
         userInputTool: true,
+        pdfTool: !!this.options.pdf,
       };
       await this.options.store.save(this.settings);
     }
@@ -2106,6 +2119,9 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          ...pdfCapability(
+            !!this.options.pdf && !!this.settings.threads[this.state.threadId!]?.pdfTool,
+          ),
           stag_browser_downloads: {
             kind: "application",
             value: !this.settings.threads[this.state.threadId!]?.browserDownloads
@@ -2113,7 +2129,7 @@ export class AssistantService extends EventEmitter {
               : this.state.mode === "read"
                 ? "Downloads desativados no modo Leitura: não gravar arquivos."
                 : this.state.browser.authorized
-                  ? "Download de PDF/ZIP disponível por stag_browser com pageId/ref atuais; salva até 100 MiB em stag-downloads no projeto atual. Consulte o arquivo com ferramentas locais após sucesso."
+                  ? "Download de PDF/ZIP disponível por stag_browser com pageId/ref atuais; salva até 100 MiB em stag-downloads no projeto atual. Consulte PDFs com stag_pdf disponível e ZIP com ferramentas locais após sucesso."
                   : "Para baixar PDF/ZIP no projeto, solicite Autorizar navegador; nenhuma ferramenta alternativa amplia este acesso.",
           },
           stag_user_input: {
@@ -2179,6 +2195,7 @@ export class AssistantService extends EventEmitter {
     this.state.queuePaused = true;
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.pdf?.cancel();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
     this.databaseImportAbort?.abort();
@@ -2187,6 +2204,7 @@ export class AssistantService extends EventEmitter {
       if (databaseWork) await databaseWork;
       await apiWork;
       await sqlWork;
+      await this.pdfWork;
       await projectRefreshWork;
       return;
     }
@@ -2206,6 +2224,7 @@ export class AssistantService extends EventEmitter {
       throw error;
     } finally {
       await sqlWork;
+      await this.pdfWork;
       await projectRefreshWork;
     }
   }
@@ -2361,6 +2380,7 @@ export class AssistantService extends EventEmitter {
         if (this.turnId && turn.id !== this.turnId) return;
         this.toolEpoch++;
         this.options.desktop.cancel?.();
+        this.options.pdf?.cancel();
         this.options.apis?.cancel();
         this.options.databases?.tools?.cancel();
         this.databaseImportAbort?.abort();
@@ -2478,6 +2498,10 @@ export class AssistantService extends EventEmitter {
       }
       if (p.tool === "stag_http") {
         await this.httpRequest(message);
+        return;
+      }
+      if (p.tool === "stag_pdf") {
+        await this.pdfRequest(message);
         return;
       }
       const isBrowser = p.tool === "stag_browser";
@@ -2662,20 +2686,22 @@ export class AssistantService extends EventEmitter {
       this.toolEpoch === epoch;
     const ownsTurn = () =>
       ownsRequest() &&
-      (waiting.tool === "database"
-        ? this.databasesReady &&
-          this.state.mode !== "read" &&
-          !!this.settings.threads[ownerThread!]?.databaseTool
-        : waiting.tool === "http"
-          ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
-          : waiting.tool === "sql"
-            ? !!this.state.projectDatabases?.authorized &&
-              this.databaseConsentThread === ownerThread
-            : waiting.tool === "browser"
-              ? this.state.browser.authorized && this.browserConsentThread === ownerThread
-              : this.state.mode === "windows" &&
-                this.windowsConsent &&
-                this.windowsConsentThread === ownerThread);
+      (waiting.tool === "pdf"
+        ? !!this.options.pdf && !!this.settings.threads[ownerThread!]?.pdfTool
+        : waiting.tool === "database"
+          ? this.databasesReady &&
+            this.state.mode !== "read" &&
+            !!this.settings.threads[ownerThread!]?.databaseTool
+          : waiting.tool === "http"
+            ? !!this.state.projectApis?.authorized && this.apiConsentThread === ownerThread
+            : waiting.tool === "sql"
+              ? !!this.state.projectDatabases?.authorized &&
+                this.databaseConsentThread === ownerThread
+              : waiting.tool === "browser"
+                ? this.state.browser.authorized && this.browserConsentThread === ownerThread
+                : this.state.mode === "windows" &&
+                  this.windowsConsent &&
+                  this.windowsConsentThread === ownerThread);
     const noAuthority: ToolResult = {
       success: false,
       contentItems: [
@@ -2713,7 +2739,7 @@ export class AssistantService extends EventEmitter {
             }
             // Recheck after DOM/confirmation inspection and again on the approved path.
             if (!blockUnsafe()) {
-              if (reason) {
+              if (reason && waiting.tool !== "pdf") {
                 const id = String(waiting.message.id);
                 this.pending.set(id, waiting);
                 this.state.approvals.push({
@@ -2760,7 +2786,53 @@ export class AssistantService extends EventEmitter {
     // Desktop, browser, HTTP and SQL share one queue, including approved operations.
     this.toolQueue = execution.catch(() => {});
     if (waiting.tool === "sql" || waiting.tool === "database") this.sqlWork = execution;
+    if (waiting.tool === "pdf") this.pdfWork = execution;
     await execution;
+  }
+  private async pdfRequest(message: RpcMessage): Promise<void> {
+    const p = message.params || {};
+    const project = this.state.project?.path;
+    const parsed = pdfArguments.safeParse(p.arguments);
+    if (
+      !this.options.pdf ||
+      !project ||
+      !this.settings.threads[this.state.threadId!]?.pdfTool ||
+      (p.namespace !== undefined && p.namespace !== null) ||
+      !text(p.turnId) ||
+      !parsed.success
+    ) {
+      this.rpc!.respond(message.id!, {
+        success: false,
+        contentItems: [
+          {
+            type: "inputText",
+            text: !this.settings.threads[this.state.threadId!]?.pdfTool
+              ? "Este histórico não possui stag_pdf. Abra nova conversa para usar o leitor PDF; a política original foi preservada."
+              : "Argumentos de leitura PDF inválidos ou ferramenta indisponível. Informe um PDF relativo ao projeto e uma operação info/read/render válida.",
+          },
+        ],
+      });
+      return;
+    }
+    const id = String(message.id);
+    if (this.toolRequests.has(id)) return;
+    this.toolRequests.add(id);
+    if (!this.turnId) this.turnId = text(p.turnId);
+    const args = parsed.data;
+    await this.executeTool(
+      {
+        message,
+        tool: "pdf",
+        confirmation: async () => null,
+        safety: () => cyberSafetyReason([args.path]),
+        execute: () => {
+          if (this.state.project?.path !== project)
+            throw new Error("O projeto mudou durante a leitura PDF.");
+          return this.options.pdf!.execute(args, project);
+        },
+      },
+      null,
+    );
   }
   private async databaseImportRequest(message: RpcMessage): Promise<void> {
     const p = message.params || {};
@@ -3079,6 +3151,7 @@ export class AssistantService extends EventEmitter {
     this.branchController?.abort();
     this.toolEpoch++;
     this.options.desktop.cancel?.();
+    this.options.pdf?.cancel();
     this.options.apis?.cancel();
     this.options.databases?.tools?.cancel();
     this.databaseImportAbort?.abort();

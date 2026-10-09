@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { build } from "esbuild";
-import { mkdtemp, rm, mkdir, cp, writeFile, readFile, symlink } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, cp, writeFile, readFile, symlink, realpath } from "node:fs/promises";
 import { resolve, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
@@ -9,6 +9,7 @@ import imageFixture from "../tests/fixtures/request-image.json" with { type: "js
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import { startImageProvider } from "../tests/fixtures/image-provider.mjs";
 import { gitFixture, verifySandboxGit } from "../tests/fixtures/project-git.mjs";
+import { syntheticReaderPdf } from "../tests/fixtures/browser-pdf.mjs";
 await mkdir(".local", { recursive: true });
 const dir = await mkdtemp(resolve(".local/codex-smoke-"));
 const project = join(dir, "projeto com espaço-ação");
@@ -37,6 +38,8 @@ try {
       "src/main/request-video.ts",
       "src/main/model-traffic.ts",
       "src/main/user-input.ts",
+      "src/main/pdf-tools.ts",
+      "src/main/pdf-reader.ts",
     ],
     outdir: dir,
     outExtension: { ".js": ".mjs" },
@@ -60,6 +63,10 @@ try {
   const { browserTool, browserArguments, browserTabsInstructions } = await import(
     pathToFileURL(join(dir, "browser-tools.mjs")).href
   );
+  const { pdfTool, pdfCapability, pdfInstructions } = await import(
+    pathToFileURL(join(dir, "pdf-tools.mjs")).href
+  );
+  const { PdfReader } = await import(pathToFileURL(join(dir, "pdf-reader.mjs")).href);
   const { projectSourcesContext } = await import(
     pathToFileURL(join(dir, "project-sources.mjs")).href
   );
@@ -193,7 +200,15 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool, databaseTool],
+    dynamicTools: [
+      userInputTool,
+      desktopTool,
+      browserTool,
+      httpTool,
+      sqlTool,
+      databaseTool,
+      pdfTool,
+    ],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");
@@ -536,6 +551,48 @@ try {
     );
   } finally {
     rpc.off("request", browserRequest);
+  }
+  const pdfRoot = await realpath(project);
+  await writeFile(join(pdfRoot, "documento.pdf"), syntheticReaderPdf());
+  const pdfReader = new PdfReader(resolve("src/main/pdf-worker.mjs"));
+  let pdfCalls = 0;
+  const pdfRequest = async (message) => {
+    if (message.method !== "item/tool/call" || message.params.tool !== "stag_pdf") {
+      rpc.rejectRequest(message.id, "Somente leitor PDF sintético nesta sonda.");
+      return;
+    }
+    pdfCalls++;
+    rpc.respond(message.id, await pdfReader.execute(message.params.arguments, pdfRoot));
+  };
+  rpc.on("request", pdfRequest);
+  try {
+    assert.ok(
+      assistantInstructions("project", process.platform, false, true, project, sources).includes(
+        pdfInstructions,
+      ),
+    );
+    for (const args of [
+      { action: "info", path: "documento.pdf" },
+      { action: "read", path: "documento.pdf", firstPage: 2, pages: 1 },
+      { action: "render", path: "documento.pdf", page: 1 },
+    ]) {
+      provider.queueToolCall({ name: "stag_pdf", arguments: args });
+      await syntheticTurn(
+        [{ type: "text", text: "Consulte o PDF sintético com o leitor do STAG Plus." }],
+        sources,
+        false,
+        pdfCapability(true),
+      );
+    }
+    assert.equal(pdfCalls, 3);
+    assert.ok(JSON.stringify(provider.inputs).includes("REGRA DE REMESSA"));
+    assert.ok(JSON.stringify(provider.inputs.at(-1)).includes("data:image/jpeg;base64,"));
+    console.log(
+      "Codex real/provedor loopback: stag_pdf info/read/render, parser real, páginas e imagem aprovados, sem inferência paga.",
+    );
+  } finally {
+    pdfReader.cancel();
+    rpc.off("request", pdfRequest);
   }
   function verifyTrafficSettings() {
     const traffic = provider.traffic.at(-1);

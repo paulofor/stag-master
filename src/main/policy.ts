@@ -15,6 +15,7 @@ import { sqlInstructions } from "./sql-tools";
 import { databaseImportInstructions } from "./database-import";
 import { modelTrafficConfig, modelTrafficInstructions } from "./model-traffic";
 import { userInputCapability, userInputInstructions } from "./user-input";
+import { pdfInstructions } from "./pdf-tools";
 
 const baseInstructions = `${engineeringInstructions}
 ${modelTrafficInstructions}
@@ -22,6 +23,7 @@ ${userInputInstructions}
 ${apiInstructions}
 ${sqlInstructions}
 ${databaseImportInstructions}
+${pdfInstructions}
 ${videoInstructions}
 ${cyberSafetyInstructions}
 ${browserSessionInstructions}

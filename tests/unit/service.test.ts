@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
 import { browserCaptureError } from "../../src/main/browser-capture";
+import { pdfInstructions } from "../../src/main/pdf-tools";
 import { RpcClient, type RpcMessage } from "../../src/main/rpc";
 import { SettingsStore } from "../../src/main/settings";
 import { codexEnvironment, threadPolicy } from "../../src/main/policy";
@@ -111,7 +112,22 @@ const browser = {
   setVisible: vi.fn(),
   selectTab: vi.fn(),
 };
+const pdf = {
+  execute: vi.fn(async (_args: unknown, _project: string): Promise<ToolResult> => ({
+    success: true,
+    contentItems: [
+      { type: "inputText", text: '{"totalPages":2,"pages":[{"page":1,"text":"REQUISITO 10039"}]}' },
+    ],
+  })),
+  cancel: vi.fn(),
+};
 beforeEach(async () => {
+  pdf.execute.mockResolvedValue({
+    success: true,
+    contentItems: [
+      { type: "inputText", text: '{"totalPages":2,"pages":[{"page":1,"text":"REQUISITO 10039"}]}' },
+    ],
+  });
   optimizeImage.mockImplementation((dataUrl: string) => dataUrl);
   await mkdir(resolve(".local"), { recursive: true });
   dir = await mkdtemp(resolve(".local/service-test-"));
@@ -198,6 +214,7 @@ beforeEach(async () => {
     desktop,
     pulseCursor,
     browser,
+    pdf,
     video,
     videoAnalysis: {
       store: new VideoAnalysisStore(resolve(dir, "video-analysis.json")),
@@ -246,6 +263,119 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+
+describe("leitor PDF na fila da conversa", () => {
+  it.each(["project", "read", "windows"] as const)(
+    "registra leitor e preserva contrato/contexto em %s, start e resume",
+    async (mode) => {
+      await ready();
+      if (mode !== "project")
+        await service.request({
+          type: "preferences",
+          mode,
+          ...(mode === "windows" ? { windowsConsent: true } : {}),
+        });
+      await send("leitor pdf duplicado");
+      await complete();
+      expect(pdf.execute).toHaveBeenCalledOnce();
+      expect(pdf.execute.mock.calls[0][1]).toBe(dir);
+      expect(service.snapshot().approvals).toEqual([]);
+      const calls =
+        await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+      const start = calls.find((call) => call.method === "thread/start")!;
+      expect(start.params.dynamicTools).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "stag_pdf" })]),
+      );
+      expect(start.params.developerInstructions).toContain(pdfInstructions);
+      expect(
+        calls.find((call) => call.method === "turn/start")!.params.additionalContext.stag_pdf.value,
+      ).toContain("disponível");
+      await service.request({ type: "connect" });
+      const resumed =
+        await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+      expect(
+        resumed.find((call) => call.method === "thread/resume")?.params.developerInstructions,
+      ).toContain(pdfInstructions);
+      expect((await store.load()).threads[service.snapshot().threadId!].pdfTool).toBe(true);
+    },
+  );
+  it.each(["inválido", "namespace", "outro thread", "outro turno"])(
+    "recusa pedido %s sem prender a conversa",
+    async (probe) => {
+      await ready();
+      await send(`leitor pdf ${probe}`);
+      await complete();
+      expect(pdf.execute).not.toHaveBeenCalled();
+      await send("leitor pdf");
+      await complete();
+      expect(pdf.execute).toHaveBeenCalledOnce();
+    },
+  );
+  it("recupera de erro sem repetir consulta e mede a falha", async () => {
+    await ready();
+    pdf.execute.mockRejectedValueOnce(new Error("PDF inválido sintético"));
+    await send("leitor pdf");
+    await complete();
+    expect(service.snapshot().error).toContain("PDF inválido");
+    expect(service.snapshot().metrics.failures).toBe(1);
+    await send("leitor pdf");
+    await complete();
+    expect(pdf.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("histórico sem leitor exige nova conversa sem alterar modo ou adicionar tools", async () => {
+    await ready();
+    await send("analise");
+    await complete();
+    const settings = await store.load();
+    settings.threads[service.snapshot().threadId!].pdfTool = false;
+    await store.save(settings);
+    await service.init();
+    await service.request({ type: "resume", threadId: service.snapshot().threadId! });
+    await send("leitor pdf");
+    await complete();
+    expect(pdf.execute).not.toHaveBeenCalled();
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+    expect(
+      calls.filter((call) => call.method === "turn/start").at(-1)!.params.additionalContext.stag_pdf
+        .value,
+    ).toContain("nova conversa");
+    expect(calls.find((call) => call.method === "thread/resume")?.params).not.toHaveProperty(
+      "dynamicTools",
+    );
+    await service.request({ type: "newChat" });
+    await send("leitor pdf");
+    await complete();
+    expect(pdf.execute).toHaveBeenCalledOnce();
+  });
+  it("serializa com navegador, aguarda limpeza ao parar e descarta resultado antigo", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    let release!: (result: ToolResult) => void;
+    pdf.execute.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await send("leitor pdf fila");
+    await vi.waitFor(() => expect(pdf.execute).toHaveBeenCalledOnce());
+    expect(browser.execute).not.toHaveBeenCalled();
+    const response = vi.spyOn(rpc, "respond");
+    const cancellations = pdf.cancel.mock.calls.length;
+    const stop = service.request({ type: "stop" });
+    await vi.waitFor(() => expect(pdf.cancel.mock.calls.length).toBeGreaterThan(cancellations));
+    release({ success: true, contentItems: [{ type: "inputText", text: "SYNTHETIC_OLD_PDF" }] });
+    await stop;
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(response.mock.calls)).not.toContain("SYNTHETIC_OLD_PDF");
+    await send("leitor pdf");
+    await complete();
+    expect(pdf.execute).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("perguntas bloqueantes no modo normal", () => {
   const waitQuestion = async () => {
@@ -3634,11 +3764,13 @@ describe("fluxo local do assistente", () => {
     const starts = calls.filter((call) => call.method === "thread/start");
     expect(starts[0].params?.dynamicTools).toEqual([
       expect.objectContaining({ name: "stag_ask_user" }),
+      expect.objectContaining({ name: "stag_pdf" }),
       expect.objectContaining({ name: "stag_browser" }),
     ]);
     expect(starts[0].params?.developerInstructions).toContain("Autorizar desktop");
     expect(starts[1].params?.dynamicTools).toEqual([
       expect.objectContaining({ name: "stag_ask_user" }),
+      expect.objectContaining({ name: "stag_pdf" }),
       expect.objectContaining({ name: "windows_desktop" }),
       expect.objectContaining({ name: "stag_browser" }),
     ]);
