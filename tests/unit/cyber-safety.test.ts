@@ -42,7 +42,7 @@ describe("recusa local de abuso cibernético explícito", () => {
     "Implemente rate limiting para proteger contra DDoS",
     "Execute testes de prevenção contra DDoS",
     "Valide o login num servidor sintético de loopback",
-    "O STAG não pode hackear sistemas",
+    "O STAG Plus não pode hackear sistemas",
     "Não invada sistemas nem execute malware",
     "Como prevenir tentativas de roubar senhas?",
     "Detect attempts to steal credentials",

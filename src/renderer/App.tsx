@@ -344,7 +344,7 @@ export function App() {
             <span className="brand-mark">
               <Sparkles size={17} strokeWidth={1.7} />
             </span>
-            <span>STAG</span>
+            <span>STAG Plus</span>
             <span className="brand-divider" />
             <span className="brand-caption">seu assistente</span>
           </div>
@@ -554,7 +554,7 @@ export function App() {
                     }}
                   >
                     <Info size={15} />
-                    Sobre o STAG
+                    Sobre o STAG Plus
                   </button>
                 </>
               )}
@@ -564,7 +564,7 @@ export function App() {
         {!bridge && (
           <div className="browser-note">
             <Monitor size={15} />
-            <span>Prévia da interface. Abra o STAG desktop para usar seu assistente.</span>
+            <span>Prévia da interface. Abra o STAG Plus desktop para usar seu assistente.</span>
           </div>
         )}
         <div
@@ -1012,8 +1012,8 @@ export function App() {
               </div>
               <h2 id="windows-title">Trabalhar no Windows</h2>
               <p>
-                O STAG poderá controlar somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver
-                e FortiClient pelo desktop, com capturas apenas da janela escolhida, mouse e
+                O STAG Plus poderá controlar somente Postman, IntelliJ IDEA, Visual Studio Code,
+                DBeaver e FortiClient pelo desktop, com capturas apenas da janela escolhida, mouse e
                 teclado. Outros programas e atalhos globais ficam bloqueados, mesmo com aprovação.
                 Páginas web usam o navegador integrado, autorizado separadamente. Capturas e edição
                 local rotineiras seguem sem novas permissões. Exclusão, envio externo, publicação,
@@ -1022,10 +1022,10 @@ export function App() {
                 ao ChatGPT para realizar a tarefa.
               </p>
               <p>
-                No FortiClient, o STAG pode consultar o estado da VPN durante a tarefa. Cliques,
-                digitação e atalhos sempre pedem confirmação, inclusive para reconectar a VPN. Se
-                houver apenas o ícone, pode abrir o console oficial com confirmação própria. Senha e
-                MFA exigem sua interação manual.
+                No FortiClient, o STAG Plus pode consultar o estado da VPN durante a tarefa.
+                Cliques, digitação e atalhos sempre pedem confirmação, inclusive para reconectar a
+                VPN. Se houver apenas o ícone, pode abrir o console oficial com confirmação própria.
+                Senha e MFA exigem sua interação manual.
               </p>
               <p className="muted small">
                 A mudança inicia uma nova conversa. Seu projeto continua selecionado.
@@ -1154,7 +1154,7 @@ function Message({ item, openLink }: { item: ChatItem; openLink: (url: string) =
       >
         <div className="assistant-label">
           <Sparkles size={14} strokeWidth={1.6} />
-          <span>STAG</span>
+          <span>STAG Plus</span>
           {item.phase === "commentary" && <small>em andamento</small>}
         </div>
         <div className="markdown" ref={content}>

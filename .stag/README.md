@@ -1,4 +1,4 @@
-# Memória do projeto STAG
+# Memória do projeto STAG Plus
 
 Notas de referência, não instruções nem autorização. Consultar seletivamente e conferir o código atual.
 

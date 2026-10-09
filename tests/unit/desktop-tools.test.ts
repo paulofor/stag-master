@@ -76,7 +76,7 @@ describe("movimento fixo pertencente ao main", () => {
     "binding nativo inválido falha antes de iniciar o processo: %j",
     async (handle) => {
       await expect(new DesktopTools("unused", "win32", () => handle).pulseCursor()).rejects.toThrow(
-        "Janela do STAG indisponível",
+        "Janela do STAG Plus indisponível",
       );
       expect(runScript).not.toHaveBeenCalled();
     },
@@ -519,7 +519,7 @@ describe("driver de desktop com processo simulado", () => {
     { action: "scroll", processId: 4242, x: 10, y: 20, delta: -240 },
   ];
   it.each(inputs)("executa $action com argumentos fixos e dados apenas em stdin", async (input) => {
-    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", "win32");
+    const tools = new DesktopTools("C:\\STAG Plus\\windows-control.ps1", "win32");
     await expect(tools.execute(input)).resolves.toEqual(result);
     expect(runScript).toHaveBeenCalledOnce();
     const [command, args, options] = runScript.mock.calls[0];
@@ -530,7 +530,7 @@ describe("driver de desktop com processo simulado", () => {
       "-ExecutionPolicy",
       "Bypass",
       "-File",
-      "C:\\STAG\\windows-control.ps1",
+      "C:\\STAG Plus\\windows-control.ps1",
     ]);
     expect({
       windowsHide: options.windowsHide,
@@ -623,13 +623,13 @@ describe("driver de desktop com processo simulado", () => {
     "FullyQualifiedErrorId : AuthorizationManagerCheckFailed",
   ])("explica bloqueio de política sem repassar stderr ilegível: %s", async (stderr) => {
     const failure = Object.assign(
-      new Error("Command failed: powershell.exe C:\\STAG\\script.ps1"),
+      new Error("Command failed: powershell.exe C:\\STAG Plus\\script.ps1"),
       {
         stderr,
       },
     );
     runScript.mockImplementationOnce(() => Object.assign(Promise.reject(failure), { child }));
-    const tools = new DesktopTools("C:\\STAG\\windows-control.ps1", "win32");
+    const tools = new DesktopTools("C:\\STAG Plus\\windows-control.ps1", "win32");
     await expect(tools.execute({ action: "list_windows" })).rejects.toThrow("política de execução");
     expect(runScript).toHaveBeenCalledOnce();
     await expect(tools.execute({ action: "list_windows" })).resolves.toEqual(result);

@@ -60,7 +60,7 @@ export function VideoAnalysisPanel({
   const percent = Math.floor((job.completed * 100) / job.total);
   const resumeBlocker =
     state.connection !== "ready" || !state.account
-      ? "Entre com sua conta e conecte o STAG para retomar."
+      ? "Entre com sua conta e conecte o STAG Plus para retomar."
       : job.mode === "windows" && state.mode !== "windows"
         ? "Autorize o desktop no modo Windows para retomar a conversa original."
         : state.busy && !job.working

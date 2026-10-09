@@ -147,8 +147,8 @@ export function ApiConnectionsDialog({
         APIs de <strong>{projectName}</strong>.
       </p>
       <p className="sources-hint">
-        O assistente faz requisições usando a conexão escolhida. Senhas e tokens ficam no STAG; as
-        respostas da API são enviadas ao assistente.
+        O assistente faz requisições usando a conexão escolhida. Senhas e tokens ficam no STAG Plus;
+        as respostas da API são enviadas ao assistente.
       </p>
       {!data ? (
         <p role="alert">{error || "Carregando APIs…"}</p>
@@ -370,8 +370,8 @@ export function ApiConnectionsDialog({
                         <code>{`http://127.0.0.1:${Number.isFinite(oauth.callbackPort) ? oauth.callbackPort : "PORTA"}/oauth/callback`}</code>
                       </p>
                       <p className="sources-hint">
-                        Você informa usuário, senha e MFA na página do provedor. O STAG renova a
-                        sessão com o refresh token, quando o provedor permitir. Salve e clique em
+                        Você informa usuário, senha e MFA na página do provedor. O STAG Plus renova
+                        a sessão com o refresh token, quando o provedor permitir. Salve e clique em
                         Entrar com OAuth2.
                       </p>
                     </>
@@ -413,7 +413,7 @@ export function ApiConnectionsDialog({
               )}
               <p className="sources-hint">
                 {data.canRemember
-                  ? "Se marcada, protege as credenciais para este usuário e projeto. Desmarcada: uso somente até encerrar o STAG."
+                  ? "Se marcada, protege as credenciais para este usuário e projeto. Desmarcada: uso somente até encerrar o STAG Plus."
                   : "Armazenamento protegido indisponível. As credenciais ficam somente nesta sessão."}
               </p>
               <details className="database-advanced">

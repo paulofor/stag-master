@@ -1,4 +1,4 @@
-/** Overrides apply only to the Codex process launched by STAG, never the user's config file. */
+/** Overrides apply only to the Codex process launched by STAG Plus, never the user's config file. */
 export const modelTrafficConfig = {
   "analytics.enabled": false,
   "feedback.enabled": false,

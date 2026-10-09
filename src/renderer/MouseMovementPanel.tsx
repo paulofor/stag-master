@@ -43,7 +43,7 @@ export function MouseMovementPanel({
         aria-pressed={enabled}
         aria-describedby="mouse-movement-status"
         disabled={pending || (!enabled && !!prerequisite)}
-        title="Move até 2 pixels e retorna com o cursor sobre STAG (inclusive navegador integrado), Postman, IntelliJ, VS Code ou DBeaver em primeiro plano, sem clicar."
+        title="Move até 2 pixels e retorna com o cursor sobre STAG Plus (inclusive navegador integrado), Postman, IntelliJ, VS Code ou DBeaver em primeiro plano, sem clicar."
         onClick={() =>
           state.threadId &&
           void run({ type: "mouseMovement", threadId: state.threadId, enabled: !enabled })

@@ -75,7 +75,7 @@ describe("Aviso de espera do usuário na barra de tarefas", () => {
     expect(sound.stop).toHaveBeenCalledTimes(2);
     expect(window.flashFrame).toHaveBeenLastCalledWith(false);
     expect(window.setOverlayIcon).toHaveBeenLastCalledWith(null, "");
-    expect(window.setTitle).toHaveBeenLastCalledWith("STAG");
+    expect(window.setTitle).toHaveBeenLastCalledWith("STAG Plus");
     controller.update(state([approval()]));
     expect(sound.play).toHaveBeenCalledTimes(2);
     expect(window.flashFrame).toHaveBeenLastCalledWith(true);

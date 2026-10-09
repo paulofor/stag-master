@@ -24,16 +24,17 @@ describe("contrato de engenharia e escopo de negócio", () => {
           [true, true],
         ]) {
           const instructions = assistantInstructions(mode, platform, authorized, available);
+          expect(instructions).toContain("Você é o STAG Plus, Engenheiro de Sistemas");
           expect(instructions).toContain(engineeringInstructions);
           expect(instructions).toContain(browserSessionInstructions);
           expect(instructions).toContain(browserCertificateInstructions);
           expect(instructions).toContain(browserTabsInstructions);
           expect(instructions).toContain("Mover mouse a cada 5 min");
           expect(instructions).toContain(
-            "janela principal do próprio STAG, inclusive o navegador integrado",
+            "janela principal do próprio STAG Plus, inclusive o navegador integrado",
           );
           expect(instructions).toContain(
-            "isso não concede à ferramenta desktop acesso ao STAG nem autorização de navegação",
+            "isso não concede à ferramenta desktop acesso ao STAG Plus nem autorização de navegação",
           );
           expect(instructions).toContain("não recrie movimentos periódicos por comandos");
           for (const fragment of engineeringCorpus.requiredInstructions)

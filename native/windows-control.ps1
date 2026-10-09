@@ -258,7 +258,7 @@ if ($request.action -eq 'nudge_cursor') {
             $window.ToInt64() -ne $handle -or
             [StagWindow]::WindowProcessId($window) -ne $request.stagHostProcessId) { return $null }
         try { $hostTarget = Get-Process -Id ([int]$request.stagHostProcessId) -ErrorAction Stop }
-        catch { throw 'STAG_DESKTOP_DENIED: Janela do STAG indisponivel.' }
+        catch { throw 'STAG_DESKTOP_DENIED: Janela do STAG Plus indisponivel.' }
         Assert-StagWindow $hostTarget $window
         return $hostTarget
     }

@@ -5,13 +5,13 @@ import { desktopArguments, withoutAssistantWindow, type DesktopTools } from "./d
 const indicatorDocument = `<!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; base-uri 'none'; form-action 'none'">
-<title>STAG · controle Windows</title><style>
+<title>STAG Plus · controle Windows</title><style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;pointer-events:none}
 .border{position:fixed;inset:0;box-sizing:border-box;border:4px solid #3984ff;border-radius:12px;
 box-shadow:inset 0 0 16px 3px #2979ff99,inset 0 0 42px #2979ff33;animation:glow 2s ease-in-out infinite alternate}
 @keyframes glow{to{border-color:#70b1ff;box-shadow:inset 0 0 22px 4px #2979ffbb,inset 0 0 48px #2979ff44}}
 @media(prefers-reduced-motion:reduce){.border{animation:none}}
-</style></head><body><div class="border" role="status" aria-label="STAG controlando o Windows"></div></body></html>`;
+</style></head><body><div class="border" role="status" aria-label="STAG Plus controlando o Windows"></div></body></html>`;
 
 interface Operation {
   controller: AbortController;
@@ -63,7 +63,7 @@ export class DesktopControlIndicator {
           displays.map(async ({ bounds }) => {
             const window = new BrowserWindow({
               ...bounds,
-              title: "STAG · controle Windows",
+              title: "STAG Plus · controle Windows",
               show: false,
               frame: false,
               transparent: true,

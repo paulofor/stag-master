@@ -30,7 +30,7 @@ export function AboutDialog({ close }: { close: () => void }) {
       }}
     >
       <Sparkles className="modal-icon" size={24} />
-      <h2 id="about-title">Sobre o STAG</h2>
+      <h2 id="about-title">Sobre o STAG Plus</h2>
       <p>Versão {version}</p>
       <p>
         Desenvolvido por: <strong>{author}</strong>

@@ -4,7 +4,7 @@ export function browserLoadError(code: unknown): string {
     typeof code === "number" && Number.isInteger(code) && code < 0 && code >= -999 ? code : null;
   switch (number) {
     case -202:
-      return "Certificado HTTPS não confiável (ERR_CERT_AUTHORITY_INVALID, -202). Peça à TI para verificar a cadeia do site e a autoridade certificadora corporativa no Windows, inclusive se houver inspeção HTTPS pela VPN/proxy. Após a correção, feche e reabra o STAG e tente novamente. Autorizar navegador e Lembrar sessões não corrigem certificados.";
+      return "Certificado HTTPS não confiável (ERR_CERT_AUTHORITY_INVALID, -202). Peça à TI para verificar a cadeia do site e a autoridade certificadora corporativa no Windows, inclusive se houver inspeção HTTPS pela VPN/proxy. Após a correção, feche e reabra o STAG Plus e tente novamente. Autorizar navegador e Lembrar sessões não corrigem certificados.";
     case -201:
       return "Certificado HTTPS fora da validade (ERR_CERT_DATE_INVALID, -201). Confira a data e a hora do Windows. Se estiverem corretas, peça à TI para verificar a validade do certificado do site.";
     case -200:

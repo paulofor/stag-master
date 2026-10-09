@@ -114,7 +114,7 @@ describe("indicador Windows durante a operação", () => {
         expect(window.showInactive).toHaveBeenCalledOnce();
         expect(window.bounds).toEqual(native.displays[index].bounds);
         const html = decodeURIComponent(window.loadURL.mock.calls[0][0].split(",")[1]);
-        expect(html).toContain("STAG controlando o Windows");
+        expect(html).toContain("STAG Plus controlando o Windows");
         expect(html).toContain("prefers-reduced-motion");
         expect(html).not.toMatch(/<script|https?:\/\//);
         const event = { preventDefault: vi.fn() };
@@ -233,7 +233,7 @@ describe("indicador Windows durante a operação", () => {
 });
 
 describe("integração de produção com o desktop", () => {
-  it("gesto periódico preserva a janela do STAG e seu foco enquanto mostra o indicador", async () => {
+  it("gesto periódico preserva a janela do STAG Plus e seu foco enquanto mostra o indicador", async () => {
     const host = {
       isDestroyed: () => false,
       isVisible: () => true,

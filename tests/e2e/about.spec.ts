@@ -12,10 +12,12 @@ test("Sobre mostra crédito e versão sem login, contém o foco e pode ser reabe
   page,
 }, info) => {
   const account = page.getByRole("button", { name: "Conta e conexão", exact: true });
+  await expect(page).toHaveTitle("STAG Plus — Seu assistente de programação");
+  await expect(page.locator(".brand")).toContainText("STAG Plus");
   const before = await page.evaluate(async () => window.stag!.getSnapshot());
   await account.click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sobre o STAG Plus", exact: true });
   await expect(dialog).toContainText("Desenvolvido por: Paulo Forestieri");
   await expect(dialog).toContainText(`Versão ${appMetadata.version}`);
   await expect(dialog).toContainText("Economia de dados ativa.");
@@ -31,7 +33,7 @@ test("Sobre mostra crédito e versão sem login, contém o foco e pode ser reabe
   await expect(dialog).toHaveCount(0);
   await expect(account).toBeFocused();
   await account.click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
   await expect(dialog).toBeVisible();
   await mkdir(".local/screenshots", { recursive: true });
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-about.png` });
@@ -60,8 +62,8 @@ test("Sobre preserva conversa, rascunho, aprovação, consentimento e métricas 
   await input.fill("Rascunho\npara a próxima tarefa");
   const before = await page.evaluate(async () => window.stag!.getSnapshot());
   await page.getByRole("button", { name: "Conta e conexão", exact: true }).click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sobre o STAG Plus", exact: true });
   await expect(dialog).toBeVisible();
   await dialog.press("Control+n");
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-about-conversation.png` });

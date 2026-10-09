@@ -131,7 +131,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                 id: crypto.randomUUID(),
                 connectionId: action.connectionId,
                 status: "success",
-                message: "API autenticada. As credenciais permanecem no STAG.",
+                message: "API autenticada. As credenciais permanecem no STAG Plus.",
               };
               state.projectApis!.connections.find(
                 (entry) => entry.id === action.connectionId,

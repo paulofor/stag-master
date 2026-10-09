@@ -63,7 +63,7 @@ export class RpcClient extends EventEmitter {
       ),
     );
     await this.call("initialize", {
-      clientInfo: { name: "stag_desktop", title: "STAG", version },
+      clientInfo: { name: "stag_desktop", title: "STAG Plus", version },
       capabilities: {
         experimentalApi: true,
         optOutNotificationMethods: ["item/reasoning/textDelta"],

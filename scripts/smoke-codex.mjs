@@ -124,7 +124,7 @@ try {
       "-c",
       'model_provider="stag_image_fixture"',
       "-c",
-      'model_providers.stag_image_fixture.name="STAG synthetic images"',
+      'model_providers.stag_image_fixture.name="STAG Plus synthetic images"',
       "-c",
       `model_providers.stag_image_fixture.base_url=${JSON.stringify(provider.url)}`,
       "-c",

@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.40
+# Matriz de homologação da versão 0.4.41
+
+## Renomeação para STAG Plus — versão 0.4.41
+
+Matriz definida antes dos testes. O cliente reservou STAG para uma futura versão mais simples e pediu manter a numeração atual. Renomear interface, janela, Sobre, avisos, instruções do agente, metadados e instalador. Preservar a identidade da aplicação e o perfil anterior, com suas configurações, histórico, conexões e sessões; manter ferramentas, política e marcadores de retomada compatíveis.
+
+Lacuna concreta do harness: Electron sempre forçava userData, ocultando uma possível perda de perfil causada pelo novo productName. O harness existente deve iniciar com o nome novo e appData sintético, conferir o perfil legado resolvido pelo main e depois reiniciar com perfil explícito. Verificar persistência de fontes, bancos, APIs, sessões e vídeo com os testes existentes. O compilador NSIS real deve conferir nome, executável, versão e identidade de atualização.
+
+| Área                    | Cenário e aceite                                                                                                                                                        | Evidência prevista                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Caminho feliz           | STAG Plus no cabeçalho, janela, Sobre, navegador, avisos e instalador; versão segue para 0.4.41                                                                         | Chromium, Electron e NSIS real                                     |
+| Compatibilidade         | userData/sessionData anteriores preservados; perfil explícito respeitado; fontes, histórico, conexões, segredos protegidos, sessões e checkpoint sobrevivem ao reinício | Electron com projetos/perfis/credenciais sintéticos; DPAPI Windows |
+| Integração              | Cliente RPC e instruções anunciam STAG Plus; tools, IPC, protocolo, .stag e marcador de vídeo continuam compatíveis                                                     | Contratos existentes, Codex fixado e retomada de vídeo             |
+| Falhas e recuperação    | Espera/recusa/interrupção/restauração retornam ao título novo; falhas de conexão e consentimentos preservam os contratos atuais                                         | Serviço bidirecional, TaskbarAttention e Electron                  |
+| Observabilidade e dados | Nome público coerente, contadores e permissões existentes preservados; nenhum perfil/conta real usado                                                                   | Snapshots sintéticos e harness existente                           |
+| Interface               | Conversa e navegador acessíveis em desktop amplo, 640×900, 360×600 e Pixel 7; nome maior sem overflow                                                                   | Chromium/Electron e screenshots                                    |
+| Entrega                 | check, test:desktop, format:check e revisão local antes do PR; jobs PR/main e instalador STAG-Plus aprovados                                                            | Workflow versionado, artefato e checksum                           |
+
+Linux comprova Electron e contratos; não comprova instalação, atalhos, DPAPI ou aparência nativa Windows. Essas verificações dependem do job Windows e do artefato correspondente. Não há deploy web. A futura versão simples não é criada nesta alteração.
+
+Evidência local: `npm run check` aprovado com typecheck, 679 contratos, build, decoder/ASR reais, Codex fixado com provedor loopback e 140 cenários Chromium (desktop e Pixel 7). `xvfb-run -a npm run test:desktop` aprovado com nome/versão/título novos, userData/sessionData anteriores e perfil explícito diferente, persistência de fontes/APIs/bancos, sessões HttpOnly e retomada do vídeo após reinício. Revalidação focalizada de RPC/NSIS aprovada: identificação STAG Plus sem mudar o id do cliente, nome do executável/atalho, compilação das boas-vindas com a versão atual e política `--publish never`. Screenshots, formatação, sintaxe JavaScript e diff conferidos. Node 22 instalado somente no workspace; saúde dos executáveis compartilhados preservada. Nenhum script Bash alterado. Namespaces bwrap bloqueados no smoke local foram declarados; execução nativa Windows/DPAPI e instalador continuam obrigatórios no PR/main. Nenhuma conta ou perfil real foi usado.
 
 ## Movimento do mouse visível e verificável — versão 0.4.40
 

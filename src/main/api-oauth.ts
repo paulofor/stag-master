@@ -34,7 +34,7 @@ async function receiveCode(
         res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
         const invalid = () => {
           res.writeHead(400);
-          res.end("Retorno de login inválido. Volte ao STAG.");
+          res.end("Retorno de login inválido. Volte ao STAG Plus.");
         };
         if (
           used ||
@@ -61,7 +61,7 @@ async function receiveCode(
         }
         if (url.searchParams.has("error")) {
           used = true;
-          res.end("Login recusado. Volte ao STAG para tentar novamente.");
+          res.end("Login recusado. Volte ao STAG Plus para tentar novamente.");
           fail(
             "O provedor recusou o login. Confira as permissões e tente novamente pela tela APIs.",
           );
@@ -78,7 +78,7 @@ async function receiveCode(
           return;
         }
         used = true;
-        res.end("Retorno recebido. Volte ao STAG para conferir a conclusão do login.", () =>
+        res.end("Retorno recebido. Volte ao STAG Plus para conferir a conclusão do login.", () =>
           resolve(code),
         );
       });

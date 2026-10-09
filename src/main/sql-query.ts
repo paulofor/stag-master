@@ -10,7 +10,7 @@ export const runSqlQuery: SqlQueryRunner = (config, password, args, signal) => {
   if (signal.aborted) return Promise.reject(new SqlFailure("Operação SQL cancelada."));
   return new Promise((resolve, reject) => {
     const options = sqlServerOptions(config, password);
-    options.options!.appName = "STAG SQL tool";
+    options.options!.appName = "STAG Plus SQL tool";
     options.options!.rowCollectionOnDone = false;
     options.options!.rowCollectionOnRequestCompletion = false;
     const connection = new Connection(options);

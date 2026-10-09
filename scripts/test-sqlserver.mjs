@@ -260,7 +260,7 @@ try {
         waiting =
           (
             await query(
-              "SELECT COUNT(*) FROM sys.dm_exec_requests r JOIN sys.dm_exec_sessions s ON r.session_id=s.session_id WHERE s.program_name=N'STAG SQL tool' AND r.wait_type LIKE N'LCK_%'",
+              "SELECT COUNT(*) FROM sys.dm_exec_requests r JOIN sys.dm_exec_sessions s ON r.session_id=s.session_id WHERE s.program_name=N'STAG Plus SQL tool' AND r.wait_type LIKE N'LCK_%'",
             )
           )[0][0] > 0;
         if (waiting) break;
@@ -281,7 +281,7 @@ try {
     assert.deepEqual(parsed(await execute()).rows, [[1, "synthetic changed"]]);
   }
   const sessions = await query(
-    "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name IN (N'STAG connection test', N'STAG SQL tool')",
+    "SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE program_name IN (N'STAG Plus connection test', N'STAG Plus SQL tool')",
   );
   assert.equal(sessions[0][0], 0, "Probe must close its session before returning");
   console.log(

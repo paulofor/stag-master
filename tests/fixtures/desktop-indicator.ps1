@@ -15,7 +15,7 @@ public static class StagIndicatorFixture {
 }
 '@
 $target = [IntPtr]$TargetHandle
-if ([StagIndicatorFixture]::Title($target) -cne 'STAG synthetic indicator target') {
+if ([StagIndicatorFixture]::Title($target) -cne 'STAG Plus synthetic indicator target') {
     throw 'Synthetic target unavailable; no capture performed.'
 }
 $tokens = $null
@@ -55,7 +55,7 @@ foreach ($point in $points) {
     $at = [StagWindow]::WindowAt(($bounds[0] + $point[0]), ($bounds[1] + $point[1]))
     if ([StagWindow]::GetAncestor($at, 2) -ne $target) { throw 'Indicator blocks coordinate targeting.' }
 }
-if ([StagIndicatorFixture]::Title($target) -cne 'STAG synthetic indicator target') { throw 'Synthetic target changed.' }
+if ([StagIndicatorFixture]::Title($target) -cne 'STAG Plus synthetic indicator target') { throw 'Synthetic target changed.' }
 $bytes = [Convert]::FromBase64String([StagWindow]::Capture($target))
 $stream = [IO.MemoryStream]::new($bytes)
 $image = $null

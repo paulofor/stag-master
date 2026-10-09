@@ -189,7 +189,7 @@ export function BrowserPane({
         </button>
         <input
           aria-label="Endereço do navegador"
-          placeholder="Digite um endereço ou peça ao STAG"
+          placeholder="Digite um endereço ou peça ao STAG Plus"
           value={address}
           disabled={manualDisabled}
           onChange={(event) =>
@@ -273,7 +273,7 @@ export function BrowserPane({
             <p>
               {state.activeTab === "documentation"
                 ? "Abra suas fontes de referência ou autorize o modelo para consultá-las aqui."
-                : "Abra o endereço do sistema do projeto ou peça ao STAG para acessá-lo."}
+                : "Abra o endereço do sistema do projeto ou peça ao STAG Plus para acessá-lo."}
             </p>
             <p className="small">
               Navegação rotineira segue sem interrupções.
@@ -290,7 +290,7 @@ export function BrowserPane({
             : state.title ||
               (state.remember ? "Sessões deste projeto" : "Sessão temporária por conversa")}
         </span>
-        <span>STAG</span>
+        <span>STAG Plus</span>
       </footer>
     </section>
   );

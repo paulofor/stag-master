@@ -56,7 +56,7 @@ export class VideoAnalysisStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw new Error(
-        "Não foi possível ler o progresso dos vídeos. Confira o armazenamento do STAG; nenhum vídeo será retomado automaticamente.",
+        "Não foi possível ler o progresso dos vídeos. Confira o armazenamento do STAG Plus; nenhum vídeo será retomado automaticamente.",
       );
     }
   }
@@ -74,7 +74,7 @@ export class VideoAnalysisStore {
         await rename(`${this.file}.tmp`, this.file);
       } catch {
         throw new Error(
-          "Não foi possível salvar o progresso do vídeo. Confira o armazenamento do STAG antes de retomar.",
+          "Não foi possível salvar o progresso do vídeo. Confira o armazenamento do STAG Plus antes de retomar.",
         );
       }
     });
@@ -191,7 +191,7 @@ export class VideoAnalysisManager {
   async start(job: VideoAnalysisJob): Promise<void> {
     if (!this.initialized)
       throw new Error(
-        "Não foi possível ler o progresso salvo. Corrija o armazenamento e reabra o STAG antes de iniciar uma análise.",
+        "Não foi possível ler o progresso salvo. Corrija o armazenamento e reabra o STAG Plus antes de iniciar uma análise.",
       );
     if (this.active) throw new Error("Pause ou cancele a análise de vídeo atual.");
     const previous = this.jobs.find(
@@ -370,7 +370,7 @@ export class VideoAnalysisManager {
       ) {
         this.errors.set(
           job.id,
-          "Não foi possível limpar os arquivos temporários do vídeo. Feche o STAG e confira o armazenamento temporário.",
+          "Não foi possível limpar os arquivos temporários do vídeo. Feche o STAG Plus e confira o armazenamento temporário.",
         );
         this.hooks.failure(this.errors.get(job.id)!);
       }
