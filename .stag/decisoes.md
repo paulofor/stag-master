@@ -1,5 +1,7 @@
 # Decisões
 
+2026-10-09 — Na homologação de conexões, a porta fixa do Playwright reutilizou um servidor de outro checkout, que encerrou durante os testes. Isolar a porta por execução e compartilhá-la somente com seus workers; não reutilizar servidor existente. Preservar a implementação de conexões do PR #54 e as correções de credenciais/relógio do PR #56; consolidar o isolamento do harness pelo PR #55, sem nova funcionalidade de produto. Fonte: falhas locais, regressão por subprocessos e revisão dos PRs.
+
 2026-10-09 — CI da main 37962699308 revelou corrida entre install e pauseAt no relógio do teste de mouse. Avanço controlado de um segundo após a interface pronta reproduziu a falha nos dois projetos Chromium; fixar Date antes da pausa e restaurar o avanço enquanto pausado tornou os dois cenários determinísticos, incluindo reload. Manter prazos e comportamento de produção; incluir no PR #56 já aberto e conferir novamente os jobs PR/main. Fonte: logs do workflow e reprodução local sintética.
 
 2026-10-09 — Revisão final da importação identificou eco de senha com caracteres escapáveis não detectado pela comparação do JSON serializado. Reproduzido com dois testes sintéticos; comparar valores originais antes de apresentar card/cadastrar e manter credenciais legítimas com aspas/barras. Correção entregue em PR adicional/versão 0.4.45 após o merge de #54; nenhum dado do cliente utilizado. Fonte: teste local de regressão e revisão do parser.

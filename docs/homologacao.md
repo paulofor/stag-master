@@ -10,6 +10,23 @@ Validação local da correção: 80 contratos focalizados de importação/store/
 
 A CI da main 37962699308 identificou corrida no relógio do cenário de mouse após reload: o tempo avançava entre install e pauseAt, deixando o alvo no passado. Avançar um segundo pelo relógio controlado após a interface pronta reproduziu a falha em desktop e Pixel 7, sem sleep ou redução de prazos. Fixar Date antes de pausar e restaurar seu avanço com os timers já pausados remove a dependência da latência entre comandos. Os dois cenários passaram localmente mantendo as asserções de tempo exato, reload, fila, execução e rascunho. O ajuste do harness integra o mesmo PR de correção 0.4.45, sem mudar o movimento do mouse em produção.
 
+## Isolamento da homologação de interface — complemento da versão 0.4.45
+
+Durante a validação local das conexões, o Playwright reutilizou o servidor de outro checkout na porta fixa; o encerramento daquela execução interrompeu os testes com conexão recusada. Cada execução passa a escolher uma porta loopback livre, compartilhada apenas com seus workers, iniciar seu próprio servidor com porta estrita e recusar reutilização. A consolidação utiliza a sincronização definitiva do relógio descrita acima, sem manter duas correções concorrentes.
+
+| Área       | Aceite                                                                                                                | Evidência prevista                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Isolamento | Execuções independentes usam portas distintas; workers mantêm a porta da execução; servidor externo não é reutilizado | Configuração real carregada em processos Node e porta ocupada sintética |
+| Validação  | Porta inválida recusa a inicialização; Vite não muda silenciosamente para outra porta                                 | Contrato do harness e servidor com strictPort                           |
+| Relógio    | Instalação, avanço e pausa não tentam voltar no tempo; reload preserva o prazo do main                                | Cenário existente em Chromium desktop e Pixel 7                         |
+| Integração | Fluxos de conexão, importação, aprovação, recuperação e isolamento permanecem aprovados                               | check, Electron e formatação locais; jobs PR/main e instalador Windows  |
+
+O complemento preserva a implementação de conexões do PR #54 e as correções de credenciais/relógio do PR #56. Acrescenta somente isolamento do harness; os dados continuam sintéticos e a execução Windows permanece dependente do job nativo.
+
+Rodada local inicial em 2026-10-09: `npm run check` aprovado com 740 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 144 cenários Chromium desktop/Pixel 7. O teste do relógio passou nas duas telas, e o contrato carrega a configuração real em subprocessos isolados. `xvfb-run -a npm run test:desktop` aprovado, incluindo recuperação nativa recusada/aprovada, reinício e reseleção sem perda de conexões. `format:check` e diff aprovados; nenhum script shell alterado. Node 22 somente no workspace, instalação compartilhada verificada. A limitação de namespaces bwrap no Linux permanece explícita; execução nativa Windows e instalador exigem os jobs correspondentes. Nenhum dado do cliente foi usado.
+
+Consolidação com o PR #56: 747 contratos, typecheck, build, Codex real/loopback e Electron aprovados. Os dois cenários desktop/Pixel 7 do relógio foram revalidados com a implementação definitiva, mantendo a porta isolada; os demais 142 cenários da rodada completa não tiveram mudanças relacionadas. Formatação e diff final aprovados. O complemento acrescenta somente o isolamento ao resultado do PR #56.
+
 ## Conexões preservadas e importação pelo assistente — versão 0.4.44
 
 Matriz definida antes dos testes. A tela abria em Nova conexão mesmo com cadastros existentes; o armazenamento usa a raiz canônica e não é apagado pela seleção. Mostrar a conexão salva ao abrir, quantidade e pasta do catálogo. Oferecer cópia explícita de cadastros de outra pasta com confirmação e novo vínculo de credenciais, preservando a origem. Não inferir que os dados do cliente foram apagados nem unir projetos automaticamente.

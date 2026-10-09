@@ -4,7 +4,40 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { promisify } from "node:util";
+import { createServer } from "node:net";
 import { createGitRunner, prepareProjectGit } from "../../src/main/project-git";
+
+it("Playwright isola porta por execução e workers herdam a porta sem reutilizar servidor alheio", async () => {
+  const env = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => /^(PATH|SystemRoot|WINDIR|TEMP|TMP)$/i.test(key)),
+  );
+  const code = `const { default: config } = await import(${JSON.stringify(pathToFileURL(resolve("playwright.config.ts")).href)}); console.log(JSON.stringify({ baseURL: config.use.baseURL, server: config.webServer, port: process.env.STAG_E2E_PORT }));`;
+  const load = async (port?: string) => {
+    const result = await promisify(execFile)(
+      process.execPath,
+      ["--experimental-strip-types", "--input-type=module", "-e", code],
+      { env: { ...env, ...(port ? { STAG_E2E_PORT: port } : {}) } },
+    );
+    return JSON.parse(result.stdout);
+  };
+  const first = await load();
+  const occupied = createServer();
+  await new Promise<void>((done, reject) => {
+    occupied.once("error", reject);
+    occupied.listen(Number(first.port), "127.0.0.1", done);
+  });
+  try {
+    const other = await load();
+    expect(other.port).not.toBe(first.port);
+    expect(other.server.reuseExistingServer).toBe(false);
+    expect(other.server.url).toBe(other.baseURL);
+    expect(other.server.command).toContain(`--port ${other.port} --strictPort`);
+    expect((await load(first.port)).baseURL).toBe(first.baseURL);
+    await expect(load("invalid")).rejects.toThrow();
+  } finally {
+    await new Promise<void>((done) => occupied.close(() => done()));
+  }
+});
 
 it("probe envia Git diretamente, distingue propriedade de falha e recupera", async () => {
   await mkdir(resolve(".local"), { recursive: true });
