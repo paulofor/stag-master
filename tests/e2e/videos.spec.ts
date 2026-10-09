@@ -171,7 +171,7 @@ test("retomada explica conexão e autorização Windows, mantendo o modo origina
       new CustomEvent("stag-fixture-snapshot", { detail: { connection: "disconnected" } }),
     ),
   );
-  await expect(panel).toContainText("Entre com sua conta e conecte o STAG");
+  await expect(panel).toContainText("Entre com sua conta e conecte o STAG Plus");
   await expect(panel).not.toContainText("Vídeo em processamento");
 });
 

@@ -304,7 +304,7 @@ describe("movimento periódico do mouse", () => {
     expect(service.snapshot().mouseMovement.moves).toBe(1);
   });
   it.each([
-    ["unverified_target", "use STAG"],
+    ["unverified_target", "use STAG Plus"],
     ["forticlient", "FortiClient não recebe movimento automático"],
     ["buttons_pressed", "botão do mouse pressionado"],
     ["cursor_outside", "cursor fora da janela ativa"],
@@ -2626,11 +2626,13 @@ describe("fluxo local do assistente", () => {
       tab: "system",
       url: "http://localhost:4201/",
       risk: "routine",
-      intent: "Conferir aplicação local no navegador do STAG",
+      intent: "Conferir aplicação local no navegador do STAG Plus",
     });
     expect(desktop.execute).not.toHaveBeenCalled();
     expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
-    expect(service.snapshot().items.at(-1)?.text).toContain("aplicação local conferida no STAG");
+    expect(service.snapshot().items.at(-1)?.text).toContain(
+      "aplicação local conferida no STAG Plus",
+    );
     expect(service.snapshot().approvals).toEqual([]);
     expect(service.snapshot().mode).toBe("windows");
 
@@ -3707,7 +3709,7 @@ describe("fluxo local do assistente", () => {
   );
   it.each([
     "Janela de teste indisponível.",
-    "O Windows bloqueou o script de controle do STAG por uma política de execução.",
+    "O Windows bloqueou o script de controle do STAG Plus por uma política de execução.",
     "Desktop restrito a Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient. O alvo mudou.",
   ])("responde falha do driver e exige nova aprovação na recuperação: %s", async (message) => {
     await ready();

@@ -751,7 +751,7 @@ export class AssistantService extends EventEmitter {
           break;
         case "videoAnalysis": {
           if (!this.analysis)
-            throw new Error("Análise em segundo plano disponível somente no STAG desktop.");
+            throw new Error("Análise em segundo plano disponível somente no STAG Plus desktop.");
           const summary = this.analysis.summary();
           if (!summary || summary.id !== action.id)
             throw new Error("Análise indisponível neste projeto, conversa ou conta.");
@@ -915,7 +915,7 @@ export class AssistantService extends EventEmitter {
         case "browserTab":
         case "browserControl": {
           if (!this.options.browser)
-            throw new Error("Navegador disponível somente no STAG desktop.");
+            throw new Error("Navegador disponível somente no STAG Plus desktop.");
           if (this.state.busy || this.sending || this.state.approvals.length)
             throw new Error("Pare o modelo antes de navegar manualmente.");
           const ownerThread = this.state.threadId;
@@ -1007,7 +1007,9 @@ export class AssistantService extends EventEmitter {
     if (this.state.project?.path !== path)
       throw new ApiFailure("O projeto mudou. Reabra APIs na pasta desejada.");
     if (!this.options.apis || !this.apisReady)
-      throw new ApiFailure("APIs indisponíveis. Reinicie o STAG para carregar a configuração.");
+      throw new ApiFailure(
+        "APIs indisponíveis. Reinicie o STAG Plus para carregar a configuração.",
+      );
     return this.options.apis;
   }
   private async authenticateApi(
@@ -1039,7 +1041,7 @@ export class AssistantService extends EventEmitter {
           id,
           connectionId: action.connectionId,
           status: "success",
-          message: "API autenticada. As credenciais permanecem no STAG.",
+          message: "API autenticada. As credenciais permanecem no STAG Plus.",
         };
       } catch (error) {
         if (
@@ -1068,7 +1070,7 @@ export class AssistantService extends EventEmitter {
       throw new Error("O projeto mudou. Reabra Conexões na pasta desejada.");
     if (!this.options.databases || !this.databasesReady)
       throw new Error(
-        "Conexões indisponíveis. Reinicie o STAG para tentar carregar a configuração.",
+        "Conexões indisponíveis. Reinicie o STAG Plus para tentar carregar a configuração.",
       );
     return this.options.databases;
   }
@@ -1187,7 +1189,7 @@ export class AssistantService extends EventEmitter {
   }
   private async startVideoAnalysis(): Promise<void> {
     if (!this.analysis || !this.options.videoAnalysis || !this.options.video || !this.state.project)
-      throw new Error("Selecione uma pasta no STAG desktop para analisar o vídeo.");
+      throw new Error("Selecione uma pasta no STAG Plus desktop para analisar o vídeo.");
     if (
       this.analysis.working ||
       this.videoPreparation ||
@@ -1232,7 +1234,7 @@ export class AssistantService extends EventEmitter {
       this.settings.threads[this.state.threadId!].backgroundVideo = true;
       await this.options.store.save(this.settings).catch(() => {
         throw new Error(
-          "Não foi possível salvar o progresso do vídeo. Confira o armazenamento do STAG.",
+          "Não foi possível salvar o progresso do vídeo. Confira o armazenamento do STAG Plus.",
         );
       });
       if (controller.signal.aborted) return;
@@ -1261,7 +1263,7 @@ export class AssistantService extends EventEmitter {
         )
           throw error;
         throw new Error(
-          "Não foi possível iniciar a análise do vídeo. Confira a conexão e o armazenamento do STAG.",
+          "Não foi possível iniciar a análise do vídeo. Confira a conexão e o armazenamento do STAG Plus.",
         );
       }
     } finally {
@@ -1658,7 +1660,8 @@ export class AssistantService extends EventEmitter {
   }
   private async browserConsent(allow: boolean): Promise<void> {
     if (!allow) this.databaseAbort?.abort();
-    if (!this.options.browser) throw new Error("Navegador disponível somente no STAG desktop.");
+    if (!this.options.browser)
+      throw new Error("Navegador disponível somente no STAG Plus desktop.");
     if (!allow) {
       this.state.queuePaused = true;
       this.analysis?.detach();
@@ -2266,7 +2269,7 @@ export class AssistantService extends EventEmitter {
               type: "inputText",
               text:
                 isBrowser && browserAccessDenied
-                  ? "stag_browser não autorizado nesta conversa. Peça ao cliente para clicar em Autorizar navegador no painel do STAG e aguarde. Se o painel estiver fechado, indique Mostrar navegador (ícone de globo); históricos sem stag_browser precisam de uma nova conversa. Não abra nem controle Chrome/Edge ou outro navegador por windows_desktop, shell ou automação externa como alternativa."
+                  ? "stag_browser não autorizado nesta conversa. Peça ao cliente para clicar em Autorizar navegador no painel do STAG Plus e aguarde. Se o painel estiver fechado, indique Mostrar navegador (ícone de globo); históricos sem stag_browser precisam de uma nova conversa. Não abra nem controle Chrome/Edge ou outro navegador por windows_desktop, shell ou automação externa como alternativa."
                   : "Ferramenta não autorizada nesta conversa. O desktop requer Autorizar desktop e permite somente Postman, IntelliJ IDEA, Visual Studio Code, DBeaver e FortiClient; não contorne o bloqueio por comandos ou outra automação.",
             },
           ],
@@ -2380,9 +2383,9 @@ export class AssistantService extends EventEmitter {
     } else if (message.method === "mcpServer/elicitation/request") {
       this.rpc.respond(message.id, { action: "decline", content: null });
       this.state.error =
-        "Solicitação de integração externa recusada: essa integração ainda não possui formulário no STAG.";
+        "Solicitação de integração externa recusada: essa integração ainda não possui formulário no STAG Plus.";
     } else {
-      this.rpc.rejectRequest(message.id, "Pedido não suportado pelo STAG.");
+      this.rpc.rejectRequest(message.id, "Pedido não suportado pelo STAG Plus.");
     }
     this.publish();
   }

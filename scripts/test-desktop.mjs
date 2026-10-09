@@ -33,7 +33,8 @@ import {
 await mkdir(".local/screenshots", { recursive: true });
 const dir = await mkdtemp(resolve(".local/desktop-test-"));
 const project = join(dir, "projeto-fixture");
-const data = join(dir, "data");
+const profile = join(dir, "profile");
+let data = join(profile, "STAG");
 let application;
 let site;
 let backgroundSaved;
@@ -69,7 +70,7 @@ try {
   const nestedRepository = join(project, "equipe", "frontend ação");
   await gitTest.init(project);
   await gitTest.init(nestedRepository);
-  await mkdir(data);
+  await mkdir(data, { recursive: true });
   await cp("dist", join(dir, "dist"), { recursive: true });
   await cp("native", join(dir, "native"), { recursive: true });
   await mkdir(join(dir, ".local"), { recursive: true });
@@ -97,11 +98,17 @@ try {
   );
   await writeFile(
     join(dir, "package.json"),
-    JSON.stringify({ name: "stag-desktop-test", type: "module", main: "boot.cjs" }),
+    JSON.stringify({
+      name: "stag-desktop-test",
+      productName: appMetadata.build.productName,
+      version: appMetadata.version,
+      type: "module",
+      main: "boot.cjs",
+    }),
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog,BrowserWindow} = require('electron'); global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('appData', ${JSON.stringify(profile)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -138,6 +145,8 @@ try {
     HOME: gitTest.home,
     USERPROFILE: gitTest.home,
     XDG_CONFIG_HOME: gitTest.env.XDG_CONFIG_HOME,
+    APPDATA: profile,
+    LOCALAPPDATA: profile,
   });
   // Reuse the fixture's isolated persistence so reconnect exercises a surviving thread.
   if (process.platform !== "win32") {
@@ -153,6 +162,25 @@ try {
     console.log(`Electron harness: processo encerrado (código=${code}, sinal=${signal}).`);
   });
   const page = await stagWindow(application);
+  assert.deepEqual(
+    await application.evaluate(({ app, BrowserWindow }) => ({
+      name: app.getName(),
+      version: app.getVersion(),
+      userData: app.getPath("userData"),
+      sessionData: app.getPath("sessionData"),
+      title: BrowserWindow.getAllWindows()
+        .find((window) => window.webContents.getURL().startsWith("stag://app/"))
+        .getTitle(),
+    })),
+    {
+      name: "STAG Plus",
+      version: appMetadata.version,
+      userData: data,
+      sessionData: data,
+      title: "STAG Plus",
+    },
+  );
+  assert.equal(await page.title(), "STAG Plus — Seu assistente de programação");
   const trafficFixture = await validateModelTraffic(application);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -202,8 +230,8 @@ try {
   const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());
   const accountMenu = page.getByRole("button", { name: "Conta e conexão", exact: true });
   await accountMenu.click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
-  const about = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
+  const about = page.getByRole("dialog", { name: "Sobre o STAG Plus", exact: true });
   await expect(about).toContainText("Desenvolvido por: Paulo Forestieri");
   await expect(about).toContainText(`Versão ${appMetadata.version}`);
   const closeAbout = about.getByRole("button", { name: "Fechar", exact: true });
@@ -215,7 +243,7 @@ try {
   await expect(accountMenu).toBeFocused();
   assert.deepEqual(await page.evaluate(async () => window.stag.getSnapshot()), beforeAbout);
   await accountMenu.click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
   await closeAbout.click();
   await expect(about).toHaveCount(0);
   await application.evaluate(({ dialog, shell }, path) => {
@@ -639,7 +667,7 @@ try {
     await page.getByLabel("Mensagem para o assistente").fill(`abrir aplicação local ${site.url}`);
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(
-      page.getByText("Clique em Autorizar navegador no painel do STAG.", { exact: true }),
+      page.getByText("Clique em Autorizar navegador no painel do STAG Plus.", { exact: true }),
     ).toBeVisible();
     assert.equal(
       await page.evaluate(async () => (await window.stag.getSnapshot()).browser.url),
@@ -655,7 +683,7 @@ try {
     await page.getByLabel("Mensagem para o assistente").fill(`abrir aplicação local ${site.url}`);
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(
-      page.getByText("Navegador: aplicação local conferida no STAG.", { exact: true }),
+      page.getByText("Navegador: aplicação local conferida no STAG Plus.", { exact: true }),
     ).toBeVisible();
     await expect(page.getByLabel("Endereço do navegador")).toHaveValue(site.url);
     assert.deepEqual(await application.evaluate(() => global.externalUrls), [
@@ -701,7 +729,7 @@ try {
     const beforeBrowserAbout = await page.evaluate(async () => window.stag.getSnapshot());
     await page.getByLabel("Mensagem para o assistente").fill("Rascunho sintético\npara depois");
     await accountMenu.click();
-    await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
+    await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
     await expect(about).toBeVisible();
     await expect
       .poll(() =>
@@ -1056,12 +1084,27 @@ try {
   assert.deepEqual(errors, []);
   await application.close();
   if (process.platform !== "win32") env.STAG_FIXTURE_VIDEO_MODE = "normal";
+  // An explicit profile supplied by the launcher must remain valid after the rename.
+  const explicitData = join(dir, "explicit-profile");
+  await cp(data, explicitData, { recursive: true });
+  data = explicitData;
+  const bootPath = join(dir, "boot.cjs");
+  await writeFile(
+    bootPath,
+    (await readFile(bootPath, "utf8")).replace(
+      "require('./dist/main/index.cjs');",
+      `app.setPath('userData', ${JSON.stringify(data)}); require('./dist/main/index.cjs');`,
+    ),
+  );
   application = await _electron.launch({
     args: [dir, ...(process.getuid?.() === 0 ? ["--no-sandbox"] : [])],
     env,
     timeout: 30000,
   });
   const restartedPage = await stagWindow(application);
+  assert.equal(await application.evaluate(({ app }) => app.getPath("userData")), data);
+  assert.equal(await application.evaluate(({ app }) => app.getPath("sessionData")), data);
+  assert.equal(await application.evaluate(({ app }) => app.getName()), "STAG Plus");
   await expect
     .poll(() => restartedPage.evaluate(async () => (await window.stag.getSnapshot()).connection))
     .toBe("ready");

@@ -23,7 +23,7 @@ manager.scheduleUpload = async (...upload) => {
 };
 assert.equal(manager.isPublish, false, "CI must not enable implicit release publishing");
 await packager.emitArtifactCreated({
-  file: "STAG-0.1.0-Windows-x64-Setup.exe",
+  file: "STAG-Plus-0.4.41-Windows-x64-Setup.exe",
   arch: Arch.x64,
   packager: null,
   target: null,

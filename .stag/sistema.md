@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-09 — Renomeação 0.4.41: nome público STAG Plus em interface, janela, avisos, contratos, metadados e instalador. Identidade interna/appId/protocolo/tools/.stag e marcador de vídeo preservados; userData anterior explicitamente mantido antes de criar sessões. Fonte: solicitação do cliente, código e validação local desta tarefa: check com 679 contratos/140 cenários, Electron com perfil anterior e explícito, RPC/NSIS, formatação e diff aprovados. Windows nativo/DPAPI e instalador exigem CI; nenhum perfil real usado.
+
 2026-10-08 — Movimento periódico 0.4.40: controle permanece visível no Windows fora do modo autorizado, com requisitos de conexão/conta/projeto/consentimento/conversa. Prazo nextAttemptAt pertence ao main e não é persistido; renderer só apresenta contagem regressiva. Estados fixos distinguem temporizador, fila e gesto; a fila única, cancelamento, alvos e driver privados permanecem preservados. Fonte: relato do cliente e código desta tarefa; check local com 679 contratos/140 cenários de interface e Electron aprovados, sem acesso à sessão do cliente. Windows nativo continua obrigatório no CI.
 
 2026-10-08 — Prontidão no reinício 0.4.39: o primeiro CI Windows revelou navegação recusada após connection=ready, pois o histórico ainda carregava. Agora a conexão permanece connecting até concluir setup/conta/modelos/histórico/retomada. Guarda de ações preservada; regressões locais controlam respostas após handshake e verificam falha/recuperação sem repetir navegação. Fonte: run 37818655934 e testes determinísticos desta tarefa.

@@ -854,7 +854,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           break;
         }
         if (!thread.developerInstructions.includes("O cliente autorizou stag_browser")) {
-          response(thread, turn, "Clique em Autorizar navegador no painel do STAG.");
+          response(thread, turn, "Clique em Autorizar navegador no painel do STAG Plus.");
           break;
         }
         desktopCall(
@@ -865,14 +865,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             url: input.slice("abrir aplicação local ".length),
             tab: "system",
             risk: "routine",
-            intent: "Conferir aplicação local no navegador do STAG",
+            intent: "Conferir aplicação local no navegador do STAG Plus",
           },
           () =>
             desktopCall(
               thread,
               turn,
               { action: "snapshot", tab: "system" },
-              () => response(thread, turn, "Navegador: aplicação local conferida no STAG."),
+              () => response(thread, turn, "Navegador: aplicação local conferida no STAG Plus."),
               {},
               false,
               "stag_browser",

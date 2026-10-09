@@ -5,7 +5,7 @@ import { windowsPowerShellEnvironment } from "./desktop-tools";
 const executeFile = promisify(execFile);
 export const waitingSoundSeconds = 5;
 export const waitingSoundFailure =
-  "Não foi possível tocar o aviso do STAG. O sinal visual permanece disponível.";
+  "Não foi possível tocar o aviso do STAG Plus. O sinal visual permanece disponível.";
 
 /** Fixed, quiet chimes; no recording, external asset or conversation data. */
 export function waitingWave(): Buffer {

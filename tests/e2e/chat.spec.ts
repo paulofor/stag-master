@@ -430,7 +430,7 @@ test("omissão explica onde posicionar o mouse sem perder rascunho ou causar ove
       moves: 0,
       skipped: 2,
       status:
-        "Intervalo omitido · janela não permitida ou não verificada; use STAG, Postman, IntelliJ, VS Code ou DBeaver",
+        "Intervalo omitido · janela não permitida ou não verificada; use STAG Plus, Postman, IntelliJ, VS Code ou DBeaver",
       nextAttemptAt: Date.now() + 300000,
     },
   });
@@ -438,11 +438,11 @@ test("omissão explica onde posicionar o mouse sem perder rascunho ou causar ove
   const input = page.getByLabel("Mensagem para o assistente");
   await input.fill("Rascunho preservado");
   const region = page.getByRole("region", { name: "Movimento periódico do mouse", exact: true });
-  await expect(region.getByRole("status")).toContainText("use STAG");
+  await expect(region.getByRole("status")).toContainText("use STAG Plus");
   await expect(region.getByRole("status")).toContainText("2 intervalo(s) omitido(s)");
   await expect(region.getByRole("button")).toHaveAttribute(
     "title",
-    /STAG \(inclusive navegador integrado\)/,
+    /STAG Plus \(inclusive navegador integrado\)/,
   );
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,

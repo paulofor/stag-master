@@ -24,7 +24,7 @@ export async function validateDesktopIndicator(application, page) {
     const host = BrowserWindow.getAllWindows()[0];
     const target = new BrowserWindow({
       ...screen.getPrimaryDisplay().bounds,
-      title: "STAG synthetic indicator target",
+      title: "STAG Plus synthetic indicator target",
       frame: false,
       show: false,
       enableLargerThanScreen: true,
@@ -32,7 +32,7 @@ export async function validateDesktopIndicator(application, page) {
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
     await target.loadURL(
-      `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>STAG synthetic indicator target</title><style>body{background:#f5f4f1;margin:0}button{position:fixed;left:1px;top:45%;height:42px}input{margin:80px}</style><button onclick="this.textContent=\'Clicado\'">Alvo sintético</button><input aria-label="Texto sintético">')}`,
+      `data:text/html;charset=utf-8,${encodeURIComponent('<!doctype html><title>STAG Plus synthetic indicator target</title><style>body{background:#f5f4f1;margin:0}button{position:fixed;left:1px;top:45%;height:42px}input{margin:80px}</style><button onclick="this.textContent=\'Clicado\'">Alvo sintético</button><input aria-label="Texto sintético">')}`,
     );
     // Keep the synthetic target above the taskbar so all four monitor-edge hit tests
     // refer to fixture content. The later indicator is still on top of this window.
@@ -91,7 +91,7 @@ export async function validateDesktopIndicator(application, page) {
     application.evaluate(
       ({ BrowserWindow }) =>
         BrowserWindow.getAllWindows().filter(
-          (window) => window.getTitle() === "STAG · controle Windows",
+          (window) => window.getTitle() === "STAG Plus · controle Windows",
         ).length,
     );
   const begin = (pulse = false) =>
@@ -133,7 +133,7 @@ export async function validateDesktopIndicator(application, page) {
     const state = await application.evaluate(async ({ BrowserWindow, screen }) => {
       const h = global.desktopIndicatorHarness;
       const windows = BrowserWindow.getAllWindows().filter(
-        (window) => window.getTitle() === "STAG · controle Windows",
+        (window) => window.getTitle() === "STAG Plus · controle Windows",
       );
       const image = await windows[0].webContents.capturePage();
       const bitmap = image.toBitmap();
@@ -174,7 +174,7 @@ export async function validateDesktopIndicator(application, page) {
     );
     assert.ok(state.targetFocused, "A borda não rouba o foco do alvo.");
     if (process.platform === "win32")
-      assert.ok(state.minimized, "A borda funciona com STAG minimizado.");
+      assert.ok(state.minimized, "A borda funciona com STAG Plus minimizado.");
     else assert.equal(state.hostVisible, false, "No Xvfb, o host deve estar realmente oculto.");
     for (const window of state.windows) {
       assert.ok(window.visible && window.top && !window.focusable && !window.enabled);
@@ -225,7 +225,9 @@ export async function validateDesktopIndicator(application, page) {
     }
     const target = application
       .windows()
-      .find((candidate) => candidate.url().includes("STAG%20synthetic%20indicator%20target"));
+      .find((candidate) =>
+        candidate.url().includes(encodeURIComponent("STAG Plus synthetic indicator target")),
+      );
     assert.ok(target);
     await target
       .getByRole("button", { name: "Alvo sintético" })
@@ -247,7 +249,7 @@ export async function validateDesktopIndicator(application, page) {
     await running();
     await application.evaluate(({ BrowserWindow }) => {
       BrowserWindow.getAllWindows()
-        .find((window) => window.getTitle() === "STAG · controle Windows")
+        .find((window) => window.getTitle() === "STAG Plus · controle Windows")
         .webContents.forcefullyCrashRenderer();
     });
     await expect.poll(indicatorWindows).toBe(0);

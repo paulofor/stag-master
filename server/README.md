@@ -1,12 +1,12 @@
-# Servidor de traces do STAG
+# Servidor de traces do STAG Plus
 
-Piloto independente do aplicativo Windows, baseado em Langfuse e OpenTelemetry. Desenvolvido por: **Paulo Forestieri** (integração STAG; Langfuse mantém sua autoria e licença).
+Piloto independente do aplicativo Windows, baseado em Langfuse e OpenTelemetry. Desenvolvido por: **Paulo Forestieri** (integração STAG Plus; Langfuse mantém sua autoria e licença).
 
-Esta pasta prepara o lado servidor. O STAG ainda não exporta traces e nenhuma coleta é ativada por esta entrega. A integração futura precisa de consentimento, filtragem local, identificadores pseudônimos e fila limitada em segundo plano. Não transmitir conversas, argumentos de ferramentas, imagens, raciocínio interno, caminhos de projetos ou credenciais do Codex.
+Esta pasta prepara o lado servidor. O STAG Plus ainda não exporta traces e nenhuma coleta é ativada por esta entrega. A integração futura precisa de consentimento, filtragem local, identificadores pseudônimos e fila limitada em segundo plano. Não transmitir conversas, argumentos de ferramentas, imagens, raciocínio interno, caminhos de projetos ou credenciais do Codex.
 
 ## Componentes e acesso
 
-`STAG (integração futura) → HTTPS/Caddy → Langfuse web → PostgreSQL + ClickHouse + Redis + MinIO + worker`
+`STAG Plus (integração futura) → HTTPS/Caddy → Langfuse web → PostgreSQL + ClickHouse + Redis + MinIO + worker`
 
 `compose.yaml` fixa as imagens upstream por digest (web e worker Langfuse 4.50.0), mantém dados em volumes e limita a rotação dos logs. O worker aguarda o web concluir a inicialização; ambos respondem ao healthcheck em loopback. Somente o web publica uma porta, em `127.0.0.1:3000`. Os bancos, o armazenamento e o worker ficam na rede do Compose. `compose.https.yaml` acrescenta o Caddy construído por `Dockerfile.proxy`, com certificado automático, limite de corpo de 1 MB e portas 80/443. O proxy não habilita log de acesso com payloads.
 
@@ -58,20 +58,20 @@ npm run test:server
 
 O harness precisa de Docker, Node e ShellCheck. Cria um projeto Compose exclusivo, credenciais aleatórias, dois projetos Langfuse e volumes descartáveis. Não lê `server/.env`, configurações do Codex ou contas reais. Valida o Compose de produção e o Caddy real; usa HTTP privado no teste para não emitir certificados públicos. Ao terminar ou falhar, aguarda `down --volumes --remove-orphans`. Recusa namespaces com containers/volumes preexistentes. `STAG_TEST_COMPOSE_PROJECT` permite informar o namespace exclusivo fornecido pela sandbox.
 
-O job **Trace server contracts** usa o mesmo harness no PR e na main. O probe testa a página de login por HTTP; não homologa a experiência móvel do painel de terceiros. O aplicativo STAG mantém sua suíte Chromium/Pixel 7/Electron. Certificado público, backup restaurado e capacidade da VPS exigem homologação no destino escolhido.
+O job **Trace server contracts** usa o mesmo harness no PR e na main. O probe testa a página de login por HTTP; não homologa a experiência móvel do painel de terceiros. O aplicativo STAG Plus mantém sua suíte Chromium/Pixel 7/Electron. Certificado público, backup restaurado e capacidade da VPS exigem homologação no destino escolhido.
 
 ## Homologação definida antes dos testes
 
-| Área                          | Cenário e aceite                                                                                                           | Evidência                                         |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Caminho feliz                 | Inicializar stack, enviar OTLP/HTTP JSON e consultar trace persistido                                                      | Containers Langfuse reais e metadados sintéticos  |
-| Validações                    | Segredos obrigatórios, URL sem credenciais, HTTP somente em loopback, arquivo existente preservado                         | Testes do gerador e Compose real                  |
-| Autenticação e segregação     | Ingestão/consulta sem chave ou com chave inválida recusadas; projeto B não lê trace de A                                   | Duas chaves de projetos descartáveis              |
-| Duplicatas                    | Reenvio do mesmo trace/span não cria observações extras                                                                    | Consulta pela API                                 |
-| Recuperação                   | Falha de conexão observada; reinício preserva dados e aceita novo trace                                                    | Stop/start da stack, volumes do mesmo teste       |
-| Privacidade e observabilidade | Fixture contém somente metadados previstos; nenhuma entrada/saída; logs do harness não expõem payloads ou segredos         | Inspeção do trace persistido, mensagens por etapa |
-| Rede e HTTPS                  | Somente UI em loopback; bancos/worker sem portas publicadas; proxy TLS validado                                            | Compose normalizado e Caddy real                  |
-| Dispositivos                  | API independe de navegador; página de login do dashboard responde; regressões STAG em Chromium compacto/Pixel 7 e Electron | Smoke HTTP e suíte desktop existente              |
-| Dados de teste                | Projeto Compose exclusivo, contas `.invalid`, credenciais aleatórias e volumes descartados inclusive em falha              | Harness sem acesso ao Codex ou a contas reais     |
+| Área                          | Cenário e aceite                                                                                                                | Evidência                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| Caminho feliz                 | Inicializar stack, enviar OTLP/HTTP JSON e consultar trace persistido                                                           | Containers Langfuse reais e metadados sintéticos  |
+| Validações                    | Segredos obrigatórios, URL sem credenciais, HTTP somente em loopback, arquivo existente preservado                              | Testes do gerador e Compose real                  |
+| Autenticação e segregação     | Ingestão/consulta sem chave ou com chave inválida recusadas; projeto B não lê trace de A                                        | Duas chaves de projetos descartáveis              |
+| Duplicatas                    | Reenvio do mesmo trace/span não cria observações extras                                                                         | Consulta pela API                                 |
+| Recuperação                   | Falha de conexão observada; reinício preserva dados e aceita novo trace                                                         | Stop/start da stack, volumes do mesmo teste       |
+| Privacidade e observabilidade | Fixture contém somente metadados previstos; nenhuma entrada/saída; logs do harness não expõem payloads ou segredos              | Inspeção do trace persistido, mensagens por etapa |
+| Rede e HTTPS                  | Somente UI em loopback; bancos/worker sem portas publicadas; proxy TLS validado                                                 | Compose normalizado e Caddy real                  |
+| Dispositivos                  | API independe de navegador; página de login do dashboard responde; regressões STAG Plus em Chromium compacto/Pixel 7 e Electron | Smoke HTTP e suíte desktop existente              |
+| Dados de teste                | Projeto Compose exclusivo, contas `.invalid`, credenciais aleatórias e volumes descartados inclusive em falha                   | Harness sem acesso ao Codex ou a contas reais     |
 
-As fixtures comprovam transporte e configuração. Não comprovam filtragem futura do STAG nem obediência semântica do modelo. Langfuse aceita conteúdo arbitrário autenticado: a política de somente metadados deverá ser aplicada **antes** do envio pelo aplicativo.
+As fixtures comprovam transporte e configuração. Não comprovam filtragem futura do STAG Plus nem obediência semântica do modelo. Langfuse aceita conteúdo arbitrário autenticado: a política de somente metadados deverá ser aplicada **antes** do envio pelo aplicativo.

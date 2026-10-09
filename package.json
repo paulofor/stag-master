@@ -1,7 +1,7 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.40",
-  "description": "Assistente desktop Windows para programação, integrado ao Codex App Server.",
+  "version": "0.4.41",
+  "description": "STAG Plus: assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
   "main": "dist/main/index.cjs",
@@ -40,7 +40,7 @@
   },
   "build": {
     "appId": "io.stag.desktop",
-    "productName": "STAG",
+    "productName": "STAG Plus",
     "copyright": "Desenvolvido por: Paulo Forestieri",
     "directories": {
       "output": "release"
@@ -72,7 +72,7 @@
           ]
         }
       ],
-      "artifactName": "STAG-${version}-Windows-${arch}-Setup.${ext}"
+      "artifactName": "STAG-Plus-${version}-Windows-${arch}-Setup.${ext}"
     },
     "nsis": {
       "include": "build/installer.nsh",

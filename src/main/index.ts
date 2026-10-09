@@ -11,6 +11,7 @@ import {
   shell,
 } from "electron";
 import { mkdir } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { RpcClient } from "./rpc";
@@ -45,7 +46,12 @@ import { build as packageBuild } from "../../package.json";
 protocol.registerSchemesAsPrivileged([
   { scheme: "stag", privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ]);
+// Keep the existing profile (including caller overrides) across the product rename.
 app.setName("STAG");
+const legacyUserData = app.getPath("userData");
+app.setName(packageBuild.productName);
+mkdirSync(legacyUserData, { recursive: true });
+app.setPath("userData", legacyUserData);
 if (process.platform === "win32") app.setAppUserModelId(packageBuild.appId);
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) app.quit();
@@ -82,7 +88,7 @@ async function start(): Promise<void> {
     height: 900,
     minWidth: 360,
     minHeight: 600,
-    title: "STAG",
+    title: packageBuild.productName,
     backgroundColor: "#faf9f6",
     autoHideMenuBar: true,
     show: false,
@@ -316,7 +322,7 @@ async function start(): Promise<void> {
         title: "Movimento periódico do mouse",
         message: "Mover o mouse a cada cinco minutos nesta conversa?",
         detail:
-          "O cursor se desloca até 2 pixels e retorna quando o alvo continua válido, sem cliques, teclas ou troca de foco. Funciona sobre a janela principal do STAG, inclusive o navegador integrado, ou Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano, sem botões do mouse pressionados. O cursor precisa estar sobre essa janela. FortiClient e outros aplicativos são omitidos; o painel informa o motivo. Continua com o STAG minimizado; desligar, parar, desconectar, trocar de conversa ou fechar encerra os movimentos. Não garante impedir suspensão, bloqueio ou expiração de sessões e não altera políticas do Windows.",
+          "O cursor se desloca até 2 pixels e retorna quando o alvo continua válido, sem cliques, teclas ou troca de foco. Funciona sobre a janela principal do STAG Plus, inclusive o navegador integrado, ou Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano, sem botões do mouse pressionados. O cursor precisa estar sobre essa janela. FortiClient e outros aplicativos são omitidos; o painel informa o motivo. Continua com o STAG Plus minimizado; desligar, parar, desconectar, trocar de conversa ou fechar encerra os movimentos. Não garante impedir suspensão, bloqueio ou expiração de sessões e não altera políticas do Windows.",
         buttons: ["Cancelar", "Ativar movimento"],
         defaultId: 0,
         cancelId: 0,
@@ -340,7 +346,7 @@ async function start(): Promise<void> {
         type: "question",
         title: "Autorizar APIs",
         message: "Permitir consultas autenticadas a estas APIs nesta conversa?",
-        detail: `${snapshot.projectApis.connections.map((entry) => `${entry.config.name}: ${entry.config.baseUrl}`).join("\n")}\n\nO STAG usará as credenciais cadastradas, sem entregá-las ao assistente. As respostas das APIs serão enviadas ao ChatGPT. Requisições com efeitos exigem confirmação específica. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra esta autorização.`,
+        detail: `${snapshot.projectApis.connections.map((entry) => `${entry.config.name}: ${entry.config.baseUrl}`).join("\n")}\n\nO STAG Plus usará as credenciais cadastradas, sem entregá-las ao assistente. As respostas das APIs serão enviadas ao ChatGPT. Requisições com efeitos exigem confirmação específica. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra esta autorização.`,
         buttons: ["Cancelar", "Autorizar APIs"],
         defaultId: 0,
         cancelId: 0,
@@ -363,7 +369,7 @@ async function start(): Promise<void> {
         type: "question",
         title: "Autorizar bancos",
         message: "Permitir consultas autenticadas a estes bancos nesta conversa?",
-        detail: `${snapshot.projectDatabases.connections.map((entry) => `${entry.config.name}: ${entry.config.server} / ${entry.config.database}`).join("\n")}\n\nO STAG usará a senha cadastrada, sem entregá-la ao assistente. Os resultados SQL serão enviados ao ChatGPT. Alterações de dados exigem confirmação específica por operação. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra a autorização.`,
+        detail: `${snapshot.projectDatabases.connections.map((entry) => `${entry.config.name}: ${entry.config.server} / ${entry.config.database}`).join("\n")}\n\nO STAG Plus usará a senha cadastrada, sem entregá-la ao assistente. Os resultados SQL serão enviados ao ChatGPT. Alterações de dados exigem confirmação específica por operação. Leitura permite somente consultas rotineiras. Trocar de conversa, desconectar, alterar o cadastro ou revogar encerra a autorização.`,
         buttons: ["Cancelar", "Autorizar bancos"],
         defaultId: 0,
         cancelId: 0,
@@ -383,7 +389,7 @@ async function start(): Promise<void> {
         title: "Reprocessar trecho de vídeo",
         message: "Você conferiu o histórico e quer reprocessar o trecho sem envio confirmado?",
         detail:
-          "O trecho pode já ter chegado ao assistente e produzido anotações. O STAG verificará o histórico novamente e só reenviará se não encontrar uma análise concluída ou em andamento. As notas existentes devem ser preservadas e conferidas para evitar duplicação.",
+          "O trecho pode já ter chegado ao assistente e produzido anotações. O STAG Plus verificará o histórico novamente e só reenviará se não encontrar uma análise concluída ou em andamento. As notas existentes devem ser preservadas e conferidas para evitar duplicação.",
         buttons: ["Cancelar", "Reprocessar trecho"],
         defaultId: 0,
         cancelId: 0,
@@ -406,7 +412,7 @@ async function start(): Promise<void> {
           ? "Lembrar sessões de sites neste projeto?"
           : "Esquecer os logins deste projeto?",
         detail: action.remember
-          ? "Cookies e dados dos sites ficarão neste computador, no perfil do STAG deste projeto, inclusive ao fechar o aplicativo ou abrir outra conversa. Ative antes de fazer login: a página atual será fechada e será preciso entrar novamente. Não há importação de senhas ou de outros navegadores. O modelo continua precisando de autorização por conversa. O site pode expirar o login ou exigir MFA."
+          ? "Cookies e dados dos sites ficarão neste computador, no perfil do STAG Plus deste projeto, inclusive ao fechar o aplicativo ou abrir outra conversa. Ative antes de fazer login: a página atual será fechada e será preciso entrar novamente. Não há importação de senhas ou de outros navegadores. O modelo continua precisando de autorização por conversa. O site pode expirar o login ou exigir MFA."
           : "Os cookies e dados locais dos sites deste projeto serão apagados e a opção de lembrar será desativada. A página será fechada, o acesso do modelo será revogado e os próximos logins serão temporários. Isso não encerra sessões em outros computadores nem altera outros projetos.",
         buttons: ["Cancelar", action.remember ? "Lembrar sessões" : "Esquecer logins"],
         defaultId: 0,
@@ -465,7 +471,7 @@ app
   .whenReady()
   .then(() => (singleInstance ? start() : undefined))
   .catch((error: Error) => {
-    dialog.showErrorBox("Não foi possível iniciar o STAG", error.message);
+    dialog.showErrorBox("Não foi possível iniciar o STAG Plus", error.message);
     app.quit();
   });
 app.on("second-instance", () => {

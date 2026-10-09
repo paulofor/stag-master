@@ -157,8 +157,8 @@ export function DatabaseConnectionsDialog({
         Conexões SQL Server de <strong>{projectName}</strong>.
       </p>
       <p className="sources-hint">
-        O assistente consulta os bancos após sua autorização. A senha fica no STAG; resultados SQL
-        são enviados ao assistente. Alterações de dados pedem confirmação por operação.
+        O assistente consulta os bancos após sua autorização. A senha fica no STAG Plus; resultados
+        SQL são enviados ao assistente. Alterações de dados pedem confirmação por operação.
       </p>
       {!data ? (
         <p role="alert">{error || "Carregando conexões…"}</p>
@@ -354,7 +354,7 @@ export function DatabaseConnectionsDialog({
               <p className="sources-hint">
                 {data.canRememberPassword
                   ? "A senha salva fica protegida pelo sistema para este usuário e projeto. Desmarcar e salvar remove a senha guardada."
-                  : "Armazenamento protegido indisponível. Ao salvar, a senha fica somente nesta sessão do STAG."}
+                  : "Armazenamento protegido indisponível. Ao salvar, a senha fica somente nesta sessão do STAG Plus."}
               </p>
               <details className="database-advanced">
                 <summary>Segurança e opções avançadas</summary>

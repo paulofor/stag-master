@@ -66,7 +66,7 @@ export function createGitRunner(
       child.on("error", (error: NodeJS.ErrnoException) => {
         failure = new GitFailure(
           error.code === "ENOENT"
-            ? "Git não encontrado. Instale o Git for Windows, reabra o STAG e selecione a pasta novamente."
+            ? "Git não encontrado. Instale o Git for Windows, reabra o STAG Plus e selecione a pasta novamente."
             : "Não foi possível iniciar o Git. Verifique a instalação e o acesso do usuário.",
         );
       });
@@ -366,5 +366,5 @@ export function projectGitInstructions(report?: ProjectGitReport): string {
   const result = report
     ? `Na última seleção: ${report.found} repositórios encontrados, ${report.added} raízes cadastradas, ${report.verified} status verificados, ${report.failures} falhas. Busca ${report.incomplete ? "incompleta" : "concluída"}.`
     : "Não há resultado de preparação Git nesta sessão.";
-  return `Preparação Git: ao selecionar uma pasta, o STAG procura .git nela e nas subpastas, cadastra cada raiz exata em safe.directory global do usuário e verifica status. ${result} Isso trata confiança de propriedade, não autenticação remota nem permissões NTFS/GPO. Não peça usuário/senha para resolver dubious ownership, não use safe.directory=* nem amplie confiança para fora do projeto. Se houver falha, consulte o aviso da interface e oriente selecionar a pasta novamente após corrigir a causa; não afirme sucesso sem verificação. Init, retomada e modo Leitura não fazem novo cadastro automático. Preserve a política de acesso e continue tarefas independentes do Git.`;
+  return `Preparação Git: ao selecionar uma pasta, o STAG Plus procura .git nela e nas subpastas, cadastra cada raiz exata em safe.directory global do usuário e verifica status. ${result} Isso trata confiança de propriedade, não autenticação remota nem permissões NTFS/GPO. Não peça usuário/senha para resolver dubious ownership, não use safe.directory=* nem amplie confiança para fora do projeto. Se houver falha, consulte o aviso da interface e oriente selecionar a pasta novamente após corrigir a causa; não afirme sucesso sem verificação. Init, retomada e modo Leitura não fazem novo cadastro automático. Preserve a política de acesso e continue tarefas independentes do Git.`;
 }

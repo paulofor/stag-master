@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { RpcClient } from "../../src/main/rpc";
 import { codexEnvironment } from "../../src/main/policy";
+import { version } from "../../package.json";
 
 const clients: RpcClient[] = [];
 const directories: string[] = [];
@@ -40,6 +41,15 @@ describe("JSONL bidirecional", () => {
     ]);
     expect(models.data).toHaveLength(1);
     expect(account.account).toBeNull();
+    const calls =
+      await rpc.call<{ method?: string; params?: { clientInfo?: unknown } }[]>(
+        "_fixture/readCalls",
+      );
+    expect(calls.find((call) => call.method === "initialize")?.params?.clientInfo).toEqual({
+      name: "stag_desktop",
+      title: "STAG Plus",
+      version,
+    });
   });
   it("encerra chamadas pendentes no exit e permite criar nova conexão", async () => {
     const rpc = await client();

@@ -55,8 +55,8 @@ test("consultar Sobre preserva o rascunho e a imagem pendente sem enviar", async
   await expect(page.locator(".composer img")).toHaveCount(1);
   const before = await page.evaluate(async () => window.stag!.getSnapshot());
   await page.getByRole("button", { name: "Conta e conexão", exact: true }).click();
-  await page.getByRole("button", { name: "Sobre o STAG", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Sobre o STAG", exact: true });
+  await page.getByRole("button", { name: "Sobre o STAG Plus", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Sobre o STAG Plus", exact: true });
   await expect(dialog).toContainText("Desenvolvido por: Paulo Forestieri");
   await dialog.getByRole("button", { name: "Fechar", exact: true }).click();
   await expect(input).toHaveValue("Analise esta tela\nquando eu enviar");

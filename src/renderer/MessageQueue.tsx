@@ -34,7 +34,7 @@ export function MessageQueue({
           ? "Envio não confirmado. Confira o histórico e remova esse item antes de continuar."
           : state.queuePaused
             ? "Os textos aguardam você continuar a fila."
-            : "Um texto por vez, após a tarefa atual. Só nesta conversa, enquanto o STAG estiver aberto."}
+            : "Um texto por vez, após a tarefa atual. Só nesta conversa, enquanto o STAG Plus estiver aberto."}
       </p>
       <ol>
         {state.queuedMessages.map((message, index) => (

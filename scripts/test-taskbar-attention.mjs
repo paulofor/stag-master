@@ -87,7 +87,7 @@ export async function validateTaskbarAttention(application, page) {
     const focusedBefore = host.isFocused();
     const target = new BrowserWindow({
       show: false,
-      title: "STAG synthetic attention",
+      title: "STAG Plus synthetic attention",
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
     let soundPlays = 0;
@@ -186,7 +186,7 @@ export async function validateTaskbarAttention(application, page) {
   assert.deepEqual(result.amber, [6, 119, 217, 255]);
   assert.deepEqual(result.mark, [255, 255, 255, 255]);
   assert.equal(result.title, result.waitingTitle);
-  assert.equal(result.cleared, "STAG");
+  assert.equal(result.cleared, "STAG Plus");
   assert.ok(result.hidden && result.focusedPreserved, "O aviso não mostra a janela nem toma foco.");
   assert.equal(
     result.started.filter((call) => call.method === "flashFrame" && call.value).length,
@@ -226,38 +226,38 @@ export async function validateTaskbarService(application, page) {
   const request = (action) => page.evaluate((action) => window.stag.request(action), action);
   await request({ type: "newChat" });
   await request({ type: "send", text: "perguntar sobre stack do projeto sintético" });
-  await expect.poll(title).toBe("STAG — Aguardando sua resposta");
+  await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
   let snapshot = await page.evaluate(() => window.stag.getSnapshot());
   assert.equal(snapshot.approvals[0].kind, "questions");
   await page.reload();
   await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toBeVisible();
-  await expect.poll(title).toBe("STAG — Aguardando sua resposta");
+  await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
   await request({ type: "answer", id: snapshot.approvals[0].id, answers: { stack: "TypeScript" } });
-  await expect.poll(title).toBe("STAG");
+  await expect.poll(title).toBe("STAG Plus");
   await expect
     .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
     .toBe(false);
   for (const accept of [false, true]) {
     await request({ type: "send", text: "aprovar validação sintética do projeto" });
-    await expect.poll(title).toBe("STAG — Aguardando sua resposta");
+    await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
     snapshot = await page.evaluate(() => window.stag.getSnapshot());
     assert.equal(snapshot.approvals[0].kind, "command");
     await request({ type: "answer", id: snapshot.approvals[0].id, accept });
-    await expect.poll(title).toBe("STAG");
+    await expect.poll(title).toBe("STAG Plus");
     await expect
       .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
       .toBe(false);
   }
   await request({ type: "send", text: "perguntar sobre stack para parar" });
-  await expect.poll(title).toBe("STAG — Aguardando sua resposta");
+  await expect.poll(title).toBe("STAG Plus — Aguardando sua resposta");
   await request({ type: "stop" });
-  await expect.poll(title).toBe("STAG");
+  await expect.poll(title).toBe("STAG Plus");
   // The interruption RPC clears the waiting signal before turn/completed arrives.
   await expect
     .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
     .toBe(false);
   await request({ type: "newChat" });
-  await expect.poll(title).toBe("STAG");
+  await expect.poll(title).toBe("STAG Plus");
   console.log(
     "Espera ponta a ponta: request de pergunta, reload, resposta, aprovação, recusa, parada e conversa nova com fixture bidirecional OK.",
   );

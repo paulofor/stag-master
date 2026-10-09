@@ -545,10 +545,10 @@ Assert-Pulse $true @('cursor:-197,20', 'cursor:-199,20')
 Reset-PulseFixture
 Assert-Pulse $true @('cursor:12,20', 'cursor:10,20')
 
-# The STAG main window has its own exact binding; it is not a signed external app.
+# The STAG Plus main window has its own exact binding; it is not a signed external app.
 # HWNDs and PIDs are different, and the embedded browser has child HWNDs.
-Add-SyntheticProcess 10101 'STAG' 'STAG' 'Synthetic unsigned app'
-Add-SyntheticProcess 10102 'STAG' 'STAG' 'Synthetic unsigned app'
+Add-SyntheticProcess 10101 'STAG Plus' 'STAG Plus' 'Synthetic unsigned app'
+Add-SyntheticProcess 10102 'STAG Plus' 'STAG Plus' 'Synthetic unsigned app'
 $global:StagSignatures[$global:StagProcesses[10101].Path].Status = 'NotSigned'
 [StagWindow]::WindowOwners[11001] = 10101
 [StagWindow]::WindowOwners[11002] = 10101
@@ -580,7 +580,7 @@ Assert-Pulse $false @() $hostBinding
 [StagWindow]::Foreground = [IntPtr]11002
 [StagWindow]::HitWindow = [IntPtr]11002
 Assert-Pulse $false @() $hostBinding
-# The same binding must never allow model-controlled input/capture on STAG.
+# The same binding must never allow model-controlled input/capture on STAG Plus.
 foreach ($operation in @('focus_window', 'screenshot', 'click', 'send_keys', 'type_text', 'scroll')) {
     Assert-Denied (@{ action = $operation; processId = 10101; x = 10; y = 20; keys = '^s'; text = 'synthetic'; delta = -120 } + $hostBinding)
 }

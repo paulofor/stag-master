@@ -1,5 +1,7 @@
 # Decisões
 
+2026-10-09 — Manter a identidade de atualização e o perfil do STAG ao mudar o nome público para STAG Plus; continuar em 0.4.41. Lacuna observada: harness Electron forçava userData, sem detectar perda de perfil pela renomeação. Ampliar o mesmo harness com appData sintético, resolução do perfil anterior, reinício explícito e persistência existente; conferir nome/executável/versão com o builder NSIS real. Marcadores antigos de análise continuam válidos para evitar repetição de trechos. Fonte: pedido atual, inspeção local e matriz 0.4.41.
+
 2026-10-08 — CI do PR #50 revelou relógio de UI instalado, mas não pausado, no teste do mouse após reload. Atrasar a carga reproduziu o erro local; pauseAt corrigiu sem mudar o produto, intervalo ou prazos. Conferir Date.now exato no teste e revalidar os cenários afetados antes de atualizar o PR. Windows já comprovou gesto/retorno do driver em janela e navegador sintéticos, sem acessar o cliente. Fonte: logs da CI 37826852429 e reprodução local.
 
 2026-10-08 — Cliente relatou desaparecimento do movimento do mouse. Código e harness ocultavam o botão antes da autorização e depois da revogação; a desabilitação antes da primeira mensagem não era explicada. Tornar o controle visível no Windows, explicar os requisitos e apresentar prazo/fila/gesto/resultados, mantendo a ativação explícita e o contrato da conversa. Corrigir expectativas do harness e conferir recuperação/isolamento sem ampliar aplicativos ou políticas. Fonte: pedido atual e inspeção do código; matriz 0.4.40 definida antes dos testes.

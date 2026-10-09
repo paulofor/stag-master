@@ -22,8 +22,8 @@ export function sqlServerOptions(
       requestTimeout: config.timeoutSeconds * 1000,
       maxRetriesOnTransientErrors: 0,
       fallbackToDefaultDb: false,
-      appName: "STAG connection test",
-      workstationId: "STAG",
+      appName: "STAG Plus connection test",
+      workstationId: "STAG Plus",
     },
   };
 }

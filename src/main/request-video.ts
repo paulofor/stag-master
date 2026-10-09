@@ -553,7 +553,7 @@ export async function prepareVideo(
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {
       throw new Error(
-        "Não foi possível limpar os arquivos temporários do vídeo. Feche o STAG e confira o armazenamento temporário.",
+        "Não foi possível limpar os arquivos temporários do vídeo. Feche o STAG Plus e confira o armazenamento temporário.",
       );
     });
   }
