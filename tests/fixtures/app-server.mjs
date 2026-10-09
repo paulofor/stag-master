@@ -1268,7 +1268,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             duplicate,
             "stag_browser",
           );
-        if (input.includes("abas")) {
+        if (input.includes("download")) {
+          call(
+            {
+              action: "download",
+              tab: "documentation",
+              pageId: "fixture-page",
+              ref: "e1",
+              risk: input.includes("crítico") ? "critical" : "routine",
+              intent: "Consultar PDF sintético no projeto",
+            },
+            null,
+            input.includes("duplicado"),
+          );
+        } else if (input.includes("abas")) {
           if (input.includes("crítico"))
             call(
               {

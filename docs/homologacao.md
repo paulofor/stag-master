@@ -1,4 +1,23 @@
-# Matriz de homologação da versão 0.4.47
+# Matriz de homologação da versão 0.4.48
+
+## Downloads de PDF e ZIP no projeto — versão 0.4.48
+
+Matriz definida antes dos testes. Lacuna observada: o navegador bloqueia todo download e o harness só verifica a recusa, impedindo a análise local solicitada. Acrescentar `download` a `stag_browser`, para um link do snapshot ou o PDF aberto, pela sessão da aba e pela fila existente. Usar somente projetos, cookies, PDFs e ZIPs sintéticos em loopback. Nenhuma conta/documento do cliente será acessada.
+
+| Área            | Cenário e aceite                                                                                                                                                                       | Evidência prevista                            |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| Caminho feliz   | PDF aberto e links PDF/ZIP, inclusive endpoint sem extensão e sessão autenticada; arquivo íntegro no projeto, caminho relativo, tamanho e SHA-256 para leitura local                   | Unidade + Electron real                       |
+| Validações      | Só HTTP(S), assinatura PDF/ZIP, até 100 MiB, prazo de dois minutos; recusar HTML/login, executável, resposta incompleta, protocolo local, downgrade TLS e excesso de redirecionamentos | Stream sintético + servidores loopback        |
+| Arquivos        | Destino fixo `stag-downloads` na raiz vigente; sem sobrescrita, links/junctions, caminhos do modelo/site ou extração/execução automática; falha limpa o parcial                        | Filesystem real, raízes temporárias           |
+| Autoridade      | Consentimento da conversa, Leitura recusa escrita, efeito crítico/incerto usa card; alvo/aba/raiz revalidados após aprovação; histórico com schema antigo exige nova conversa          | Serviço bidirecional + smoke Codex real       |
+| Recuperação     | Parar, revogar, navegar, trocar/resetar/fechar cancelam e aguardam limpeza; pedidos duplicados não repetem, fila não sobrepõe desktop/SQL/browser, nova tentativa explícita funciona   | Serviço + Electron                            |
+| Isolamento      | Sessão/cookies da aba, nenhum segredo retornado; um projeto não recebe arquivos de outro; conteúdo remoto continua dado não confiável                                                  | Electron + contratos                          |
+| Observabilidade | Progresso e conclusão/falha por aba; caminho só depois da gravação concluída; bytes e SHA locais, sem afirmar leitura/interpretação pelo modelo nem confundir com tokens               | Unidade + Chromium amplo/compacto/Pixel 7     |
+| Plataformas     | Linux local valida Electron e filesystem; Windows nativo valida driver, junctions e instalador no CI                                                                                   | check, test:desktop, format:check; Windows CI |
+
+O transporte usa [ClientRequest do Electron](https://www.electronjs.org/docs/latest/api/client-request), com TLS padrão, cookies restritos à partição e redirecionamentos validados. O download não instala leitores nem executa conteúdo: o assistente consulta o arquivo com ferramentas locais disponíveis, declara limitações de OCR/parser e só extrai ZIP depois de verificar caminhos, links e limites. A validação de assinatura não é uma análise antimalware.
+
+Evidência local: `npm run check` aprovado com 796 contratos, build, decoder/ASR, schema real do Codex/provedor loopback (incluindo download nas duas abas) e 148 cenários de interface. `xvfb-run -a npm run test:desktop` aprovado com PDF/ZIP íntegros, cookies HttpOnly isolados, TLS, redirecionamentos, cancelamento com fechamento da resposta/limpeza, prazo acionado após handshake e recuperação. Typecheck, formatação, sintaxe JavaScript, capturas compacta/Pixel 7 e diff conferidos. Testes focais detectaram a incompatibilidade de redirect manual em fetch e o evento close antecipado do request no Electron fixado; o adaptador agora acompanha a resposta real e limita a fila com backpressure. O fixture de isolamento começa sem login na segunda aba. Node 22.23.3 fica somente no workspace, sem substituir instalação compartilhada. Nenhum script shell alterado. Linux não comprova APIs Windows/NTFS nem o sandbox nativo: o kernel bloqueia namespaces bwrap; Windows installer deve executar a política de produção, junctions, testes nativos e empacotamento no PR.
 
 ## Captura do navegador e UnknownVizError — versão 0.4.47
 

@@ -125,6 +125,14 @@ export interface BrowserPageInfo {
   canGoBack: boolean;
   canGoForward: boolean;
   error: string | null;
+  download?: BrowserDownloadInfo;
+}
+export interface BrowserDownloadInfo {
+  status: "downloading" | "completed" | "failed" | "canceled";
+  receivedBytes: number;
+  totalBytes: number | null;
+  path?: string;
+  message: string;
 }
 export interface BrowserInfo extends BrowserPageInfo {
   activeTab: BrowserTab;

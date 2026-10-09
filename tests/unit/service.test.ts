@@ -39,10 +39,12 @@ import {
   browserSessionInstructions,
   browserCertificateInstructions,
   browserTabsInstructions,
+  browserDownloadInstructions,
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
 import { userInputInstructions, userInputTool } from "../../src/main/user-input";
+import type { BrowserDownloadContext } from "../../src/main/browser-download";
 
 let dir: string;
 let service: AssistantService;
@@ -91,10 +93,15 @@ const pulseCursor = vi.fn(async (_signal: AbortSignal): Promise<CursorPulseResul
   moved: true,
 }));
 const browser = {
-  execute: vi.fn(async (_args: BrowserArguments): Promise<ToolResult> => ({
-    success: true,
-    contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
-  })),
+  execute: vi.fn(
+    async (
+      _args: BrowserArguments,
+      _downloadContext?: BrowserDownloadContext,
+    ): Promise<ToolResult> => ({
+      success: true,
+      contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
+    }),
+  ),
   confirmationReason: vi.fn(async (args: BrowserArguments) => browserConfirmationReason(args)),
   control: vi.fn(async () => {}),
   reset: vi.fn(),
@@ -3087,6 +3094,94 @@ describe("fluxo local do assistente", () => {
     expect(browser.execute).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(service.snapshot().connection).toBe("error"));
     await service.request({ type: "connect" });
+    expect(service.snapshot().browser.authorized).toBe(false);
+  });
+  it("download usa raiz do main, exige consentimento, preserva Leitura e descreve capacidade vigente", async () => {
+    await ready();
+    await send("navegador download forçar");
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ action: "download", tab: "documentation" }),
+      { project: dir, readOnly: false },
+    );
+    expect(service.snapshot().approvals).toEqual([]);
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    for (const call of calls.filter((c) => ["thread/start", "thread/resume"].includes(c.method)))
+      expect(call.params.developerInstructions).toContain(browserDownloadInstructions);
+    expect(
+      calls.filter((c) => c.method === "turn/start").at(-1).params.additionalContext
+        .stag_browser_downloads.value,
+    ).toContain("disponível");
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "browserConsent", allow: true });
+    browser.execute.mockClear();
+    await send("navegador download crítico");
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().error).toContain("Leitura");
+  });
+  it("download crítico recusa, revalida alvo na execução e recupera uma vez", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download crítico");
+    await approve(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    browser.execute.mockRejectedValueOnce(new Error("A página ou o alvo mudou."));
+    await send("navegador download crítico");
+    await approve(true);
+    expect(service.snapshot().metrics.failures).toBe(1);
+    await send("navegador download crítico duplicado");
+    await approve(true);
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+    expect(service.snapshot().error).toBeNull();
+  });
+  it("histórico sem download mantém schema original e orienta nova conversa", async () => {
+    await ready();
+    await send("tarefa sintética");
+    await complete();
+    const thread = service.snapshot().threadId!;
+    const settings = await store.load();
+    delete settings.threads[thread].browserDownloads;
+    await store.save(settings);
+    await service.init();
+    await service.request({ type: "resume", threadId: thread });
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download");
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().error).toContain("nova conversa");
+    expect(service.snapshot().mode).toBe("project");
+  });
+  it("parar download aguarda limpeza e revogação não reutiliza resultado antigo", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    browser.execute.mockImplementationOnce(async () => {
+      await gate;
+      return { success: true, contentItems: [{ type: "inputText", text: "OLD_DOWNLOAD_RESULT" }] };
+    });
+    await send("navegador download");
+    await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledOnce());
+    let stopped = false;
+    const stop = service.request({ type: "browserConsent", allow: false }).then(() => {
+      stopped = true;
+    });
+    try {
+      await vi.waitFor(() => expect(browser.cancel).toHaveBeenCalled());
+      expect(stopped).toBe(false);
+    } finally {
+      release();
+    }
+    await stop;
+    expect(JSON.stringify(service.snapshot())).not.toContain("OLD_DOWNLOAD_RESULT");
     expect(service.snapshot().browser.authorized).toBe(false);
   });
   it("desktop e navegador compartilham a fila de execução", async () => {

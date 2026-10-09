@@ -71,6 +71,7 @@ import {
   browserTool,
   type BrowserArguments,
 } from "./browser-tools";
+import type { BrowserDownloadContext } from "./browser-download";
 
 interface WireItem {
   id: string;
@@ -125,7 +126,10 @@ interface Options {
     Partial<Pick<DesktopTools, "cancel">>;
   pulseCursor?: (signal: AbortSignal) => Promise<CursorPulseResult>;
   browser?: {
-    execute: (args: BrowserArguments) => Promise<ToolResult>;
+    execute: (
+      args: BrowserArguments,
+      downloadContext?: BrowserDownloadContext,
+    ) => Promise<ToolResult>;
     confirmationReason: (args: BrowserArguments) => Promise<string | null>;
     control: (args: BrowserControl) => Promise<void>;
     reset: () => void;
@@ -283,7 +287,7 @@ export class AssistantService extends EventEmitter {
     return structuredClone({ ...this.state, videoAnalysis: this.analysis?.summary() || null });
   }
   updateBrowser(info: BrowserInfo): void {
-    Object.assign(this.state.browser, info);
+    Object.assign(this.state.browser, info, { download: info.download });
     this.publish();
   }
   private publish(): void {
@@ -2009,6 +2013,7 @@ export class AssistantService extends EventEmitter {
         path: project.path,
         mode: this.state.mode,
         browserTool: !!this.options.browser,
+        browserDownloads: !!this.options.browser,
         httpTool: this.apisReady,
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
         databaseTool: this.databasesReady,
@@ -2101,6 +2106,16 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          stag_browser_downloads: {
+            kind: "application",
+            value: !this.settings.threads[this.state.threadId!]?.browserDownloads
+              ? "Este histórico não possui download em stag_browser. Para baixar PDF/ZIP, solicite nova conversa e Autorizar navegador."
+              : this.state.mode === "read"
+                ? "Downloads desativados no modo Leitura: não gravar arquivos."
+                : this.state.browser.authorized
+                  ? "Download de PDF/ZIP disponível por stag_browser com pageId/ref atuais; salva até 100 MiB em stag-downloads no projeto atual. Consulte o arquivo com ferramentas locais após sucesso."
+                  : "Para baixar PDF/ZIP no projeto, solicite Autorizar navegador; nenhuma ferramenta alternativa amplia este acesso.",
+          },
           stag_user_input: {
             kind: "application",
             value: userInputCapability(
@@ -2525,13 +2540,38 @@ export class AssistantService extends EventEmitter {
         : parsed.data;
       const safety = () =>
         cyberSafetyReason(Object.values(args).filter((value) => typeof value === "string"));
+      const downloadProject = this.state.project?.path;
+      const downloadContext = (): BrowserDownloadContext | undefined => {
+        if (!isBrowser || args.action !== "download") return undefined;
+        if (!this.settings.threads[this.state.threadId!]?.browserDownloads)
+          throw new Error(
+            "Este histórico não possui download em stag_browser. Abra uma nova conversa e autorize o navegador.",
+          );
+        if (
+          this.state.mode === "read" ||
+          !downloadProject ||
+          this.state.project?.path !== downloadProject
+        )
+          throw new Error(
+            "Downloads exigem escrita na pasta do projeto atual. O modo Leitura não salva arquivos.",
+          );
+        return { project: downloadProject, readOnly: false };
+      };
       const waiting: PendingApproval = isBrowser
         ? {
             message,
             safety,
             tool: "browser",
-            execute: () => this.options.browser!.execute(args as BrowserArguments),
-            confirmation: () => this.options.browser!.confirmationReason(args as BrowserArguments),
+            execute: () => {
+              const context = downloadContext();
+              return context
+                ? this.options.browser!.execute(args as BrowserArguments, context)
+                : this.options.browser!.execute(args as BrowserArguments);
+            },
+            confirmation: () => {
+              downloadContext();
+              return this.options.browser!.confirmationReason(args as BrowserArguments);
+            },
             approval: (reason) => browserApproval(args as BrowserArguments, reason),
           }
         : {

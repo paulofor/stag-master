@@ -2,7 +2,7 @@
 export const pdfViewerOrigin = "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/";
 export const pdfViewerPage = `${pdfViewerOrigin}index.html`;
 export const pdfSnapshotNote =
-  "PDF no visualizador integrado. O snapshot não extrai o texto do PDF. Use screenshot para ler a página visível; a troca de páginas exige ação manual no painel. Não use shell, HTTP ou navegador externo como alternativa.";
+  "PDF no visualizador integrado. O snapshot não extrai o texto do PDF. Use screenshot para ler a página visível; a troca de páginas exige ação manual no painel. Para consultar o documento completo, use download com este pageId para salvar o PDF no projeto e então leia o arquivo com ferramentas locais. Leitura não salva downloads. Não use shell, HTTP ou navegador externo para buscar o arquivo.";
 
 export function browserPdfResource(
   details: Electron.OnBeforeRequestListenerDetails,

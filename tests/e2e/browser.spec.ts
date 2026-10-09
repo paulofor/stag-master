@@ -11,6 +11,59 @@ async function ready(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 }
+test("download exibe progresso, caminho confirmado e falha sem overflow", async ({
+  page,
+}, info) => {
+  const browser = structuredClone(emptySnapshot.browser);
+  Object.assign(browser, {
+    available: true,
+    visible: true,
+    authorized: true,
+    url: "https://fixture.invalid/documentos",
+    download: {
+      status: "downloading",
+      receivedBytes: 1024 * 1024,
+      totalBytes: 4 * 1024 * 1024,
+      message: "Baixando arquivo para o projeto…",
+    },
+  });
+  browser.tabs.documentation.url = browser.url;
+  await installBridge(page, { busy: true, browser });
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  const status = page.getByRole("status", { name: "Download do navegador" });
+  await expect(status).toContainText("1.0 MiB de 4.0 MiB");
+  await expect(status.getByRole("progressbar")).toHaveAttribute("value", String(1024 * 1024));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-browser-download.png` });
+  await page.evaluate(() => {
+    void window.stag!.getSnapshot().then((state) => {
+      state.browser.download = {
+        status: "completed",
+        receivedBytes: 4 * 1024 * 1024,
+        totalBytes: 4 * 1024 * 1024,
+        path: "stag-downloads/download-sintetico/documento.pdf",
+        message: "Download concluído no projeto.",
+      };
+      window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+    });
+  });
+  await expect(status).toContainText("stag-downloads/download-sintetico/documento.pdf");
+  await expect(status.getByRole("progressbar")).toHaveCount(0);
+  await page.evaluate(() => {
+    void window.stag!.getSnapshot().then((state) => {
+      state.browser.download = {
+        status: "failed",
+        receivedBytes: 0,
+        totalBytes: null,
+        message: "O conteúdo recebido não é PDF nem ZIP.",
+      };
+      window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+    });
+  });
+  await expect(status).toContainText("não é PDF nem ZIP");
+  await expect(status).not.toContainText("stag-downloads/");
+});
 test("restaurar visualização durante execução só atualiza a área, preservando página e autorização", async ({
   page,
 }, info) => {
