@@ -30,6 +30,12 @@ import {
   type CursorPulseResult,
 } from "./desktop-tools";
 import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
+import {
+  userInputQuestions,
+  userInputTool,
+  userInputToolArguments,
+  userInputCapability,
+} from "./user-input";
 import { cyberSafetyReason, cyberSafetyRefusal } from "./cyber-safety";
 import { prepareProjectGit, projectGitInstructions, GitFailure } from "./project-git";
 import { projectSourcesContext } from "./project-sources";
@@ -185,6 +191,7 @@ export class AssistantService extends EventEmitter {
   private completedTurns = new Set<string>();
   private safetyBlockId = 0;
   private projectPreparation = new AbortController();
+  private projectRefreshAbort: AbortController | null = null;
   private branches: ProjectBranchManager;
   private branchController: AbortController | null = null;
   private databasesReady = false;
@@ -474,6 +481,18 @@ export class AssistantService extends EventEmitter {
   }
   async request(raw: Action): Promise<Snapshot> {
     const action = actionSchema.parse(raw) as Action;
+    const reselectingProject =
+      action.type === "selectProject" &&
+      this.state.busy &&
+      this.state.mode === "project" &&
+      this.state.approvals.length > 0 &&
+      this.state.approvals.every(
+        (approval) => approval.kind === "questions" && approval.blocking !== false,
+      ) &&
+      !this.sending &&
+      !this.drainingMessages;
+    const selectionThread = this.state.threadId;
+    const selectionTurn = this.turnId;
     const revokingBrowser =
       (action.type === "browserConsent" && !action.allow) ||
       (action.type === "browserVisibility" && !action.visible);
@@ -522,7 +541,8 @@ export class AssistantService extends EventEmitter {
     if (
       changesContext &&
       (this.state.busy || this.sending || this.drainingMessages) &&
-      action.type !== "connect"
+      action.type !== "connect" &&
+      !reselectingProject
     )
       throw new Error("Pare a execução antes de mudar a conversa.");
     if (changesContext) {
@@ -792,7 +812,11 @@ export class AssistantService extends EventEmitter {
           break;
         case "selectProject": {
           const selected = await this.options.selectProject();
-          if (selected) await this.setProject(selected);
+          if (selected) {
+            if (reselectingProject)
+              await this.reselectProject(selected, selectionThread, selectionTurn);
+            else await this.setProject(selected);
+          }
           break;
         }
         case "preferences":
@@ -1448,6 +1472,7 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.projectRefreshAbort?.abort();
     this.revokeApis();
     this.revokeDatabases();
     this.databaseAbort?.abort();
@@ -1490,6 +1515,7 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.projectRefreshAbort?.abort();
       this.revokeApis();
       this.revokeDatabases();
       this.databaseAbort?.abort();
@@ -1613,17 +1639,72 @@ export class AssistantService extends EventEmitter {
     this.restoreBrowserProfile();
     this.settings.project = path;
     await this.options.store.save(this.settings);
-    this.state.project.git = await (this.options.prepareProjectGit || prepareProjectGit)(path, {
-      signal: this.projectPreparation.signal,
-      onProgress: (git) => {
-        if (!this.disposed && this.state.project?.path === path) {
-          this.state.project.git = git;
-          this.publish();
-        }
-      },
-    });
-    this.state.metrics.failures += this.state.project.git.failures;
+    await this.prepareGit(path);
     if (this.state.connection === "ready") await this.refreshHistory();
+  }
+  private async reselectProject(
+    selected: string,
+    threadId: string | null,
+    turnId: string | null,
+  ): Promise<void> {
+    const path = await realpath(selected);
+    if (!(await stat(path)).isDirectory()) throw new Error("Selecione uma pasta de projeto.");
+    if (path !== this.state.project?.path)
+      throw new Error(
+        "Durante a pergunta, selecione a mesma pasta. Para trocar de projeto, pare a execução primeiro.",
+      );
+    const ownsSelection = () =>
+      !this.disposed &&
+      !this.stopping &&
+      this.state.connection === "ready" &&
+      this.state.project?.path === path &&
+      this.state.mode === "project" &&
+      this.state.threadId === threadId &&
+      this.turnId === turnId &&
+      this.state.busy &&
+      this.state.approvals.length > 0 &&
+      this.state.approvals.every(
+        (approval) => approval.kind === "questions" && approval.blocking !== false,
+      );
+    const controller = new AbortController();
+    this.projectRefreshAbort = controller;
+    const execution = this.toolQueue.then(async () => {
+      if (!ownsSelection()) throw new Error("A pergunta mudou. Selecione a pasta novamente.");
+      await this.prepareGit(
+        path,
+        AbortSignal.any([controller.signal, this.projectPreparation.signal]),
+      );
+      if (ownsSelection()) this.contextInstructionsDirty = true;
+    });
+    this.toolQueue = execution.catch(() => {});
+    try {
+      await execution;
+    } finally {
+      if (this.projectRefreshAbort === controller) this.projectRefreshAbort = null;
+    }
+  }
+  private async prepareGit(path: string, signal = this.projectPreparation.signal): Promise<void> {
+    const project = this.state.project;
+    if (!project || project.path !== path) throw new Error("O projeto mudou.");
+    const previous = project.git;
+    try {
+      const report = await (this.options.prepareProjectGit || prepareProjectGit)(path, {
+        signal,
+        onProgress: (git) => {
+          if (!this.disposed && !signal.aborted && this.state.project === project) {
+            project.git = git;
+            this.publish();
+          }
+        },
+      });
+      signal.throwIfAborted();
+      if (this.disposed || this.state.project !== project) return;
+      project.git = report;
+      this.state.metrics.failures += report.failures;
+    } catch (error) {
+      if (this.state.project === project) project.git = previous;
+      throw error;
+    }
   }
   private clearChat(): void {
     if (this.state.busy || this.sending)
@@ -1786,6 +1867,7 @@ export class AssistantService extends EventEmitter {
           !!policy.browserTool,
           policy.path,
           this.state.projectSources,
+          !!policy.userInputTool,
         ) +
         "\n" +
         projectGitInstructions(this.state.project?.git) +
@@ -1843,6 +1925,7 @@ export class AssistantService extends EventEmitter {
           projectBranchesInstructions,
         serviceName: "stag_desktop",
         dynamicTools: [
+          userInputTool,
           ...(this.state.mode === "windows" ? [desktopTool] : []),
           ...(this.options.browser ? [browserTool] : []),
           ...(this.apisReady ? [httpTool] : []),
@@ -1861,6 +1944,7 @@ export class AssistantService extends EventEmitter {
         browserTool: !!this.options.browser,
         httpTool: this.apisReady,
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
+        userInputTool: true,
       };
       await this.options.store.save(this.settings);
     }
@@ -1949,6 +2033,12 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          stag_user_input: {
+            kind: "application",
+            value: userInputCapability(
+              !!this.settings.threads[this.state.threadId!]?.userInputTool,
+            ),
+          },
           ...databaseContext(
             this.state.projectDatabases,
             !!this.settings.threads[this.state.threadId!]?.sqlTool,
@@ -1993,6 +2083,8 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    const projectRefreshWork = this.projectRefreshAbort ? this.toolQueue : null;
+    this.projectRefreshAbort?.abort();
     const sqlWork = this.sqlWork;
     const apiWork = Promise.all([this.apiLoginWork, this.httpWork]);
     const databaseWork = this.databaseAbort ? this.databaseWork : null;
@@ -2010,6 +2102,7 @@ export class AssistantService extends EventEmitter {
       if (databaseWork) await databaseWork;
       await apiWork;
       await sqlWork;
+      await projectRefreshWork;
       return;
     }
     if (!this.turnId || !this.state.threadId)
@@ -2028,6 +2121,7 @@ export class AssistantService extends EventEmitter {
       throw error;
     } finally {
       await sqlWork;
+      await projectRefreshWork;
     }
   }
   private upsert(item: WireItem): void {
@@ -2092,7 +2186,8 @@ export class AssistantService extends EventEmitter {
       next = {
         id: item.id,
         kind: "status",
-        text: item.tool || "Ação no Windows",
+        text:
+          item.tool === userInputTool.name ? "Pergunta para você" : item.tool || "Ação no Windows",
         status: item.status,
       };
     if (!next) return; // Raw reasoning, auth, and unknown item content never reach the renderer.
@@ -2238,6 +2333,55 @@ export class AssistantService extends EventEmitter {
       return;
     }
     if (message.method === "item/tool/call") {
+      if (p.tool === userInputTool.name) {
+        if (this.toolRequests.has(id)) return;
+        const parsed = userInputToolArguments.safeParse(p.arguments);
+        if (
+          !this.settings.threads[this.state.threadId!]?.userInputTool ||
+          (p.namespace !== undefined && p.namespace !== null) ||
+          !text(p.turnId) ||
+          !parsed.success
+        ) {
+          this.rpc.respond(message.id, {
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: "Pergunta indisponível ou inválida. Históricos sem stag_ask_user exigem uma nova conversa; não presuma resposta ou autorização.",
+              },
+            ],
+          });
+          return;
+        }
+        if (
+          cyberSafetyReason(
+            parsed.data.questions.flatMap((q) => [
+              q.question,
+              ...(q.options || []).map((option) => option.label + " " + option.description),
+            ]),
+          )
+        ) {
+          this.recordSafetyBlock();
+          this.rpc.respond(message.id, {
+            success: false,
+            contentItems: [{ type: "inputText", text: cyberSafetyRefusal }],
+          });
+          return;
+        }
+        this.toolRequests.add(id);
+        if (!this.turnId) this.turnId = text(p.turnId);
+        this.pending.set(id, { message });
+        this.state.approvals.push({
+          id,
+          kind: "questions",
+          blocking: true,
+          title: "O assistente precisa de uma resposta",
+          detail: "",
+          questions: parsed.data.questions.map((q) => ({ ...q, options: q.options || [] })),
+        });
+        this.publish();
+        return;
+      }
       if (p.tool === "stag_sql") {
         await this.sqlRequest(message);
         return;
@@ -2354,23 +2498,22 @@ export class AssistantService extends EventEmitter {
           .join("\n\n"),
       });
     } else if (message.method === "item/tool/requestUserInput") {
-      const questions = z
-        .array(
-          z.object({
-            id: z.string(),
-            question: z.string(),
-            isSecret: z.boolean().optional(),
-            options: z
-              .array(z.object({ label: z.string(), description: z.string() }))
-              .nullable()
-              .optional(),
-          }),
-        )
-        .parse(p.questions);
+      if (this.toolRequests.has(id)) return;
+      const parsed = userInputQuestions.safeParse(p.questions);
+      if (!text(p.turnId) || !parsed.success) {
+        this.rpc.rejectRequest(message.id, "Perguntas inválidas. Corrija e envie um novo pedido.");
+        this.state.error = "Não foi possível apresentar a pergunta do assistente.";
+        this.publish();
+        return;
+      }
+      this.toolRequests.add(id);
+      if (!this.turnId) this.turnId = text(p.turnId);
+      const questions = parsed.data;
       this.pending.set(id, { message });
       this.state.approvals.push({
         id,
         kind: "questions",
+        blocking: p.isBlocking !== false,
         title: "O assistente precisa de uma resposta",
         detail: "",
         questions: questions.map((q) => ({ ...q, options: q.options || [] })),
@@ -2659,7 +2802,15 @@ export class AssistantService extends EventEmitter {
         // Resolve the reverse request with the refusal, never forward the hostile answer.
         for (const q of approval.questions || []) answers[q.id] = { answers: [cyberSafetyRefusal] };
       }
-      this.rpc.respond(waiting.message.id, { answers });
+      this.rpc.respond(
+        waiting.message.id,
+        waiting.message.method === "item/tool/call"
+          ? {
+              success: true,
+              contentItems: [{ type: "inputText", text: JSON.stringify({ answers }) }],
+            }
+          : { answers },
+      );
     } else if (waiting.execute) {
       // Remove first to prevent double-click executing a desktop action twice.
       this.pending.delete(action.id);
@@ -2683,6 +2834,7 @@ export class AssistantService extends EventEmitter {
     this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
   }
   dispose(): void {
+    this.projectRefreshAbort?.abort();
     this.databaseAbort?.abort();
     this.disableMouseMovement();
     this.disposed = true;

@@ -5,6 +5,7 @@ O navegador lateral solicitado pelo cliente é um painel opcional ao lado dessa 
 
 ## Contratos observados
 
+- Perguntas dependentes de resposta/ação manual usam stag_ask_user bloqueante em todos os modos; contrato em start/resume e capacidade vigente por turno. Históricos sem a ferramenta requerem nova conversa, sem alterar a política original. Perguntas nativas assíncronas não comprovam pausa do agente. Reutilize cards, fila e avisos; texto livre não cria consentimento ou espera. Durante pergunta bloqueante em Projeto, a interface pode selecionar novamente somente a mesma raiz canônica e preparar Git na fila existente, preservando thread, modo, pergunta e pendências. Outra raiz, Leitura/Windows ou aprovação crítica exige parar; cancelamento/arquivo inválido preserva contexto. Interrupção aguarda limpeza e não aplica resultados antigos. Harness confere disponibilidade e espera com o Codex fixado/provedor loopback, além de recuperação, isolamento e avisos existentes, sem afirmar obediência semântica absoluta.
 - O App Server é bidirecional: além de notificações, recebe requests do servidor com `id`. Responda, recuse explicitamente ou mostre a aprovação; nunca deixe o agente preso.
 - Tokens e OAuth da conta ChatGPT pertencem ao Codex. Não leia `auth.json`, não exponha tokens ao renderer, não registre payloads de autenticação e não use dados reais em testes.
 - Use os modelos e esforços de `model/list`; não fixe nomes de modelos.

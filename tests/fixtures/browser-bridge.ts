@@ -370,6 +370,27 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               state.items = [];
               break;
             case "selectProject":
+              if (
+                state.busy &&
+                state.mode === "project" &&
+                state.approvals.length &&
+                state.approvals.every(
+                  (entry) => entry.kind === "questions" && entry.blocking !== false,
+                )
+              ) {
+                state.project!.git = {
+                  phase: "complete",
+                  scanned: 4,
+                  found: 2,
+                  added: 0,
+                  verified: 2,
+                  skipped: 0,
+                  failures: 0,
+                  incomplete: false,
+                  issues: [],
+                };
+                break;
+              }
               clearQueue();
               state.projectBranches = null;
               state.project = {
@@ -561,19 +582,36 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
                   },
                 ];
               } else if (action.text.includes("perguntar")) {
+                const folder = action.text.includes("pasta");
                 state.approvals = [
                   {
                     id: "question",
                     kind: "questions",
+                    blocking: folder || !action.text.includes("assíncrona"),
                     title: "O assistente precisa de uma resposta",
                     detail: "",
-                    questions: [
-                      {
-                        id: "stack",
-                        question: "Qual stack deseja?",
-                        options: [{ label: "TypeScript", description: "Tipos" }],
-                      },
-                    ],
+                    questions: folder
+                      ? [
+                          {
+                            id: "folder",
+                            question:
+                              "Selecione novamente a pasta sintética no STAG Plus. Avise quando terminar.",
+                            options: [
+                              {
+                                label: "Pasta selecionada novamente",
+                                description: "Conferir o Git",
+                              },
+                              { label: "Não consigo agora", description: "Informar o impedimento" },
+                            ],
+                          },
+                        ]
+                      : [
+                          {
+                            id: "stack",
+                            question: "Qual stack deseja?",
+                            options: [{ label: "TypeScript", description: "Tipos" }],
+                          },
+                        ],
                   },
                 ];
               } else if (action.text.includes("erro")) {

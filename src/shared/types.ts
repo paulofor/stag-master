@@ -68,6 +68,7 @@ export interface Approval {
   title: string;
   detail: string;
   questions?: Question[];
+  blocking?: boolean;
 }
 export interface Snapshot {
   connection: "disconnected" | "connecting" | "ready" | "error";

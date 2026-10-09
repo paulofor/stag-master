@@ -324,6 +324,14 @@ export function App() {
   ]);
   const chosenModel = state.models.find((m) => m.model === state.model);
   const disabledContext = state.busy || pending;
+  const disabledProjectSelection =
+    pending ||
+    (state.busy &&
+      (state.mode !== "project" ||
+        !state.approvals.length ||
+        state.approvals.some(
+          (approval) => approval.kind !== "questions" || approval.blocking === false,
+        )));
   const visibleError = error || state.error;
   const connectionLabel =
     state.connection === "ready"
@@ -398,7 +406,7 @@ export function App() {
         <div className="context-bar">
           <button
             className="project-button"
-            disabled={disabledContext}
+            disabled={disabledProjectSelection}
             onClick={() => void run({ type: "selectProject" })}
             title={state.project?.path || "Selecionar pasta do projeto"}
           >
@@ -695,8 +703,14 @@ export function App() {
               )}
               {state.busy && (
                 <div className="working" role="status">
-                  <span className="working-pulse" />
-                  Assistente trabalhando<span className="working-ellipsis">…</span>
+                  {state.approvals.length ? (
+                    <>Aguardando sua resposta ou autorização</>
+                  ) : (
+                    <>
+                      <span className="working-pulse" />
+                      Assistente trabalhando<span className="working-ellipsis">…</span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -874,7 +888,7 @@ export function App() {
                 className="attach-button icon-button"
                 aria-label="Selecionar pasta do projeto"
                 title="Selecionar pasta, autorizar leitura e escrita e preparar seus repositórios Git"
-                disabled={disabledContext}
+                disabled={disabledProjectSelection}
                 onClick={() => void run({ type: "selectProject" })}
               >
                 <Plus size={20} />

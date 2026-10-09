@@ -38,6 +38,7 @@ import {
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
+import { userInputInstructions, userInputTool } from "../../src/main/user-input";
 
 let dir: string;
 let service: AssistantService;
@@ -234,6 +235,286 @@ async function approve(accept: boolean) {
   await service.request({ type: "answer", id: service.snapshot().approvals[0].id, accept });
   await complete();
 }
+
+describe("perguntas bloqueantes no modo normal", () => {
+  const waitQuestion = async () => {
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    return service.snapshot().approvals[0];
+  };
+  it("pergunta nativa assíncrona preserva bloqueio de troca de pasta durante o turno", async () => {
+    await ready();
+    await send("perguntar assíncrona");
+    const question = await waitQuestion();
+    expect(question.blocking).toBe(false);
+    const selections = selectProject.mock.calls.length;
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow("Pare");
+    expect(selectProject.mock.calls).toHaveLength(selections);
+    await service.request({
+      type: "answer",
+      id: question.id,
+      answers: { stack: "TypeScript" },
+    });
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+  });
+  it.each(["project", "read", "windows"] as const)(
+    "preserva espera e contrato em início/retomada %s",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      await send("perguntar pasta");
+      const question = await waitQuestion();
+      expect(service.snapshot().busy).toBe(true);
+      if (mode !== "project")
+        await expect(service.request({ type: "selectProject" })).rejects.toThrow("Pare");
+      await service.request({
+        type: "answer",
+        id: question.id,
+        answers: { folder: "Não consigo agora" },
+      });
+      await complete();
+      const threadId = service.snapshot().threadId!;
+      await service.request({ type: "resume", threadId });
+      await send("perguntar pasta novamente");
+      const next = await waitQuestion();
+      await service.request({
+        type: "answer",
+        id: next.id,
+        answers: { folder: "Preciso de mais tempo" },
+      });
+      await complete();
+      const calls =
+        await rpc.call<{ method: string; params?: Record<string, unknown> }[]>(
+          "_fixture/readCalls",
+        );
+      for (const call of calls.filter((entry) =>
+        ["thread/start", "thread/resume"].includes(entry.method),
+      )) {
+        expect(call.params?.developerInstructions).toContain(userInputInstructions);
+        expect(call.params?.approvalPolicy).toBe("on-request");
+        if (call.method === "thread/start")
+          expect(call.params?.dynamicTools).toContainEqual(userInputTool);
+      }
+      expect(service.snapshot().mode).toBe(mode);
+      expect(service.snapshot().items.at(-1)?.text).toContain("Preciso de mais tempo");
+    },
+  );
+
+  it("deduplica perguntas e mantém a fila até resposta explícita", async () => {
+    await ready();
+    await send("perguntar pasta duplicado");
+    const question = await waitQuestion();
+    const threadId = service.snapshot().threadId!;
+    await service.request({
+      type: "enqueue",
+      id: randomUUID(),
+      threadId,
+      text: "tarefa posterior",
+    });
+    await rpc.call("thread/list");
+    expect(service.snapshot().busy).toBe(true);
+    expect(service.snapshot().approvals).toHaveLength(1);
+    expect(service.snapshot().queuedMessages).toHaveLength(1);
+    await expect(service.request({ type: "answer", id: question.id, answers: {} })).rejects.toThrow(
+      "todas",
+    );
+    await service.request({
+      type: "answer",
+      id: question.id,
+      answers: { folder: "Não consigo agora" },
+    });
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toEqual([]));
+    await complete();
+    await expect(
+      service.request({ type: "answer", id: question.id, answers: { folder: "repetido" } }),
+    ).rejects.toThrow("resolvido");
+    const calls =
+      await rpc.call<{ method?: string; responseId?: number; result?: unknown }[]>(
+        "_fixture/readCalls",
+      );
+    expect(calls.filter((entry) => entry.method === "turn/start")).toHaveLength(2);
+    expect(calls.filter((entry) => String(entry.responseId) === question.id)).toHaveLength(1);
+  });
+
+  it("histórico sem ferramenta orienta nova conversa e preserva Leitura", async () => {
+    await ready();
+    const old = await rpc.call<{ thread: { id: string } }>("thread/start", {
+      cwd: dir,
+      ...threadPolicy("read", dir),
+      developerInstructions: "Contrato antigo sintético.",
+    });
+    await store.save({ project: dir, threads: { [old.thread.id]: { path: dir, mode: "read" } } });
+    await service.init();
+    await service.request({ type: "resume", threadId: old.thread.id });
+    await send("perguntar pasta forçar");
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(service.snapshot().mode).toBe("read");
+    const calls = await rpc.call<
+      {
+        method: string;
+        params?: {
+          developerInstructions?: string;
+          additionalContext?: Record<string, { value: string }>;
+        };
+      }[]
+    >("_fixture/readCalls");
+    expect(
+      calls.find((entry) => entry.method === "thread/resume")?.params?.developerInstructions,
+    ).toContain("não está registrada neste histórico");
+    expect(
+      calls.find((entry) => entry.method === "turn/start")?.params?.additionalContext
+        ?.stag_user_input.value,
+    ).toContain("Nova conversa");
+    await service.request({ type: "newChat" });
+    await send("perguntar pasta");
+    expect((await waitQuestion()).blocking).toBe(true);
+    expect(service.snapshot().mode).toBe("read");
+  });
+
+  it("recusa perguntas vazias/ids repetidos e de outra conversa, permitindo recuperação", async () => {
+    await ready();
+    await send("perguntar pasta");
+    const question = await waitQuestion();
+    // Ownership is taken from the actual request, not inferred from an item identifier.
+    let received: RpcMessage | undefined;
+    const listener = (message: RpcMessage) => {
+      if (message.method === "item/tool/call" && message.params?.tool === "stag_ask_user")
+        received = message;
+    };
+    await service.request({
+      type: "answer",
+      id: question.id,
+      answers: { folder: "Não consigo agora" },
+    });
+    await complete();
+    rpc.on("request", listener);
+    await send("perguntar pasta seguinte");
+    await waitQuestion();
+    rpc.off("request", listener);
+    expect(received).toBeDefined();
+    const before = service.snapshot().approvals;
+    for (const [index, params] of [
+      { ...received!.params, arguments: { questions: [] } },
+      {
+        ...received!.params,
+        arguments: { questions: [...before[0].questions!, ...before[0].questions!] },
+      },
+      { ...received!.params, threadId: "outro-thread" },
+      { ...received!.params, turnId: "outro-turno" },
+    ].entries())
+      rpc.emit("request", { id: 50000 + index, method: "item/tool/call", params });
+    await rpc.call("thread/list");
+    expect(service.snapshot().approvals).toEqual(before);
+    await service.request({
+      type: "answer",
+      id: before[0].id,
+      answers: { folder: "Pasta selecionada novamente" },
+    });
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+  });
+
+  it("prepara Git ao selecionar novamente a mesma raiz sem descartar pergunta ou fila", async () => {
+    await ready();
+    const fixture = await gitFixture(dir);
+    const repository = resolve(dir, "novo-repositorio");
+    await fixture.init(repository);
+    await send("perguntar pasta");
+    const question = await waitQuestion();
+    const threadId = service.snapshot().threadId!;
+    await service.request({
+      type: "enqueue",
+      id: randomUUID(),
+      threadId,
+      text: "trabalho posterior",
+    });
+    const before = service.snapshot();
+    const snapshot = await service.request({ type: "selectProject" });
+    expect(snapshot.threadId).toBe(threadId);
+    expect(snapshot.approvals).toEqual(before.approvals);
+    expect(snapshot.queuedMessages).toEqual(before.queuedMessages);
+    expect(snapshot.items).toEqual(before.items);
+    expect(snapshot.project?.git?.verified).toBe(1);
+    expect(snapshot.mode).toBe("project");
+    await service.request({
+      type: "answer",
+      id: question.id,
+      answers: { folder: "Pasta selecionada novamente" },
+    });
+    await vi.waitFor(() => expect(service.snapshot().queuedMessages).toEqual([]));
+    await complete();
+  });
+
+  it("cancelamento, outra raiz e arquivo inválido preservam contexto durante a espera", async () => {
+    await ready();
+    await send("perguntar pasta");
+    await waitQuestion();
+    const before = service.snapshot();
+    const preparations = prepareProjectGit.mock.calls.length;
+    selectProject.mockResolvedValueOnce(null);
+    await service.request({ type: "selectProject" });
+    const other = resolve(dir, "outra-raiz");
+    await mkdir(other);
+    selectProject.mockResolvedValueOnce(other);
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow("mesma pasta");
+    selectProject.mockResolvedValueOnce(resolve(dir, "inexistente"));
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow();
+    const file = resolve(dir, "arquivo.txt");
+    await writeFile(file, "conteúdo sintético");
+    selectProject.mockResolvedValueOnce(file);
+    await expect(service.request({ type: "selectProject" })).rejects.toThrow("pasta");
+    expect(prepareProjectGit.mock.calls).toHaveLength(preparations);
+    expect(service.snapshot()).toMatchObject({
+      threadId: before.threadId,
+      mode: before.mode,
+      project: before.project,
+      approvals: before.approvals,
+      busy: true,
+    });
+    await service.request({ type: "stop" });
+    await complete();
+    await send("perguntar pasta recuperação");
+    expect((await waitQuestion()).kind).toBe("questions");
+  });
+
+  it("parada cancela preparação e aguarda limpeza sem resultado antigo", async () => {
+    await ready();
+    await send("perguntar pasta");
+    await waitQuestion();
+    const before = service.snapshot().project?.git;
+    let finish!: () => void;
+    prepareProjectGit.mockImplementationOnce(async (_path, options) => {
+      await new Promise<void>((resolve) =>
+        options!.signal!.addEventListener(
+          "abort",
+          () => {
+            finish = resolve;
+          },
+          { once: true },
+        ),
+      );
+      return { ...before!, found: 99 };
+    });
+    const selection = service.request({ type: "selectProject" }).then(
+      () => null,
+      (error) => error,
+    );
+    await vi.waitFor(() => expect(prepareProjectGit.mock.calls).toHaveLength(2));
+    let stopped = false;
+    const stop = service.request({ type: "stop" }).then(() => {
+      stopped = true;
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    expect(stopped).toBe(false);
+    finish();
+    expect(await selection).toBeInstanceOf(Error);
+    await stop;
+    await complete();
+    expect(service.snapshot().project?.git).toEqual(before);
+    expect(service.snapshot().approvals).toEqual([]);
+  });
+});
 
 describe("movimento periódico do mouse", () => {
   async function enable() {
@@ -3172,10 +3453,12 @@ describe("fluxo local do assistente", () => {
       await rpc.call<{ method?: string; params?: Record<string, unknown> }[]>("_fixture/readCalls");
     const starts = calls.filter((call) => call.method === "thread/start");
     expect(starts[0].params?.dynamicTools).toEqual([
+      expect.objectContaining({ name: "stag_ask_user" }),
       expect.objectContaining({ name: "stag_browser" }),
     ]);
     expect(starts[0].params?.developerInstructions).toContain("Autorizar desktop");
     expect(starts[1].params?.dynamicTools).toEqual([
+      expect.objectContaining({ name: "stag_ask_user" }),
       expect.objectContaining({ name: "windows_desktop" }),
       expect.objectContaining({ name: "stag_browser" }),
     ]);
