@@ -191,6 +191,40 @@ export async function validateBrowserDownloads({
       intent: "Consultar PDF completo",
     });
     assert.equal(JSON.parse(result.contentItems[0].text).format, "pdf");
+    const path = JSON.parse(result.contentItems[0].text).path;
+    // Production parser process under Electron_RUN_AS_NODE, reading the actual downloaded PDF.
+    for (const action of ["info", "read", "render"]) {
+      const parsed = await application.evaluate(
+        async (_electron, { project, path, action }) => {
+          const reader = new global.PdfHarness(
+            `${_electron.app.getAppPath()}/dist/main/pdf-worker.mjs`,
+          );
+          const result = await reader.execute(
+            { action, path, ...(action === "render" ? { page: 1 } : {}) },
+            project,
+          );
+          const text = JSON.parse(result.contentItems[0].text);
+          if (action === "render") {
+            const image = _electron.nativeImage.createFromDataURL(result.contentItems[1].imageUrl);
+            return {
+              success: result.success,
+              document: text,
+              imageEmpty: image.isEmpty(),
+              size: image.getSize(),
+            };
+          }
+          return { success: result.success, document: text };
+        },
+        { project, path, action },
+      );
+      assert.equal(parsed.success, true);
+      assert.equal(parsed.document.totalPages, 1);
+      if (action === "read") assert.match(parsed.document.pages[0].text, /SYNTHETIC PDF/);
+      if (action === "render") {
+        assert.equal(parsed.imageEmpty, false);
+        assert.equal(parsed.size.width, 800);
+      }
+    }
     console.log(
       "Browser downloads: PDF/ZIP íntegros, sessão da aba, redirect, Leitura, tipos/limites, refs, cancelamento, timeout após handshake e recuperação aprovados.",
     );

@@ -32,6 +32,7 @@ import { modelTrafficArguments } from "./model-traffic";
 import { optimizeModelImage } from "./model-images";
 import { actionSchema } from "../shared/validation";
 import type { Action } from "../shared/types";
+import { PdfReader } from "./pdf-reader";
 import { BrowserPanel } from "./browser-panel";
 import {
   inspectVideo,
@@ -205,6 +206,7 @@ async function start(): Promise<void> {
     },
     desktop,
     pulseCursor: (signal) => desktop.pulseCursor(signal),
+    pdf: new PdfReader(join(app.getAppPath(), "dist/main/pdf-worker.mjs")),
     browser,
     video: {
       select: async () => {

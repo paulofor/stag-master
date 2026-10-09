@@ -12,6 +12,13 @@ import { validateBrowserDownloads } from "./test-browser-downloads.mjs";
 
 export async function buildBrowserHarness(dir) {
   await build({
+    entryPoints: ["src/main/pdf-reader.ts"],
+    outfile: join(dir, "pdf-reader.cjs"),
+    bundle: true,
+    platform: "node",
+    format: "cjs",
+  });
+  await build({
     entryPoints: ["src/main/browser-panel.ts"],
     outfile: join(dir, "browser-panel.cjs"),
     bundle: true,

@@ -1244,6 +1244,32 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         }
         break;
       }
+      if (input.includes("leitor pdf")) {
+        desktopCall(
+          thread,
+          turn,
+          input.includes("inválido")
+            ? { action: "read", path: "documento.pdf", pages: 11 }
+            : {
+                action: input.includes("render") ? "render" : "read",
+                path: "documento.pdf",
+                ...(input.includes("render") ? { page: 1 } : {}),
+              },
+          null,
+          input.includes("outro thread")
+            ? { threadId: "other-thread" }
+            : input.includes("outro turno")
+              ? { turnId: "other-turn" }
+              : input.includes("namespace")
+                ? { namespace: "unknown" }
+                : {},
+          input.includes("duplicado"),
+          "stag_pdf",
+        );
+        if (input.includes("fila"))
+          desktopCall(thread, turn, { action: "snapshot" }, null, {}, false, "stag_browser");
+        break;
+      }
       if (input.includes("navegador")) {
         if (
           !thread.dynamicTools.some((tool) => tool.name === "stag_browser") &&
