@@ -29,6 +29,7 @@ try {
       "src/main/http-tools.ts",
       "src/main/sql-tools.ts",
       "src/main/database-connections.ts",
+      "src/main/database-import.ts",
       "src/main/policy.ts",
       "src/main/project-git.ts",
       "src/main/project-branches.ts",
@@ -42,6 +43,7 @@ try {
     bundle: true,
     platform: "node",
     format: "esm",
+    external: ["yaml"],
   });
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
@@ -51,6 +53,9 @@ try {
   );
   const { DatabaseConnections } = await import(
     pathToFileURL(join(dir, "database-connections.mjs")).href
+  );
+  const { databaseTool, inspectDatabaseImport, databaseImportInstructions } = await import(
+    pathToFileURL(join(dir, "database-import.mjs")).href
   );
   const { browserTool, browserArguments, browserTabsInstructions } = await import(
     pathToFileURL(join(dir, "browser-tools.mjs")).href
@@ -188,7 +193,7 @@ try {
       projectGitInstructions(gitReport) +
       "\n" +
       projectBranchesInstructions,
-    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool],
+    dynamicTools: [userInputTool, desktopTool, browserTool, httpTool, sqlTool, databaseTool],
   });
   assert.ok(started.thread.id);
   assert.equal(started.sandbox.type, "workspaceWrite");
@@ -329,6 +334,64 @@ try {
     rpc.off("request", questionRequest);
   }
   const sqlSecret = "synthetic-smoke-sql-password";
+  const importSecret = "synthetic-smoke-import-password";
+  await writeFile(
+    join(project, "application.properties"),
+    `spring.datasource.url=jdbc:sqlserver://localhost;databaseName=stag_import\nspring.datasource.username=fixture\nspring.datasource.password=${importSecret}\n`,
+  );
+  let importCount = 0;
+  const importRequest = async (message) => {
+    if (message.method !== "item/tool/call" || message.params.tool !== "stag_database") {
+      rpc.rejectRequest(message.id, "Somente importação sintética nesta sonda.");
+      return;
+    }
+    assert.deepEqual(message.params.arguments, { sourcePath: "application.properties" });
+    const prepared = await inspectDatabaseImport(project, message.params.arguments);
+    assert.equal(prepared.password, importSecret);
+    assert.equal(prepared.config.database, "stag_import");
+    importCount++;
+    // Refusal and approval are exercised through the service; this probe checks the real schema/transport.
+    rpc.respond(message.id, {
+      success: true,
+      contentItems: [
+        { type: "inputText", text: "Configuração sintética conferida pelo main; senha privada." },
+      ],
+    });
+  };
+  rpc.on("request", importRequest);
+  try {
+    provider.queueToolCall({
+      name: "stag_database",
+      arguments: { sourcePath: "application.properties" },
+    });
+    await syntheticTurn(
+      [
+        {
+          type: "text",
+          text: "Importe a conexão sintética usando stag_database, sem ler a senha.",
+        },
+      ],
+      sources,
+      false,
+      databaseContext(null, true, true),
+    );
+    assert.equal(importCount, 1);
+    assert.ok(
+      JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
+        databaseImportInstructions,
+      ),
+    );
+    assert.ok(
+      !JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
+        importSecret,
+      ),
+    );
+    console.log(
+      "Codex real/loopback: schema stag_database de produção, contrato e senha privada aprovados.",
+    );
+  } finally {
+    rpc.off("request", importRequest);
+  }
   const connections = new DatabaseConnections(join(dir, "sql-connections.json"), {
     available: () => false,
     encrypt: () => {

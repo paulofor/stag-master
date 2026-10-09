@@ -32,6 +32,7 @@ try {
     bundle: true,
     platform: "node",
     format: "esm",
+    external: ["yaml"],
   });
   const { prepareVideo, inspectVideo, prepareVideoSegment, validateVideoSource, videoImages } =
     await import(pathToFileURL(join(dir, "request-video.mjs")).href);

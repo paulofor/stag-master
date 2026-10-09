@@ -1964,3 +1964,19 @@ summary::-webkit-details-marker {
 .api-dialog code {
   overflow-wrap: anywhere;
 }
+.database-project-summary,
+.database-recovery {
+  overflow-wrap: anywhere;
+}
+.database-recovery {
+  margin: 12px 0;
+}
+.database-recovery label {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.database-recovery select {
+  width: 100%;
+  min-width: 0;
+}

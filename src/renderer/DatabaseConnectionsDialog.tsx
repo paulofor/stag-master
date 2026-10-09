@@ -40,9 +40,24 @@ export function DatabaseConnectionsDialog({
   const [validation, setValidation] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [testId, setTestId] = useState<string | null>(null);
+  const [recoveryId, setRecoveryId] = useState("");
+  const [recoveryRevision, setRecoveryRevision] = useState<string | null>(null);
+  const initialized = useRef(false);
   const testing = data?.test?.status === "testing";
   const locked = pending || testing || busy;
   const saved = data?.connections.find((entry) => entry.id === id);
+  useEffect(() => {
+    if (data && !initialized.current) {
+      initialized.current = true;
+      select(data.connections[0]?.id || null);
+    }
+  }, [data]);
+  useEffect(() => {
+    if (data && recoveryRevision && data.revision !== recoveryRevision) {
+      select(data.connections[0]?.id || null);
+      setRecoveryRevision(null);
+    }
+  }, [data, recoveryRevision]);
   useEffect(() => {
     const element = dialog.current!;
     const previous = document.activeElement;
@@ -210,6 +225,61 @@ export function DatabaseConnectionsDialog({
               ))}
             </select>
           </label>
+          <p className="sources-hint database-project-summary">
+            {data.connections.length === 1
+              ? "1 conexão salva"
+              : `${data.connections.length} conexões salvas`}{" "}
+            nesta pasta: <span>{projectPath}</span>. Selecionar novamente a mesma pasta preserva os
+            cadastros. Outra pasta mantém um catálogo separado.
+          </p>
+          {!!data.recoverySources?.length && (
+            <details className="database-recovery">
+              <summary>Recuperar conexões de outra pasta</summary>
+              <p className="sources-hint">
+                Se mudou o caminho da pasta, copie os cadastros anteriores. A origem será
+                preservada; confirme as duas pastas antes de copiar.
+              </p>
+              <label>
+                Pasta de origem
+                <select
+                  aria-label="Pasta de origem"
+                  value={recoveryId}
+                  disabled={locked}
+                  onChange={(event) => setRecoveryId(event.target.value)}
+                >
+                  <option value="">Escolha a pasta anterior</option>
+                  {data.recoverySources.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.path} ({entry.count})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={locked || !recoveryId}
+                onClick={async () => {
+                  const source = data.recoverySources?.find((entry) => entry.id === recoveryId);
+                  if (source) {
+                    setRecoveryRevision(data.revision);
+                    if (
+                      !(await run({
+                        type: "recoverDatabases",
+                        projectPath,
+                        revision: data.revision,
+                        sourceId: source.id,
+                        sourceRevision: source.revision,
+                      }))
+                    )
+                      setRecoveryRevision(null);
+                  }
+                }}
+              >
+                Recuperar conexões
+              </button>
+            </details>
+          )}
           <form
             noValidate
             autoComplete="off"

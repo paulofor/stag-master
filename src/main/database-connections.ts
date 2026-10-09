@@ -45,6 +45,7 @@ export class DatabaseConnections {
   private revisions = new Map<string, string>();
   private queue: Promise<void> = Promise.resolve();
   private sessionPasswords = new Map<string, { binding: string; password: string }>();
+  private sourceIds = new Map<string, string>();
   constructor(
     private file: string,
     private secrets: DatabaseSecretStorage,
@@ -79,6 +80,18 @@ export class DatabaseConnections {
       authorized: false,
       metrics: { requests: 0, failures: 0, elapsedMs: 0, lastRows: null },
       test: null,
+      recoverySources: Object.entries(this.data.projects)
+        .filter(([source, entries]) => source !== path && entries.length > 0)
+        .map(([source, entries]) => {
+          if (!this.sourceIds.has(source)) this.sourceIds.set(source, randomUUID());
+          if (!this.revisions.has(source)) this.revisions.set(source, randomUUID());
+          return {
+            id: this.sourceIds.get(source)!,
+            revision: this.revisions.get(source)!,
+            path: source,
+            count: entries.length,
+          };
+        }),
     };
   }
 
@@ -144,8 +157,10 @@ export class DatabaseConnections {
     raw: SqlServerConfig,
     password: string,
     remember: boolean,
+    signal?: AbortSignal,
   ): Promise<void> {
     return this.enqueue(async () => {
+      signal?.throwIfAborted();
       this.check(path, revision);
       const config = sqlServerConfigSchema.parse(raw);
       databasePasswordSchema.parse(password);
@@ -198,7 +213,7 @@ export class DatabaseConnections {
       const connections = id
         ? list.map((entry) => (entry.id === id ? next : entry))
         : [...list, next];
-      await this.persist(path, connections);
+      await this.persist(path, connections, signal);
       this.sessionPasswords.delete(this.key(path, nextId));
       if (!remember && sessionPassword)
         this.sessionPasswords.set(this.key(path, nextId), {
@@ -220,12 +235,81 @@ export class DatabaseConnections {
     });
   }
 
+  recoverySource(path: string, revision: string, sourceId: string, sourceRevision: string) {
+    this.check(path, revision);
+    const source = this.snapshot(path).recoverySources!.find((entry) => entry.id === sourceId);
+    if (!source || source.revision !== sourceRevision)
+      throw new Error("O cadastro de origem mudou. Reabra Conexões e confira novamente.");
+    return source;
+  }
+
+  recover(
+    path: string,
+    revision: string,
+    sourceId: string,
+    sourceRevision: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.enqueue(async () => {
+      signal?.throwIfAborted();
+      const source = this.recoverySource(path, revision, sourceId, sourceRevision);
+      const next = [...(this.data.projects[path] || [])];
+      const sessions: { id: string; config: SqlServerConfig; password: string }[] = [];
+      for (const entry of this.data.projects[source.path]) {
+        const existing = next.find(
+          (item) => item.config.name.toLocaleLowerCase() === entry.config.name.toLocaleLowerCase(),
+        );
+        if (existing) {
+          if (binding(existing.config) === binding(entry.config)) continue;
+          throw new Error(
+            "Há uma conexão com o mesmo nome e outro destino. Renomeie antes de recuperar; nenhum cadastro foi alterado.",
+          );
+        }
+        if (next.length >= maxDatabaseConnections)
+          throw new Error("A recuperação excede 20 conexões. Nenhum cadastro foi alterado.");
+        const id = randomUUID();
+        let encryptedPassword: string | undefined;
+        if (entry.encryptedPassword || this.sessionPasswords.has(this.key(source.path, entry.id))) {
+          const password = this.password(source.path, sourceRevision, entry.id, entry.config, "");
+          if (entry.encryptedPassword) {
+            try {
+              encryptedPassword = this.secrets
+                .encrypt(
+                  JSON.stringify({ project: path, id, binding: binding(entry.config), password }),
+                )
+                .toString("base64");
+            } catch {
+              throw new Error(
+                "Não foi possível proteger a senha recuperada. Os cadastros anteriores foram preservados.",
+              );
+            }
+          } else sessions.push({ id, config: entry.config, password });
+        }
+        next.push({
+          id,
+          config: structuredClone(entry.config),
+          ...(encryptedPassword ? { encryptedPassword } : {}),
+        });
+      }
+      await this.persist(path, next, signal);
+      for (const entry of sessions)
+        this.sessionPasswords.set(this.key(path, entry.id), {
+          binding: binding(entry.config),
+          password: entry.password,
+        });
+    });
+  }
+
   private enqueue(operation: () => Promise<void>): Promise<void> {
     const execution = this.queue.then(operation);
     this.queue = execution.catch(() => {});
     return execution;
   }
-  private async persist(path: string, connections: Stored["projects"][string]): Promise<void> {
+  private async persist(
+    path: string,
+    connections: Stored["projects"][string],
+    signal?: AbortSignal,
+  ): Promise<void> {
     const next: Stored = { version: 1, projects: { ...this.data.projects, [path]: connections } };
     try {
       const content = JSON.stringify(storageSchema.parse(next));
@@ -234,6 +318,7 @@ export class DatabaseConnections {
       await writeFile(`${this.file}.tmp`, content, {
         mode: 0o600,
       });
+      signal?.throwIfAborted();
       await rename(`${this.file}.tmp`, this.file);
     } catch {
       throw new Error(
