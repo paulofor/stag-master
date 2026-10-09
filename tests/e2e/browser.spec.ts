@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { installBridge } from "../fixtures/browser-bridge";
+import { emptySnapshot, type Action } from "../../src/shared/types";
 
 test.beforeEach(async ({ page }) => {
   await installBridge(page);
@@ -9,6 +10,48 @@ async function ready(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Entrar com ChatGPT" }).click();
   await page.getByRole("button", { name: "Escolher meu projeto" }).click();
 }
+test("restaurar visualização durante execução só atualiza a área, preservando página e autorização", async ({
+  page,
+}, info) => {
+  const browser = structuredClone(emptySnapshot.browser);
+  Object.assign(browser, {
+    available: true,
+    visible: true,
+    authorized: true,
+    url: "https://fixture.invalid/docs",
+  });
+  browser.tabs.documentation.url = browser.url;
+  await installBridge(page, { busy: true, browser });
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  await page.evaluate(() => {
+    const fixture = window as typeof window & { browserActions: Action[] };
+    fixture.browserActions = [];
+    const request = window.stag!.request;
+    window.stag!.request = (action) => {
+      fixture.browserActions.push(action);
+      return request(action);
+    };
+  });
+  const restore = page.getByRole("button", { name: "Restaurar visualização", exact: true });
+  await expect(restore).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Recarregar página", exact: true })).toBeDisabled();
+  await restore.click();
+  const actions = await page.evaluate(
+    () => (window as typeof window & { browserActions: Action[] }).browserActions,
+  );
+  expect(actions.length).toBeGreaterThan(0);
+  expect(actions.every((action) => action.type === "browserBounds")).toBe(true);
+  const last = actions.at(-1) as Extract<Action, { type: "browserBounds" }>;
+  expect(last.bounds.width).toBeGreaterThan(0);
+  expect(last.bounds.height).toBeGreaterThan(100);
+  const state = await page.evaluate(() => window.stag!.getSnapshot());
+  expect(state.busy).toBe(true);
+  expect(state.browser.authorized).toBe(true);
+  expect(state.browser.url).toBe(browser.url);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-browser-restore.png` });
+});
 test("abas preservam endereço e rascunho, suportam teclado e descartam páginas ao revogar", async ({
   page,
 }, info) => {

@@ -31,11 +31,14 @@ type BrowserBounds = { x: number; y: number; width: number; height: number };
 function fitsWindow(bounds: BrowserBounds, [width, height]: number[]): boolean {
   return bounds.x + bounds.width <= width + 1 && bounds.y + bounds.height <= height + 1;
 }
+const timeoutMessage =
+  "O navegador demorou para responder. Se a página estiver em branco, use Restaurar visualização. Para recarregar, pare o assistente primeiro.";
 class BrowserTimeoutError extends Error {}
 class BrowserPage extends EventEmitter {
   view!: WebContentsView;
   private info = blankInfo();
   private loadFailure: string | null = null;
+  private timedOut = false;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
   private visible = true;
   private pageId: string | null = null;
@@ -49,6 +52,9 @@ class BrowserPage extends EventEmitter {
   ) {
     super();
     this.reset();
+    this.window.on("resize", this.restoreBounds);
+    this.window.on("restore", this.restoreBounds);
+    this.window.on("show", this.restoreBounds);
   }
   snapshot(): BrowserPageInfo {
     return { ...this.info };
@@ -75,6 +81,7 @@ class BrowserPage extends EventEmitter {
     this.profileId = profileId;
     this.info = blankInfo();
     this.loadFailure = null;
+    this.timedOut = false;
     const browserSession = session.fromPartition(
       profileId
         ? `persist:stag-project-${profileId}${this.tab === "system" ? "-system" : ""}`
@@ -164,9 +171,7 @@ class BrowserPage extends EventEmitter {
       this.info.loading = contents.isLoading();
       this.info.canGoBack = contents.navigationHistory.canGoBack();
       this.info.canGoForward = contents.navigationHistory.canGoForward();
-      this.view.setVisible(
-        this.visible && !!this.info.url && this.bounds.width > 0 && this.bounds.height > 0,
-      );
+      this.restoreBounds();
       this.publish();
     };
     contents.on("did-start-loading", update);
@@ -184,9 +189,12 @@ class BrowserPage extends EventEmitter {
     });
     contents.on("render-process-gone", () => {
       if (contents !== this.view.webContents) return;
+      this.generation++;
       this.pageId = null;
+      this.loadFailure =
+        "O navegador encerrou. Pare o assistente e recarregue a página para continuar.";
       this.info.loading = false;
-      this.info.error = "O navegador encerrou. Recarregue a página para continuar.";
+      this.info.error = this.loadFailure;
       this.publish();
     });
     this.restoreBounds();
@@ -196,20 +204,15 @@ class BrowserPage extends EventEmitter {
     this.visible = visible;
     this.restoreBounds();
   }
-  private restoreBounds(): void {
-    // The native window may shrink before the renderer sends updated bounds.
-    // Discard only stale internal layout; explicit IPC bounds remain strictly validated.
-    this.setBounds(
-      fitsWindow(this.bounds, this.window.getContentSize())
-        ? this.bounds
-        : { x: 0, y: 0, width: 0, height: 0 },
-    );
-  }
-  setBounds(bounds: BrowserBounds): void {
+  private restoreBounds = (): void => {
+    if (this.disposed || this.window.isDestroyed() || this.view.webContents.isDestroyed()) return;
     const size = this.window.getContentSize();
     const [width, height] = size;
-    if (!fitsWindow(bounds, size)) throw new Error("Limites do navegador fora da janela.");
-    this.bounds = bounds;
+    // A native resize/minimize can precede renderer layout. Hide stale geometry,
+    // but retain the last accepted bounds so restore/show can recover without a reload.
+    const bounds = fitsWindow(this.bounds, size)
+      ? this.bounds
+      : { x: 0, y: 0, width: 0, height: 0 };
     // Keep a usable viewport for model operations while a compact window shows the conversation tab.
     this.view.setBounds(
       bounds.width && bounds.height
@@ -217,6 +220,13 @@ class BrowserPage extends EventEmitter {
         : { x: 0, y: 0, width: Math.min(640, width), height: Math.min(720, height) },
     );
     this.view.setVisible(this.visible && !!this.info.url && bounds.width > 0 && bounds.height > 0);
+    if (this.view.getVisible()) this.view.webContents.invalidate();
+  };
+  setBounds(bounds: BrowserBounds): void {
+    if (!fitsWindow(bounds, this.window.getContentSize()))
+      throw new Error("Limites do navegador fora da janela.");
+    this.bounds = bounds;
+    this.restoreBounds();
   }
   cancel(): void {
     this.generation++;
@@ -249,19 +259,27 @@ class BrowserPage extends EventEmitter {
     const generation = this.generation;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
+      const result = await Promise.race([
         operation,
         new Promise<T>((_resolve, reject) => {
           timer = setTimeout(() => {
-            if (generation === this.generation && !contents.isDestroyed()) this.cancel();
-            reject(
-              new BrowserTimeoutError(
-                "O navegador demorou para responder. Recarregue a página ou revogue e autorize novamente.",
-              ),
-            );
+            // stop() may reject loadURL synchronously; preserve the actual timeout diagnosis.
+            reject(new BrowserTimeoutError(timeoutMessage));
+            if (generation === this.generation && !contents.isDestroyed()) {
+              this.cancel();
+              this.timedOut = true;
+              this.info.error = timeoutMessage;
+              this.publish();
+            }
           }, 30000);
         }),
       ]);
+      if (generation === this.generation && contents === this.view.webContents && this.timedOut) {
+        this.timedOut = false;
+        if (this.info.error === timeoutMessage) this.info.error = null;
+        this.publish();
+      }
+      return result;
     } finally {
       clearTimeout(timer);
     }
@@ -386,6 +404,9 @@ class BrowserPage extends EventEmitter {
   }
   dispose(): void {
     this.disposed = true;
+    this.window.removeListener("resize", this.restoreBounds);
+    this.window.removeListener("restore", this.restoreBounds);
+    this.window.removeListener("show", this.restoreBounds);
     this.generation++;
     if (!this.view.webContents.isDestroyed()) {
       this.view.webContents.session.webRequest.onBeforeRequest((_details, callback) =>

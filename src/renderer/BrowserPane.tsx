@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   BookOpen,
   Globe2,
   Monitor,
+  PanelsTopLeft,
   RefreshCw,
   ShieldCheck,
   X,
@@ -33,6 +34,17 @@ export function BrowserPane({
   const [addresses, setAddresses] = useState(urls);
   const address = addresses[state.activeTab];
   const viewport = useRef<HTMLDivElement>(null);
+  const viewBounds = useCallback(() => {
+    const rect = viewport.current?.getBoundingClientRect();
+    return !obscured && rect?.width && rect.height
+      ? {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.floor(rect.width),
+          height: Math.floor(rect.height),
+        }
+      : { x: 0, y: 0, width: 0, height: 0 };
+  }, [obscured]);
   useEffect(() => {
     const current = { documentation: state.tabs.documentation.url, system: state.tabs.system.url };
     const changed = Object.fromEntries(
@@ -48,30 +60,24 @@ export function BrowserPane({
     const bridge = window.stag;
     if (!target || !bridge) return;
     const update = () => {
-      const rect = target.getBoundingClientRect();
-      const bounds =
-        !obscured && rect.width && rect.height
-          ? {
-              x: Math.round(rect.x),
-              y: Math.round(rect.y),
-              width: Math.floor(rect.width),
-              height: Math.floor(rect.height),
-            }
-          : { x: 0, y: 0, width: 0, height: 0 };
-      void bridge.request({ type: "browserBounds", bounds }).catch(() => {});
+      void bridge.request({ type: "browserBounds", bounds: viewBounds() }).catch(() => {});
     };
     const observer = new ResizeObserver(update);
     observer.observe(target);
     window.addEventListener("resize", update);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
     update();
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
+      window.removeEventListener("focus", update);
+      document.removeEventListener("visibilitychange", update);
       void bridge
         .request({ type: "browserBounds", bounds: { x: 0, y: 0, width: 0, height: 0 } })
         .catch(() => {});
     };
-  }, [obscured]);
+  }, [viewBounds]);
   const manualDisabled = busy || pending || obscured;
   return (
     <section className="browser-panel" aria-label="Navegador do assistente">
@@ -200,6 +206,16 @@ export function BrowserPane({
         />
         <button type="submit" className="text-button" disabled={manualDisabled || !address.trim()}>
           Ir
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Restaurar visualização"
+          title="Restaurar visualização sem recarregar a página"
+          disabled={obscured || !state.url}
+          onClick={() => void run({ type: "browserBounds", bounds: viewBounds() })}
+        >
+          <PanelsTopLeft size={16} />
         </button>
       </form>
       <div className="browser-control-status" role="status">

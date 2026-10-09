@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-09 — Navegador 0.4.46: preserva limites aceitos durante redução nativa temporária; resize/restore/show reaplicam a área. Interface oferece Restaurar visualização durante a tarefa pelo IPC existente, sem navegação ou novo consentimento. Timeout também aparece na aba; crash invalida leituras. Fonte: reprodução local no Electron e implementação desta solicitação; sessão Windows do cliente não acessada.
+
 2026-10-09 — Versão final 0.4.45 reforça a importação: compara os valores originais dos campos públicos com a senha, recusando ecos com aspas/barras antes de cards ou cadastro. Recusa também auth.json na raiz e diretórios .ssh/.aws. Regressões sintéticas, serviço, build, Codex/loopback e Electron aprovados; mesmas conexões recuperáveis da 0.4.44. Fonte: revisão final e testes desta entrega.
 
 2026-10-09 — Conexões 0.4.44: formulário abre na primeira conexão salva, mostra quantidade/raiz e oferece recuperação explícita de outra pasta com confirmação nativa, origem preservada e novo vínculo de credenciais. stag_database importa um datasource SQL Server de properties/YAML/JSON/.env dentro da raiz; main lê arquivos limitados e injeta a senha diretamente no cadastro após card bloqueante, revalidando conteúdo/revisão/contexto. Não consulta nem autoriza SQL. Leitura e históricos sem tool preservados. Harness cobre recuperação, recriação de pasta, isolamento, erros, Codex real/loopback, Electron e SQL Server real sintético. Fonte: solicitação atual e implementação; nenhum dado do cliente acessado.
