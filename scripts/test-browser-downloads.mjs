@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
@@ -16,10 +16,11 @@ export async function validateBrowserDownloads({
   dom,
 }) {
   const site = await startDownloadSite();
-  const project = resolve(dir, "downloads-project"),
-    neighbor = resolve(dir, "downloads-neighbor");
+  let project = resolve(dir, "downloads-project");
+  const neighbor = resolve(dir, "downloads-neighbor");
   await mkdir(project, { recursive: true });
   await mkdir(neighbor, { recursive: true });
+  project = await realpath(project); // Same canonical-root contract as the service.
   const navigate = () =>
     execute({
       action: "navigate",

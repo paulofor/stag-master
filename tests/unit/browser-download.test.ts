@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, readdir, rm, mkdir, symlink, rename } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, mkdir, symlink, rename, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -16,7 +16,8 @@ let root: string;
 const pdf = Buffer.from("%PDF-1.7\nsynthetic test only\n%%EOF");
 const zip = Buffer.from("504b0506000000000000000000000000000000000000", "hex");
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "stag-download-"));
+  // Windows TEMP can use a short/aliased path. The service always passes realpath.
+  root = await realpath(await mkdtemp(join(tmpdir(), "stag-download-")));
 });
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
@@ -172,6 +173,20 @@ describe("download limitado para o projeto", () => {
     expect(await readdir(neighbor)).toEqual([]);
     await rm(join(root, "stag-downloads"));
     await run();
+  });
+  it("recebe a raiz canônica da seleção mesmo quando a pasta temporária usa alias", async () => {
+    const physical = join(root, "project");
+    const alias = join(root, "project-alias");
+    await mkdir(physical);
+    await symlink(physical, alias, process.platform === "win32" ? "junction" : "dir");
+    const fetch = vi.fn(async () => new Response(pdf));
+    await expect(run(fetch, { context: { project: alias, readOnly: false } })).rejects.toThrow(
+      "link",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+    const canonical = await realpath(alias);
+    const result = await run(fetch, { context: { project: canonical, readOnly: false } });
+    expect(await readFile(join(canonical, result.path))).toEqual(pdf);
   });
   it("cancela com limpeza, não retorna caminho parcial e permite nova tentativa", async () => {
     const controller = new AbortController();
