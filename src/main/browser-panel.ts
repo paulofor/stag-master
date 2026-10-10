@@ -432,7 +432,9 @@ class BrowserPage extends EventEmitter {
               label: input.label,
               index: input.index,
             }
-          : {}),
+          : input.action === "fill"
+            ? { operation: "fill" as const, text: input.text }
+            : {}),
       })) as { reason: string | null };
       reason ||= probe.reason;
     }

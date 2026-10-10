@@ -1,6 +1,6 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.59",
+  "version": "0.4.60",
   "description": "STAG Plus: assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
@@ -101,6 +101,12 @@
     }
   },
   "devDependencies": {
+    "@angular/animations": "17.3.12",
+    "@angular/common": "17.3.12",
+    "@angular/compiler": "17.3.12",
+    "@angular/core": "17.3.12",
+    "@angular/forms": "17.3.12",
+    "@angular/platform-browser": "17.3.12",
     "@openai/codex": "0.160.0",
     "@playwright/test": "1.63.0",
     "@types/node": "26.6.4",
@@ -111,8 +117,11 @@
     "electron-builder": "26.15.3",
     "esbuild": "0.28.2",
     "prettier": "3.9.9",
+    "primeng": "17.18.15",
+    "rxjs": "7.8.2",
     "typescript": "7.0.2",
     "vite": "8.3.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "zone.js": "0.14.10"
   }
 }

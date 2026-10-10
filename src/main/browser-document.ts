@@ -7,7 +7,7 @@ export function browserDocument(request: {
   value?: string;
   label?: string;
   index?: number;
-  operation?: "select";
+  operation?: "select" | "fill";
   delta?: number;
 }) {
   type Target = { element: HTMLElement; signature: string };
@@ -15,6 +15,41 @@ export function browserDocument(request: {
     __stagDocument?: { pageId: string; url: string; targets: Map<string, Target> };
   };
   const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  // PrimeNG Calendar 17 renders these choices as spans without an ARIA role.
+  // Keep explicit DOM targets; no selectors or script supplied by the model.
+  const calendarCells =
+    ".p-datepicker .p-monthpicker-month,.p-datepicker .p-yearpicker-year,.p-datepicker .p-datepicker-calendar td > span";
+  const calendarScope = (el: HTMLElement): HTMLElement | null =>
+    el.closest<HTMLElement>(".p-datepicker") ||
+    (el.closest<HTMLElement>('[role="dialog"]')?.querySelector('[role="grid"]')
+      ? el.closest<HTMLElement>('[role="dialog"]')
+      : el.closest<HTMLElement>('[role="grid"]'));
+  const selectedState = (el: HTMLElement) =>
+    el.hasAttribute("aria-selected")
+      ? el.getAttribute("aria-selected") === "true"
+      : el.matches(calendarCells)
+        ? el.classList.contains("p-highlight")
+        : undefined;
+  const dateFormats: Record<string, { format: string; pattern: RegExp }> = {
+    date: { format: "YYYY-MM-DD", pattern: /^\d{4}-\d{2}-\d{2}$/ },
+    month: { format: "YYYY-MM", pattern: /^\d{4}-\d{2}$/ },
+    "datetime-local": {
+      format: "YYYY-MM-DDTHH:mm[:ss[.SSS]]",
+      pattern: /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/,
+    },
+    time: { format: "HH:mm[:ss[.SSS]]", pattern: /^\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/ },
+    week: { format: "YYYY-Www", pattern: /^\d{4}-W\d{2}$/ },
+  };
+  const dateInfo = (el: HTMLElement) => {
+    if (!(el instanceof HTMLInputElement) || !dateFormats[el.type]) return undefined;
+    const { format, pattern } = dateFormats[el.type];
+    return {
+      format,
+      min: pattern.test(el.min) ? el.min : undefined,
+      max: pattern.test(el.max) ? el.max : undefined,
+      step: /^(?:any|\d+(?:\.\d+)?)$/.test(el.step) ? el.step : undefined,
+    };
+  };
   const label = (el: HTMLElement) =>
     (
       (el.getAttribute("aria-labelledby") || "")
@@ -24,6 +59,13 @@ export function browserDocument(request: {
         .trim() ||
       el.getAttribute("aria-label") ||
       el.getAttribute("placeholder") ||
+      (el.matches(calendarCells)
+        ? Array.from(el.childNodes)
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent || "")
+            .join(" ")
+            .trim()
+        : "") ||
       (el instanceof HTMLInputElement ||
       el instanceof HTMLSelectElement ||
       el instanceof HTMLTextAreaElement
@@ -63,31 +105,52 @@ export function browserDocument(request: {
       el.getAttribute("aria-haspopup"),
       el.getAttribute("aria-readonly"),
       el.getAttribute("aria-disabled"),
+      el.getAttribute("readonly"),
+      el.getAttribute("disabled"),
+      el.getAttribute("aria-selected"),
+      el.getAttribute("min"),
+      el.getAttribute("max"),
+      el.getAttribute("step"),
+      el.getAttribute("required"),
+      el.getAttribute("data-date"),
+      selectedState(el),
+      unavailable(el),
       checkedState(el),
       el instanceof HTMLSelectElement
         ? [el.multiple, Array.from(el.options).map((o) => [o.label, o.value, unavailable(o)])]
         : null,
     ]);
   const unavailable = (el: HTMLElement) =>
-    el.matches(":disabled") || !!el.closest('[aria-disabled="true"],[inert],[hidden]');
+    el.matches(":disabled") ||
+    !!el.closest('[aria-disabled="true"],[inert],[hidden]') ||
+    (!!calendarScope(el) && !!el.closest(".p-disabled"));
   const owners = (el: HTMLElement): HTMLElement[] => {
     const list = el.closest<HTMLElement>('[role="listbox"]');
-    if (!list) return [];
+    const calendar = calendarScope(el);
+    const container = calendar || list;
+    if (!container) return [];
     return [
-      list,
+      container,
       ...Array.from(
-        document.querySelectorAll<HTMLElement>('[role="combobox"],[aria-haspopup="listbox"]'),
+        document.querySelectorAll<HTMLElement>(
+          '[role="combobox"],[aria-haspopup="listbox"],[aria-haspopup="dialog"],[aria-haspopup="grid"]',
+        ),
       ).filter(
         (combo) =>
-          combo.contains(list) ||
+          combo.contains(container) ||
           [combo.getAttribute("aria-controls"), combo.getAttribute("aria-owns")].some(
-            (ids) => !!list.id && ids?.split(/\s+/).includes(list.id),
+            (ids) => !!container.id && ids?.split(/\s+/).includes(container.id),
           ),
       ),
     ].filter((owner) => owner !== el);
   };
   const targetSignature = (el: HTMLElement) =>
-    JSON.stringify([signature(el), owners(el).map(signature)]);
+    JSON.stringify([
+      signature(el),
+      owners(el).map(signature),
+      // A month/day with the same label in another year/month is a different target.
+      normalize(calendarScope(el)?.innerText || "").slice(0, 4000),
+    ]);
   const visible = (el: HTMLElement) => {
     const rect = el.getBoundingClientRect();
     const style = getComputedStyle(el);
@@ -103,7 +166,8 @@ export function browserDocument(request: {
     const targets = new Map<string, Target>();
     const nodes = Array.from(
       document.querySelectorAll<HTMLElement>(
-        "a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[contenteditable=true],[role=combobox],[role=listbox],[role=option],[aria-haspopup=listbox],[role=checkbox],[role=radio],[role=switch]",
+        "a[href],button,input:not([type=hidden]),textarea,select,[role=button],[role=link],[contenteditable=true],[role=combobox],[role=listbox],[role=option],[aria-haspopup=listbox],[role=checkbox],[role=radio],[role=switch],[role=grid],[role=gridcell],[role=dialog],[tabindex]:not(input[type=hidden])," +
+          calendarCells,
       ),
     )
       .filter(visible)
@@ -124,6 +188,16 @@ export function browserDocument(request: {
           : undefined,
         disabled: unavailable(el),
         checked: checkedState(el),
+        selected: selectedState(el),
+        otherMonth: el.matches(".p-datepicker .p-datepicker-calendar td > span")
+          ? !!el.closest(".p-datepicker-other-month")
+          : undefined,
+        readOnly:
+          el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+            ? el.readOnly
+            : el.getAttribute("aria-readonly") === "true",
+        date: dateInfo(el),
+        calendarRef: refs.get(calendarScope(el)!),
         controlsRefs: (el.getAttribute("aria-controls") || el.getAttribute("aria-owns") || "")
           .split(/\s+/)
           .map((id) => refs.get(document.getElementById(id)!))
@@ -193,6 +267,23 @@ export function browserDocument(request: {
     throw new Error("O campo é somente leitura.");
   if (el instanceof HTMLInputElement && el.type === "file")
     throw new Error("Upload de arquivos requer ação manual do cliente.");
+  let dateValue: string | undefined;
+  if (request.action === "fill" || request.operation === "fill") {
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      if (el.readOnly) throw new Error("O campo é somente leitura. Use o calendário disponível.");
+    }
+    if (el instanceof HTMLInputElement && dateFormats[el.type]) {
+      const info = dateFormats[el.type];
+      if (request.text !== "" && !info.pattern.test(request.text || ""))
+        throw new Error(`Formato de data inválido. Use ${info.format}, sem fuso horário.`);
+      // Check a detached native control before mutating the live form or emitting events.
+      const candidate = el.cloneNode(false) as HTMLInputElement;
+      candidate.value = request.text!;
+      if ((request.text !== "" && !candidate.value) || !candidate.validity.valid)
+        throw new Error("Data/hora inválida ou fora dos limites min/max/step do campo.");
+      dateValue = candidate.value;
+    }
+  }
   let option: HTMLOptionElement | undefined;
   if (request.action === "select" || request.operation === "select") {
     if (!(el instanceof HTMLSelectElement))
@@ -251,7 +342,11 @@ export function browserDocument(request: {
   el.scrollIntoView({ block: "center", inline: "nearest" });
   if (request.action === "click") {
     // Custom combos commonly open on mouse/pointer down, not on HTMLElement.click().
-    if (el.matches('[role="combobox"],[role="option"],[aria-haspopup="listbox"]')) {
+    if (
+      el.matches(
+        '[role="combobox"]:not([aria-haspopup="dialog"]):not([aria-haspopup="grid"]),[role="option"],[aria-haspopup="listbox"]',
+      )
+    ) {
       const rect = el.getBoundingClientRect();
       const pointer = {
         bubbles: true,
@@ -287,7 +382,8 @@ export function browserDocument(request: {
   if (request.action === "fill") {
     if (
       (el instanceof HTMLInputElement &&
-        !["text", "email", "search", "url", "tel", "password", "number"].includes(el.type)) ||
+        !["text", "email", "search", "url", "tel", "password", "number"].includes(el.type) &&
+        !dateFormats[el.type]) ||
       (!(el instanceof HTMLInputElement) &&
         !(el instanceof HTMLTextAreaElement) &&
         !el.isContentEditable)
@@ -297,12 +393,19 @@ export function browserDocument(request: {
       if (el.readOnly) throw new Error("O campo é somente leitura.");
       const proto =
         el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
-      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, request.text);
+      Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, dateValue ?? request.text);
     } else el.textContent = request.text!;
     el.dispatchEvent(
       new InputEvent("input", { bubbles: true, inputType: "insertText", data: request.text }),
     );
     el.dispatchEvent(new Event("change", { bubbles: true }));
+    if (
+      dateValue !== undefined &&
+      (!el.isConnected || (el as HTMLInputElement).value !== dateValue)
+    )
+      throw new Error(
+        "A página não manteve a data. Faça um novo snapshot para conferir o resultado.",
+      );
   }
   if (request.action === "select") {
     const select = el as HTMLSelectElement;

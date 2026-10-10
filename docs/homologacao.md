@@ -1,4 +1,21 @@
-# Matriz de homologação da versão 0.4.59
+# Matriz de homologação da versão 0.4.60
+
+## Escolha de datas e competências — versão 0.4.60
+
+Matriz definida antes dos testes. A imagem mostra escolha de competência por mês/ano. O driver omite spans de calendário sem role e recusa fill em inputs date/month; o harness anterior só cobre combos. Usar o Calendar PrimeNG 17 real com Angular e dados sintéticos para reproduzir a estrutura, além de campos nativos e uma grade ARIA. A versão do sistema do cliente não foi verificada; não acessar seu sistema, sessão ou dados.
+
+| Área                       | Cenário e aceite                                                                                                                                                 | Evidência prevista                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Caminho feliz              | Abrir competência, navegar ano/década, escolher mês e conferir ngModel; selecionar dia; preencher date/month/datetime-local/time nativos nos formatos declarados | Driver de produção em Electron, Angular/PrimeNG e Chromium    |
+| Validações                 | Datas impossíveis, formato incorreto, min/max/step, desabilitados, somente leitura; seleção inválida sem efeito                                                  | Controles reais e falhas explícitas                           |
+| Recuperação                | Referência antiga após trocar ano/mês, mudar restrições, fechar/substituir calendário ou navegar; campo que rejeita valor não pode retornar sucesso              | Falhas reproduzíveis e nova tentativa com snapshot atualizado |
+| Integração e isolamento    | Mesmo schema click/fill; instruções em início/retomada; referências não atravessam abas; calendário herda risco do campo; aprovação revalida alvo                | Serviço, Codex real/provedor loopback e Electron              |
+| Observabilidade e métricas | Formato e restrições no snapshot; confirmação pelo estado do componente; não expor valores de outros campos, segredos ou criar métricas novas                    | Asserções sintéticas e contadores existentes                  |
+| Plataformas                | Electron Linux e Windows; Chromium amplo/compacto e Pixel 7; preservar conversa, consentimento e fila existentes                                                 | check, test:desktop, format:check, PR/main e pacote Windows   |
+
+O harness comprova execução e transporte, sem prometer decisões semânticas do modelo. Referências técnicas: [Calendar PrimeNG 17](https://github.com/primefaces/primeng/blob/17.18.15/src/app/components/calendar/calendar.ts) e [DatePicker — seleção de mês](https://v19.primeng.org/datepicker).
+
+Evidência local em 2026-10-10: comparação com o driver anterior reproduziu 12 meses renderizados e zero refs, além da recusa de fill date. Os novos cenários passaram em Chromium desktop/Pixel 7 e no driver isolado do Electron com Angular/PrimeNG reais: ngModel, dia bloqueado, ano/década, min/max/step, referências antigas, portal com pagamento, rejeição do valor e recuperação. A conferência final do Electron validou as 12 referências, captura e isolamento/reset. A regressão completa do Electron passou, incluindo downloads, sessões, TLS, fila e cancelamento. `npm run check` completo passou: 906 contratos, 148 cenários de interface, build, decoder/ASR e Codex real/provedor loopback; a primeira rodada revelou timeout de um segundo para cinco turnos serializados na fila, corrigido com espera limitada de cinco segundos, e os três modos passaram novamente. Formatação, tipos e sintaxe JavaScript conferidos. Nenhum script shell alterado. O servidor independente passou seus 15 contratos e integração Docker/PostgreSQL/painel, backup/restauração e limpeza. Node 22.23.3 ficou somente no workspace; dependências de mídia foram obtidas com checksum fixado após download lento. A sandbox Linux limita namespaces bwrap; execução nativa Windows e pacote exigem os jobs do PR/main. Nenhum sistema, sessão ou dado do cliente foi acessado.
 
 ## Downloads e destino escolhido pelo modelo — versão 0.4.59
 

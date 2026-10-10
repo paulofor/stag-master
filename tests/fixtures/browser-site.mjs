@@ -1,10 +1,21 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { build } from "esbuild";
+import { readFile } from "node:fs/promises";
 import { syntheticBrowserPdf } from "./browser-pdf.mjs";
 
 // Every page and field is synthetic. Only loopback traffic, with no account or external service.
 export async function startBrowserSite() {
+  const dateScript = (
+    await build({
+      entryPoints: ["tests/fixtures/browser-dates.mjs"],
+      bundle: true,
+      write: false,
+      platform: "browser",
+      format: "iife",
+    })
+  ).outputFiles[0].text;
+  const dateCss = await readFile("node_modules/primeng/resources/primeng.min.css", "utf8");
   const comboScript = (
     await build({
       entryPoints: ["tests/fixtures/browser-combos.tsx"],
@@ -17,6 +28,20 @@ export async function startBrowserSite() {
   ).outputFiles[0].text;
   const effects = { submissions: 0, downloads: 0, hangs: 0 };
   const server = createServer((request, response) => {
+    if (request.url === "/dates.js" || request.url === "/dates.css") {
+      response.writeHead(200, {
+        "Content-Type": request.url.endsWith(".js") ? "text/javascript" : "text/css",
+      });
+      response.end(request.url.endsWith(".js") ? dateScript : dateCss);
+      return;
+    }
+    if (request.url === "/dates") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(
+        '<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Datas sintéticas</title><link rel="stylesheet" href="/dates.css"><style>body{font:16px system-ui;padding:16px}label{display:block;margin:12px 0}input{padding:8px;max-width:90%}.p-datepicker{background:white;border:1px solid #888;padding:12px;box-shadow:0 2px 8px #999}.p-monthpicker-month,.p-yearpicker-year,.p-datepicker-calendar td>span{padding:10px}.p-datepicker-header{padding:8px}.p-disabled{opacity:.4}.p-highlight{background:#cdf}.p-hidden-accessible{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}</style><body><date-controls></date-controls><script src="/dates.js"></script></body></html>',
+      );
+      return;
+    }
     if (["/manual.pdf/@@display-file/file", "/download-pdf"].includes(request.url)) {
       response.writeHead(200, {
         "Content-Type": "application/pdf",
