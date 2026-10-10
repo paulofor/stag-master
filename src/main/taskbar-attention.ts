@@ -25,6 +25,8 @@ export class TaskbarAttention {
   private waitingThread: string | null = null;
   private flashing = false;
   private disposed = false;
+  private thread: string | null = null;
+  private working = false;
   private readonly icon = attentionIcon();
   private readonly refresh = () => {
     if (this.window.isFocused() && !this.window.isMinimized() && this.window.isVisible())
@@ -51,9 +53,21 @@ export class TaskbarAttention {
     const waiting =
       snapshot.connection === "ready" && !!snapshot.threadId && snapshot.approvals.length > 0;
     const waitingThread = waiting ? snapshot.threadId : null;
+    const thread = snapshot.connection === "ready" ? snapshot.threadId : null;
+    const working =
+      snapshot.busy ||
+      !!snapshot.videoAnalysis?.working ||
+      (!snapshot.queuePaused && snapshot.queuedMessages.length > 0);
+    if (
+      waitingThread !== this.waitingThread ||
+      thread !== this.thread ||
+      (working && !this.working)
+    )
+      this.sound?.stop();
+    this.thread = thread;
+    this.working = working;
     if (waitingThread !== this.waitingThread) {
       this.waitingThread = waitingThread;
-      this.sound?.stop();
       if (waiting && this.platform === "win32") this.sound?.play();
     }
     if (waiting !== this.waiting) {
@@ -66,6 +80,23 @@ export class TaskbarAttention {
         );
     }
     this.updateFlash();
+  }
+
+  completed(threadId: string): void {
+    if (
+      this.disposed ||
+      this.window.isDestroyed() ||
+      this.platform !== "win32" ||
+      this.thread !== threadId ||
+      this.waiting ||
+      this.working
+    )
+      return;
+    this.sound?.play();
+  }
+
+  stopSound(): void {
+    this.sound?.stop();
   }
 
   private updateFlash(): void {
@@ -94,6 +125,8 @@ export class TaskbarAttention {
     }
     this.waiting = false;
     this.waitingThread = null;
+    this.thread = null;
+    this.working = false;
     this.flashing = false;
     this.disposed = true;
   };

@@ -202,6 +202,8 @@ export class AssistantService extends EventEmitter {
   private disposed = false;
   private sandboxReady = false;
   private completedTurns = new Set<string>();
+  private completedWork: { threadId: string; videoId: string | null } | null = null;
+  private checkingCompletion = false;
   private safetyBlockId = 0;
   private projectPreparation = new AbortController();
   private projectRefreshAbort: AbortController | null = null;
@@ -295,7 +297,47 @@ export class AssistantService extends EventEmitter {
     this.publish();
   }
   private publish(): void {
-    if (!this.disposed) this.emit("snapshot", this.snapshot());
+    if (this.disposed) return;
+    this.emit("snapshot", this.snapshot());
+    this.notifyWorkCompleted();
+  }
+  private notifyWorkCompleted(): void {
+    const completed = this.completedWork;
+    if (!completed) return;
+    const video = this.analysis?.summary();
+    if (
+      this.disposed ||
+      this.stopping ||
+      this.state.connection !== "ready" ||
+      this.state.threadId !== completed.threadId ||
+      (completed.videoId &&
+        (video?.id !== completed.videoId || !["running", "completed"].includes(video.status)))
+    ) {
+      this.completedWork = null;
+      return;
+    }
+    const idle = () =>
+      !this.state.busy &&
+      !this.sending &&
+      !this.drainingMessages &&
+      !this.changing &&
+      !this.analysis?.working &&
+      !this.state.approvals.length &&
+      (this.state.queuePaused || !this.state.queuedMessages.length);
+    if (this.checkingCompletion || !idle()) return;
+    this.checkingCompletion = true;
+    const tools = this.toolQueue;
+    void tools
+      .then(() => {
+        // Completion is not idleness until local tools have closed and automatic work has ended.
+        if (this.completedWork !== completed || tools !== this.toolQueue || !idle()) return;
+        this.completedWork = null;
+        this.emit("workCompleted", { threadId: completed.threadId });
+      })
+      .finally(() => {
+        this.checkingCompletion = false;
+        this.notifyWorkCompleted();
+      });
   }
   private disableMouseMovement(status = "Desligado"): void {
     this.mouseEpoch++;
@@ -1542,6 +1584,7 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.completedWork = null;
     this.projectRefreshAbort?.abort();
     this.revokeApis();
     this.revokeDatabases();
@@ -1784,6 +1827,7 @@ export class AssistantService extends EventEmitter {
   private clearChat(): void {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
+    this.completedWork = null;
     this.disableMouseMovement();
     this.analysis?.detach();
     this.toolEpoch++;
@@ -1909,6 +1953,7 @@ export class AssistantService extends EventEmitter {
     this.publish();
   }
   private async resume(id: string): Promise<void> {
+    this.completedWork = null;
     const policy = this.settings.threads[id];
     if (!policy || policy.path !== this.state.project?.path)
       throw new Error("Conversa indisponível para este projeto.");
@@ -2080,6 +2125,7 @@ export class AssistantService extends EventEmitter {
     const localId = `local-${Date.now()}`;
     if (video) input = `${input}${input ? "\n\n" : ""}${videoMessage(video)}`;
     const suppliedImages = video ? videoImages(video).images : images;
+    this.completedWork = null;
     this.sending = true;
     try {
       // Preview and authoritative item must refer to the same encoded image; otherwise
@@ -2166,6 +2212,7 @@ export class AssistantService extends EventEmitter {
       if (analysisVideo && this.analysisInterruptRequested && this.state.busy) await this.stop();
       if (video && this.preparedVideo === video) this.clearVideo();
     } catch (error) {
+      this.completedWork = null;
       this.state.busy = false;
       this.turnId = null;
       this.state.items = this.state.items.filter((item) => item.id !== localId);
@@ -2183,6 +2230,8 @@ export class AssistantService extends EventEmitter {
     }
   }
   private async stop(): Promise<void> {
+    this.completedWork = null;
+    this.emit("workStopped");
     const projectRefreshWork = this.projectRefreshAbort ? this.toolQueue : null;
     this.projectRefreshAbort?.abort();
     const sqlWork = this.sqlWork;
@@ -2370,6 +2419,7 @@ export class AssistantService extends EventEmitter {
         this.state.approvals = this.state.approvals.filter((a) => a.id !== String(p.requestId));
         break;
       case "error":
+        this.completedWork = null;
         this.analysis?.detach();
         this.state.error = text(object(p.error).message) || "Falha na execução.";
         this.state.queuePaused = true;
@@ -2392,6 +2442,13 @@ export class AssistantService extends EventEmitter {
         this.pending.clear();
         this.state.approvals = [];
         if (turn.status !== "completed" || this.stopping) this.state.queuePaused = true;
+        this.completedWork =
+          turn.status === "completed" && !this.stopping
+            ? {
+                threadId: this.state.threadId,
+                videoId: this.analysis?.working ? this.analysis.summary()?.id || null : null,
+              }
+            : null;
         if (turn.status === "failed") {
           this.state.error = turn.error?.message || "Falha na execução.";
           this.state.metrics.failures++;
@@ -3139,6 +3196,7 @@ export class AssistantService extends EventEmitter {
     this.state.approvals = this.state.approvals.filter((a) => a.id !== action.id);
   }
   dispose(): void {
+    this.completedWork = null;
     this.projectRefreshAbort?.abort();
     this.databaseAbort?.abort();
     this.disableMouseMovement();

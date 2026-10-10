@@ -1844,6 +1844,8 @@ describe("fila de textos por conversa", () => {
   });
   it("reconecta sem replay e mantém envio sem resposta como incerto até remoção", async () => {
     await ready();
+    const completed = vi.fn();
+    service.on("workCompleted", completed);
     await send("lento");
     await enqueue("sonda fila sem resposta");
     await enqueue("depois do envio incerto");
@@ -1861,6 +1863,7 @@ describe("fila de textos por conversa", () => {
     // Close after handshake and observed turn acceptance, without a process-start deadline.
     await rpc.shutdown();
     await vi.waitFor(() => expect(service.snapshot().queuedMessages[0].status).toBe("uncertain"));
+    expect(completed).not.toHaveBeenCalled();
     await service.request({ type: "connect" });
     expect(service.snapshot().queuePaused).toBe(true);
     expect(service.snapshot().busy).toBe(true);
@@ -1868,6 +1871,7 @@ describe("fila de textos por conversa", () => {
     await expect(pause(false)).rejects.toThrow("Envio não confirmado");
     await service.request({ type: "stop" });
     await complete();
+    expect(completed).not.toHaveBeenCalled();
     await service.request({
       type: "removeQueued",
       threadId: service.snapshot().threadId!,
@@ -1876,6 +1880,7 @@ describe("fila de textos por conversa", () => {
     await pause(false);
     await vi.waitFor(() => expect(service.snapshot().queuedMessages).toHaveLength(0));
     await complete();
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
     expect(
       service
         .snapshot()
@@ -2047,6 +2052,238 @@ describe("conclusão de turnos e fila", () => {
     } finally {
       release();
     }
+  });
+});
+describe("aviso de trabalho concluído", () => {
+  it.each(["project", "read", "windows"] as const)(
+    "avisa uma vez após conclusão autoritativa em %s, sem repetir no histórico",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      const completed = vi.fn();
+      service.on("workCompleted", completed);
+      await send("trabalho sintético concluído");
+      await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+      expect(service.snapshot().busy).toBe(false);
+      expect(service.snapshot().approvals).toEqual([]);
+      const threadId = service.snapshot().threadId!;
+      expect(completed).toHaveBeenCalledWith({ threadId });
+      const { thread } = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      for (const eventThread of [threadId, "other-thread"])
+        rpc.emit("notification", {
+          method: "turn/completed",
+          params: {
+            threadId: eventThread,
+            turn: { id: thread.turns.at(-1)!.id, status: "completed", items: [] },
+          },
+        });
+      await service.request({ type: "resume", threadId });
+      expect(completed).toHaveBeenCalledOnce();
+      await send("novo trabalho sintético concluído");
+      await vi.waitFor(() => expect(completed).toHaveBeenCalledTimes(2));
+    },
+  );
+
+  it("não avisa por resposta final, turno alheio, falha ou interrupção e recupera na próxima tarefa", async () => {
+    await ready();
+    const completed = vi.fn();
+    const stopped = vi.fn();
+    service.on("workCompleted", completed);
+    service.on("workStopped", stopped);
+    for (const status of ["failed", "interrupted"] as const) {
+      await send("trabalho lento");
+      const threadId = service.snapshot().threadId!;
+      const { thread } = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      const turnId = thread.turns.at(-1)!.id;
+      rpc.emit("notification", {
+        method: "item/completed",
+        params: {
+          threadId,
+          turnId,
+          item: {
+            id: "synthetic-final",
+            type: "agentMessage",
+            text: "Concluído",
+            phase: "final_answer",
+          },
+        },
+      });
+      for (const [eventThreadId, id] of [
+        ["other-thread", turnId],
+        [threadId, "old-turn"],
+      ])
+        rpc.emit("notification", {
+          method: "turn/completed",
+          params: { threadId: eventThreadId, turn: { id, status: "completed", items: [] } },
+        });
+      expect(service.snapshot().busy).toBe(true);
+      expect(completed).not.toHaveBeenCalled();
+      if (status === "interrupted") await service.request({ type: "stop" });
+      else await rpc.call("_fixture/finishTurn", { threadId, turnId, status });
+      await complete();
+      expect(completed).not.toHaveBeenCalled();
+    }
+    expect(stopped).toHaveBeenCalledOnce();
+    await send("trabalho recuperado rápido");
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    // Parar também cancela o aviso depois que a conversa já ficou ociosa.
+    await service.request({ type: "stop" });
+    expect(stopped).toHaveBeenCalledTimes(2);
+  });
+
+  it("avisa somente no fim da fila, incluindo conclusão anterior à resposta de turn/start", async () => {
+    await ready();
+    const completed = vi.fn();
+    service.on("workCompleted", completed);
+    await send("primeiro lento");
+    const threadId = service.snapshot().threadId!;
+    for (const text of ["segundo rápido", "terceiro rápido"])
+      await service.request({ type: "enqueue", threadId, id: randomUUID(), text });
+    const { thread } = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    await rpc.call("_fixture/finishTurn", { threadId, turnId: thread.turns.at(-1)!.id });
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    expect(service.snapshot().queuedMessages).toEqual([]);
+    expect(service.snapshot().busy).toBe(false);
+    const calls = await rpc.call<{ method: string }[]>("_fixture/readCalls");
+    expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(3);
+  });
+
+  it.each(["none", "stop", "newChat", "connect", "dispose"] as const)(
+    "aguarda limpeza das ferramentas e descarta conclusão ao %s",
+    async (action) => {
+      await ready();
+      await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
+      const completed = vi.fn();
+      service.on("workCompleted", completed);
+      let release!: () => void;
+      desktop.execute.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return {
+          success: true,
+          contentItems: [{ type: "inputText", text: "Resultado sintético" }],
+        };
+      });
+      try {
+        await send("desktop");
+        await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+        const threadId = service.snapshot().threadId!;
+        const { thread } = await rpc.call<{ thread: { turns: { id: string }[] } }>("thread/read", {
+          threadId,
+          includeTurns: true,
+        });
+        await rpc.call("_fixture/finishTurn", { threadId, turnId: thread.turns.at(-1)!.id });
+        await complete();
+        expect(completed).not.toHaveBeenCalled();
+        let change: Promise<unknown> | undefined;
+        if (action === "dispose") service.dispose();
+        else if (action !== "none") change = service.request({ type: action });
+        release();
+        await change;
+        await service.mediaSettled();
+        if (action === "none") await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+        else expect(completed).not.toHaveBeenCalled();
+      } finally {
+        release?.();
+      }
+    },
+  );
+
+  it("não avisa entre trechos e só avisa após checkpoint final do vídeo", async () => {
+    await ready();
+    const snapshots: ReturnType<AssistantService["snapshot"]>[] = [];
+    service.on("workCompleted", () => snapshots.push(service.snapshot()));
+    await service.request({ type: "analyzeVideo" });
+    await service.mediaSettled();
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(backgroundVideo.prepare).toHaveBeenCalledTimes(3);
+    expect(snapshots[0]).toMatchObject({
+      busy: false,
+      videoAnalysis: { completed: 3, status: "completed", working: false },
+    });
+  });
+
+  it("aguarda também os textos enfileirados durante análise do vídeo", async () => {
+    await ready();
+    const snapshots: ReturnType<AssistantService["snapshot"]>[] = [];
+    service.on("workCompleted", () => snapshots.push(service.snapshot()));
+    await service.request({ type: "analyzeVideo" });
+    await service.request({
+      type: "enqueue",
+      threadId: service.snapshot().threadId!,
+      id: randomUUID(),
+      text: "consolidação sintética rápida",
+    });
+    await service.mediaSettled();
+    await vi.waitFor(() => expect(snapshots).toHaveLength(1));
+    expect(snapshots[0]).toMatchObject({
+      busy: false,
+      queuedMessages: [],
+      videoAnalysis: { status: "completed" },
+    });
+    expect(
+      snapshots[0].items.some(
+        (item) => item.kind === "user" && item.text === "consolidação sintética rápida",
+      ),
+    ).toBe(true);
+  });
+
+  it("falha depois de trecho concluído e envio rejeitado não anunciam sucesso", async () => {
+    await ready();
+    const completed = vi.fn();
+    service.on("workCompleted", completed);
+    const prepare = vi.mocked(backgroundVideo.prepare).getMockImplementation()!;
+    vi.mocked(backgroundVideo.prepare)
+      .mockImplementationOnce(prepare)
+      .mockRejectedValueOnce(new Error("Não foi possível preparar o vídeo."));
+    await service.request({ type: "analyzeVideo" });
+    await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis).toMatchObject({ completed: 1, status: "failed" });
+    expect(completed).not.toHaveBeenCalled();
+    await expect(send("sonda fila rejeitada")).rejects.toThrow("Falha sintética");
+    expect(completed).not.toHaveBeenCalled();
+    await send("trabalho sintético recuperado");
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
+  });
+
+  it("pausa depois de um trecho descarta aviso; retomada concluída volta a avisar", async () => {
+    await ready();
+    const completed = vi.fn();
+    service.on("workCompleted", completed);
+    const prepare = vi.mocked(backgroundVideo.prepare).getMockImplementation()!;
+    let preparingSecond = false;
+    vi.mocked(backgroundVideo.prepare)
+      .mockImplementationOnce(prepare)
+      .mockImplementationOnce(async (...args) => {
+        preparingSecond = true;
+        const signal = args[3];
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", () => resolve(), { once: true }),
+        );
+        signal.throwIfAborted();
+        return prepare(...args);
+      });
+    await service.request({ type: "analyzeVideo" });
+    await vi.waitFor(() => expect(preparingSecond).toBe(true));
+    const id = service.snapshot().videoAnalysis!.id;
+    expect(service.snapshot().videoAnalysis?.completed).toBe(1);
+    await service.request({ type: "videoAnalysis", id, control: "pause" });
+    await service.mediaSettled();
+    expect(service.snapshot().videoAnalysis?.status).toBe("paused");
+    expect(completed).not.toHaveBeenCalled();
+    await service.request({ type: "videoAnalysis", id, control: "resume" });
+    await service.mediaSettled();
+    await vi.waitFor(() => expect(completed).toHaveBeenCalledOnce());
   });
 });
 describe("fontes de documentação cadastradas", () => {

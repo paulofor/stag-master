@@ -1,4 +1,22 @@
-# Matriz de homologação da versão 0.4.50
+# Matriz de homologação da versão 0.4.51
+
+## Aviso sonoro ao concluir o trabalho — versão 0.4.51
+
+Matriz definida antes dos testes. Lacuna observada: o aviso existente só considera perguntas/aprovações; o harness não confere a conclusão autoritativa seguida de ociosidade. Reutilizar o áudio de cinco segundos e o controlador do main, sem interpretar mensagens, criar IPC ou consumir turnos.
+
+| Área                          | Cenário e aceite                                                                                                                                     | Evidência prevista                                             |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Caminho feliz                 | Conclusão bem-sucedida toca uma vez em Projeto, Leitura e Windows, inclusive minimizado; mensagem final em andamento não toca                        | Serviço, controlador e Electron reais com fixture bidirecional |
+| Continuidade                  | Não tocar entre mensagens da fila nem entre trechos de vídeo; aguardar encerramento da fila compartilhada e checkpoint final                         | Gates locais e vídeo sintético de vários trechos               |
+| Validações e isolamento       | Eventos duplicados/antigos/de outra conversa, histórico, falha, interrupção e envio incerto não anunciam conclusão                                   | Contratos do serviço e recuperação                             |
+| Cancelamento e recuperação    | Novo trabalho, foco, parada, desconexão, troca e fechamento interrompem áudio e descartam conclusão pendente; próxima conclusão válida volta a tocar | Controlador, subprocesso e serviço                             |
+| Integrações e observabilidade | Perguntas/aprovações continuam com aviso visual e sonoro; conclusão não cria aprovação nem sinal de espera; falha de áudio não bloqueia o trabalho   | Contadores sintéticos, APIs Electron e player existentes       |
+| Métricas e dados              | Sem requisição ao modelo ou exportação adicional; som fixo sem conteúdo da conversa, segredos ou persistência                                        | RPC da fixture e testes de waveform/decoder                    |
+| Plataformas                   | Chromium desktop/Pixel 7 preservados; Linux valida lógica e decoder, Windows comprova player nativo e instalador                                     | check, test:desktop, format:check e CI PR/main                 |
+
+Os testes usam somente contas, projetos e respostas sintéticos. O aviso indica conclusão da execução, sem comprovar que o conteúdo da resposta atende semanticamente ao pedido. O volume e a saída seguem o Windows; não alterar mixer, foco ou políticas. Linux não comprova reprodução/aparência nativa Windows.
+
+Evidência local: regressão confirmou ausência do aviso antes do ajuste; `npm run check` passou com 860 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 148 cenários Chromium/Pixel 7. `xvfb-run -a npm run test:desktop` passou com APIs/controlador e fluxo completo da conversa, histórico/reload, interrupção e recuperação; o probe Windows conta apenas partidas do player de produção, sem registrar argumentos ou áudio. A regressão adicional de envio incerto passou após ampliar as asserções do caso existente. Formatação, sintaxe JavaScript e diff aprovados; nenhum script shell alterado. O primeiro download Node da dependência de mídia excedeu o prazo; os mesmos arquivos fixados foram obtidos por curl, validados por SHA-256 e usados pelo build existente. Node 22.23.3 fica somente no workspace, sem alterar ferramentas compartilhadas. Linux mantém a limitação bwrap declarada pelo smoke; player/NTFS e pacote Windows exigem os jobs nativos do PR/main. Nenhuma conta, mídia ou janela do cliente utilizada.
 
 ## Testes e build locais sem perguntas redundantes — versão 0.4.50
 
