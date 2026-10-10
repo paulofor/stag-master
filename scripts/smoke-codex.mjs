@@ -65,6 +65,7 @@ try {
     browserArguments,
     browserTabsInstructions,
     browserCaptureInstructions,
+    browserDateInstructions,
     browserCaptureCapability,
   } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const { pdfTool, pdfCapability, pdfInstructions } = await import(
@@ -651,6 +652,18 @@ try {
             tab: args.tab,
             pageId: `synthetic-${args.tab}`,
             text: "Página sintética, sem rede externa.",
+            elements:
+              args.action === "snapshot"
+                ? [
+                    { ref: "e2", label: "Set", selected: false, calendarRef: "e1" },
+                    {
+                      ref: "e3",
+                      label: "Competência nativa",
+                      type: "month",
+                      date: { format: "YYYY-MM" },
+                    },
+                  ]
+                : undefined,
           }),
         },
       ],
@@ -710,6 +723,59 @@ try {
       );
     }
     assert.ok(browserTool.description.includes(browserCaptureInstructions));
+    for (const expected of [
+      {
+        action: "click",
+        pageId: "synthetic-system",
+        ref: "e2",
+        tab: "system",
+        risk: "routine",
+        intent: "Escolher setembro de 2026 no calendário sintético",
+      },
+      {
+        action: "fill",
+        pageId: "synthetic-system",
+        ref: "e3",
+        tab: "system",
+        text: "2026-09",
+        risk: "routine",
+        intent: "Preencher competência sintética",
+      },
+    ]) {
+      provider.queueToolCall({
+        name: "stag_browser",
+        arguments: { action: "snapshot", tab: "system" },
+      });
+      provider.queueToolCall((body) => {
+        assert.ok(
+          `${body.instructions}\n${JSON.stringify(body.input)}`.includes("Datas e competências"),
+        );
+        assert.ok(browserTool.description.includes(browserDateInstructions));
+        const output = body.input.filter((item) => item.type === "function_call_output").at(-1);
+        assert.ok(output, "A escolha depende do snapshot entregue ao provedor.");
+        const doc = JSON.parse(output.output);
+        const item = doc.elements.find(
+          (el) => el.label === (expected.action === "click" ? "Set" : "Competência nativa"),
+        );
+        assert.ok(item);
+        if (expected.action === "fill") assert.equal(item.date.format, "YYYY-MM");
+        return {
+          name: "stag_browser",
+          arguments: { ...expected, pageId: doc.pageId, ref: item.ref, tab: doc.tab },
+        };
+      });
+      await syntheticTurn(
+        [
+          {
+            type: "text",
+            text: "Escolha a competência sintética de setembro de 2026. Transporte substituído; driver validado no Electron.",
+          },
+        ],
+        sources,
+        true,
+      );
+      assert.deepEqual(browserRequests.at(-1), expected);
+    }
     for (const tab of ["documentation", "system"]) {
       const args = {
         action: "download",

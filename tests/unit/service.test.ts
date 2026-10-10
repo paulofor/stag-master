@@ -41,6 +41,7 @@ import {
   browserTabsInstructions,
   browserDownloadInstructions,
   browserCaptureInstructions,
+  browserDateInstructions,
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -2594,10 +2595,14 @@ describe("engenharia e limite de assuntos", () => {
       await complete();
       await service.request({ type: "connect" });
       await service.request({ type: "pauseQueue", threadId, paused: false });
-      await vi.waitFor(() => {
-        expect(service.snapshot().queuedMessages).toEqual([]);
-        expect(service.snapshot().busy).toBe(false);
-      });
+      // Five serialized RPC turns, including resume, can exceed the default one-second wait.
+      await vi.waitFor(
+        () => {
+          expect(service.snapshot().queuedMessages).toEqual([]);
+          expect(service.snapshot().busy).toBe(false);
+        },
+        { timeout: 5000 },
+      );
       const responses = service.snapshot().items.filter((item) => item.kind === "assistant");
       expect(responses.slice(-scenarios.length).map((item) => item.text)).toEqual(
         scenarios.map((scenario) => (mode === "read" ? scenario.readResponse : scenario.response)),
@@ -3380,6 +3385,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.developerInstructions).toContain(browserTabsInstructions);
       expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
+      expect(call.params.developerInstructions).toContain(browserDateInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -3426,6 +3432,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.sandbox).toBe("workspace-write");
       expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
+      expect(call.params.developerInstructions).toContain(browserDateInstructions);
       if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
     }
     expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);

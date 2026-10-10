@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { validateBrowserCombos } from "./test-browser-combos.mjs";
+import { validateBrowserDates } from "./test-browser-dates.mjs";
 import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 import { validateBrowserCertificates } from "./test-browser-certificates.mjs";
 import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
@@ -410,6 +411,13 @@ export async function validateBrowser(application, dir, site, page) {
       "Browser real: segurança, IPC remoto, popups/downloads, protocolos e sessão efêmera.",
     );
     await validateBrowserCombos({ execute, reason, snapshot, dom, target, site });
+    await validateBrowserDates({ execute, reason, snapshot, dom, target, site });
+    await execute({
+      action: "navigate",
+      url: site.url,
+      risk: "routine",
+      intent: "Retomar página sintética",
+    });
     assert.deepEqual(await dom("window.securityProbe"), {
       node: "undefined",
       require: "undefined",
