@@ -8,7 +8,7 @@ import { expect } from "@playwright/test";
 
 export async function buildDesktopIndicatorHarness(dir) {
   await build({
-    entryPoints: ["src/main/desktop-indicator.ts", "src/main/desktop-tools.ts"],
+    entryPoints: ["src/main/desktop-indicator.ts"],
     outdir: dir,
     outExtension: { ".js": ".cjs" },
     bundle: true,
@@ -80,7 +80,6 @@ export async function validateDesktopIndicator(application, page) {
         cancel: () => {
           harness.canceled++;
         },
-        pulseCursor: (signal) => execute(null, false, signal).then(() => ({ moved: true })),
       },
       indicator,
     );
@@ -94,13 +93,11 @@ export async function validateDesktopIndicator(application, page) {
           (window) => window.getTitle() === "STAG Plus · controle Windows",
         ).length,
     );
-  const begin = (pulse = false) =>
-    application.evaluate((_electron, pulse) => {
+  const begin = () =>
+    application.evaluate(() => {
       const h = global.desktopIndicatorHarness;
       h.outcome = "";
-      const operation = pulse
-        ? h.control.pulseCursor(new AbortController().signal)
-        : h.control.execute({ action: "screenshot", processId: 4242 });
+      const operation = h.control.execute({ action: "screenshot", processId: 4242 });
       h.work = operation.then(
         () => {
           h.outcome = "ok";
@@ -109,7 +106,7 @@ export async function validateDesktopIndicator(application, page) {
           h.outcome = error.message;
         },
       );
-    }, pulse);
+    });
   const running = () =>
     expect
       .poll(() => application.evaluate(() => global.desktopIndicatorHarness.phase), {
@@ -255,111 +252,14 @@ export async function validateDesktopIndicator(application, page) {
     await expect.poll(indicatorWindows).toBe(0);
     assert.match(await finish(), /interrompida/);
 
-    await begin(true);
-    await running();
-    assert.ok((await indicatorWindows()) > 0, "Movimento periódico usa o mesmo indicador.");
-    assert.equal(await finish(), "ok");
-    // Exercise main-context construction and child views on Linux too, before native platform gating.
-    await application.evaluate(async ({ WebContentsView }) => {
-      const h = global.desktopIndicatorHarness;
-      const view = new WebContentsView({
-        webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-      });
-      h.target.contentView.addChildView(view);
-      const { width, height } = h.target.getContentBounds();
-      view.setBounds({ x: Math.floor(width / 2), y: 0, width: Math.floor(width / 2), height });
-      await view.webContents.loadURL(
-        "data:text/html,<title>Navegador sintetico</title><body style='background:ivory'>Pagina sintetica</body>",
-      );
-      h.pulseView = view;
-    });
-    const pulse = () =>
-      application.evaluate(async (_electron, scriptPath) => {
-        const h = global.desktopIndicatorHarness;
-        const driver = new global.DesktopDriverHarness.DesktopTools(
-          scriptPath,
-          process.platform,
-          () => (h.target.isDestroyed() ? null : h.target.getNativeWindowHandle()),
-        );
-        const control = global.DesktopIndicatorHarness.createDesktopControl(
-          h.target,
-          driver,
-          h.indicator,
-        );
-        return control.pulseCursor(new AbortController().signal);
-      }, resolve("native/windows-control.ps1"));
-    if (process.platform === "win32") {
-      // Real gesture only on the exact, test-owned Electron window; no client windows or accounts.
-      const binding = await application.evaluate(() => ({
-        processId: process.pid,
-        handle: global.desktopIndicatorHarness.target
-          .getNativeWindowHandle()
-          .readBigUInt64LE()
-          .toString(),
-      }));
-      const probe = async (mode) => {
-        const result = await promisify(execFile)(
-          "powershell.exe",
-          [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            resolve("tests/fixtures/desktop-indicator.ps1"),
-            "-ScriptPath",
-            resolve("native/windows-control.ps1"),
-            "-TargetHandle",
-            binding.handle,
-            "-TargetProcessId",
-            String(binding.processId),
-            "-Mode",
-            mode,
-          ],
-          {
-            windowsHide: true,
-            timeout: 60000,
-            maxBuffer: 1024 * 1024,
-            env: Object.fromEntries(
-              Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PSMODULEPATH"),
-            ),
-          },
-        );
-        return JSON.parse(result.stdout.replace(/^\uFEFF/, "").trim());
-      };
-      for (const embedded of [false, true]) {
-        await application.evaluate(
-          (_electron, embedded) => global.desktopIndicatorHarness.pulseView.setVisible(embedded),
-          embedded,
-        );
-        assert.deepEqual(await probe("preparePulse"), { ready: true });
-        const result = await pulse();
-        assert.deepEqual(
-          result,
-          { moved: true },
-          "Gesto de produção deve funcionar sobre a janela principal e o navegador filho.",
-        );
-        assert.deepEqual(await probe("verifyPulse"), { restored: true });
-        assert.equal(await indicatorWindows(), 0);
-      }
-      console.log(
-        "Movimento Windows nativo: driver de produção, HWND/PID do main, navegador filho, foco/retorno e bordas OK; somente janela sintética.",
-      );
-    } else {
-      await assert.rejects(pulse(), /somente no Windows/);
-      assert.equal(await indicatorWindows(), 0);
-      console.log(
-        "Gesto do main e navegador filho: construção real e recusa de plataforma Linux OK; nenhuma API Windows executada.",
-      );
-    }
     await begin();
     await running();
     await application.evaluate(() => global.desktopIndicatorHarness.control.dispose());
     assert.equal(await indicatorWindows(), 0);
     assert.match(await finish(), /interrompida/);
-    assert.equal(await application.evaluate(() => global.desktopIndicatorHarness.executions), 5);
+    assert.equal(await application.evaluate(() => global.desktopIndicatorHarness.executions), 4);
     console.log(
-      `Indicador desktop: bordas/alpha, foco, ${process.platform === "win32" ? "minimização nativa" : "host oculto no Xvfb"}, entrada sintética, cancelamento, crash, recuperação e gesto periódico OK.`,
+      `Indicador desktop: bordas/alpha, foco, ${process.platform === "win32" ? "minimização nativa" : "host oculto no Xvfb"}, entrada sintética, cancelamento, crash, recuperação OK.`,
     );
   } finally {
     await application.evaluate(async () => {
@@ -367,7 +267,6 @@ export async function validateDesktopIndicator(application, page) {
       h.control.dispose();
       h.release?.();
       await h.work;
-      h.pulseView?.webContents.close();
       h.target.destroy();
       h.host.restore();
       h.host.show();

@@ -155,21 +155,9 @@ try {
     "Restricted",
     "A política herdada do processo pai deve ser preservada.",
   );
-  assert.deepEqual(
-    await driver.pulseCursor(new AbortController().signal),
-    { moved: false },
-    "O gesto interno usa a mesma política do subprocesso, somente com dados sintéticos.",
-  );
-  const hostHandle = Buffer.alloc(8);
-  hostHandle.writeBigUInt64LE(11001n);
-  const boundDriver = new DesktopTools(fixture, "win32", () => hostHandle);
-  assert.deepEqual(await boundDriver.pulseCursor(), { moved: false, reason: "cursor_outside" });
-  // Binding is never attached to public actions, even on the same driver instance.
-  assert.deepEqual(
-    JSON.parse((await boundDriver.execute({ action: "list_windows" })).contentItems[0].text)
-      .request,
-    { action: "list_windows" },
-  );
+  await assert.rejects(driver.execute({ action: "nudge_cursor", stagPeriodicMovement: true }));
+  const recovered = await driver.execute({ action: "list_windows" });
+  assert.deepEqual(JSON.parse(recovered.contentItems[0].text).request, { action: "list_windows" });
   assert.equal(
     process.env.PSModulePath,
     inheritedModules,

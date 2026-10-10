@@ -41,7 +41,6 @@ import { DatabaseConnectionsDialog } from "./DatabaseConnectionsDialog";
 import { ApiConnectionsDialog } from "./ApiConnectionsDialog";
 import { VideoAnalysisPanel } from "./VideoAnalysisPanel";
 import { MessageQueue } from "./MessageQueue";
-import { MouseMovementPanel } from "./MouseMovementPanel";
 import { readPastedImage } from "./request-images";
 import { copyResponse } from "./copy-response";
 import { videoTime } from "../shared/request-video";
@@ -780,7 +779,6 @@ export function App() {
                   {state.mode === "windows" ? "Revogar acesso" : "Autorizar desktop"}
                 </button>
               </section>
-              <MouseMovementPanel state={state} pending={pending} run={run} />
             </>
           )}
           <VideoAnalysisPanel state={state} pending={pending} run={run} />

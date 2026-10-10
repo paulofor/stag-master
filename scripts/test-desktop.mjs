@@ -109,7 +109,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog,BrowserWindow} = require('electron'); global.PdfHarness = require('./pdf-reader.cjs').PdfReader; global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); global.CompletionPlayerHarness = { ...require('./service.cjs'), ...require('./rpc.cjs'), ...require('./settings.cjs'), ...require('./waiting-sound.cjs'), path: require('node:path'), files: require('node:fs/promises') }; (${installTaskbarProbe.toString()})(BrowserWindow, require('node:child_process').ChildProcess); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('appData', ${JSON.stringify(profile)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.PdfHarness = require('./pdf-reader.cjs').PdfReader; global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); global.CompletionPlayerHarness = { ...require('./service.cjs'), ...require('./rpc.cjs'), ...require('./settings.cjs'), ...require('./waiting-sound.cjs'), path: require('node:path'), files: require('node:fs/promises') }; (${installTaskbarProbe.toString()})(BrowserWindow, require('node:child_process').ChildProcess); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('appData', ${JSON.stringify(profile)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -196,21 +196,13 @@ try {
       }),
     )
     .toEqual({ connection: "ready", requests: process.platform === "win32" ? 2 : 1 });
-  assert.deepEqual((await page.evaluate(async () => window.stag.getSnapshot())).mouseMovement, {
-    enabled: false,
-    moves: 0,
-    skipped: 0,
-    status: "Desligado",
-    nextAttemptAt: null,
-  });
-  const mouseControl = page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true });
-  if (process.platform === "win32") {
-    await expect(mouseControl).toBeVisible();
-    await expect(mouseControl).toBeDisabled();
-    await expect(
-      page.getByRole("region", { name: "Movimento periódico do mouse" }).getByRole("status"),
-    ).toHaveText("Entre com ChatGPT para ativar");
-  } else await expect(mouseControl).toHaveCount(0);
+  assert.equal(
+    Object.hasOwn(await page.evaluate(async () => window.stag.getSnapshot()), "mouseMovement"),
+    false,
+  );
+  await expect(
+    page.getByRole("button", { name: /Mover mouse|Desligar movimento do mouse/ }),
+  ).toHaveCount(0);
   const movementRejected = await page.evaluate(async () => {
     try {
       await window.stag.request({
@@ -225,7 +217,7 @@ try {
   });
   assert.equal(movementRejected, true);
   assert.equal(
-    (await page.evaluate(async () => window.stag.getSnapshot())).mouseMovement.enabled,
+    Object.hasOwn(await page.evaluate(async () => window.stag.getSnapshot()), "mouseMovement"),
     false,
   );
   const beforeAbout = await page.evaluate(async () => window.stag.getSnapshot());

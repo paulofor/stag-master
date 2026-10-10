@@ -473,27 +473,6 @@ h1 {
 .desktop-access .desktop-authorized {
   color: #587448;
 }
-.mouse-movement {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 0 3px 9px;
-  font-size: 11px;
-  color: #68755b;
-}
-.mouse-movement .text-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-}
-.mouse-movement-timer {
-  font-variant-numeric: tabular-nums;
-}
-.mouse-movement [aria-pressed="true"] {
-  color: #587448;
-}
 .paste-hint {
   font-size: 9px;
   color: #7d876f;
@@ -1447,9 +1426,6 @@ summary::-webkit-details-marker {
   .composer textarea {
     min-height: 44px;
     height: 44px;
-  }
-  .mouse-movement-counts {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

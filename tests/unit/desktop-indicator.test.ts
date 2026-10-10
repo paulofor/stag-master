@@ -219,7 +219,7 @@ describe("indicador Windows durante a operação", () => {
     await expect(indicator.run(async () => "nova")).resolves.toBe("nova");
   });
 
-  it("propaga cancelamento externo do movimento e não transfere autorização após dispose", async () => {
+  it("propaga cancelamento externo da ação e não transfere autorização após dispose", async () => {
     const controller = new AbortController();
     await expect(
       indicator.run(async (signal) => {
@@ -233,40 +233,11 @@ describe("indicador Windows durante a operação", () => {
 });
 
 describe("integração de produção com o desktop", () => {
-  it("gesto periódico preserva a janela do STAG Plus e seu foco enquanto mostra o indicador", async () => {
-    const host = {
-      isDestroyed: () => false,
-      isVisible: () => true,
-      hide: vi.fn(),
-      showInactive: vi.fn(),
-    };
-    const driver = {
-      execute: vi.fn(),
-      confirmationReason: vi.fn(),
-      cancel: vi.fn(),
-      pulseCursor: vi.fn(async (signal: AbortSignal) => {
-        expect(signal.aborted).toBe(false);
-        expect(host.hide).not.toHaveBeenCalled();
-        expect(native.windows.every((window) => !window.options.focusable)).toBe(true);
-        return { moved: false as const, reason: "cursor_outside" as const };
-      }),
-    };
-    const control = createDesktopControl(host, driver, indicator);
-    await expect(control.pulseCursor(new AbortController().signal)).resolves.toEqual({
-      moved: false,
-      reason: "cursor_outside",
-    });
-    expect(driver.pulseCursor).toHaveBeenCalledOnce();
-    expect(host.hide).not.toHaveBeenCalled();
-    expect(host.showInactive).not.toHaveBeenCalled();
-    expect(native.windows.every((window) => window.destroyed)).toBe(true);
-  });
   it("cancelamento enquanto o painel se oculta não inicia entrada e restaura sem foco", async () => {
     const driver = {
       execute: vi.fn(async () => ({ success: true, contentItems: [] })),
       confirmationReason: vi.fn(async () => null),
       cancel: vi.fn(),
-      pulseCursor: vi.fn(async () => ({ moved: true })),
     };
     const host = {
       isDestroyed: () => false,
@@ -287,13 +258,13 @@ describe("integração de produção com o desktop", () => {
       execute: vi.fn(async () => ({ success: true, contentItems: [] })),
       confirmationReason: vi.fn(async () => "confirme"),
       cancel: vi.fn(),
-      pulseCursor: vi.fn(async () => ({ moved: true })),
     };
     const control = createDesktopControl(null, driver, indicator);
     const input = { action: "focus_window", processId: 42 };
     await expect(control.confirmationReason(input)).resolves.toBe("confirme");
     expect(native.windows).toHaveLength(0);
     expect(() => control.execute({ ...input, stagCriticalApproved: true })).toThrow();
+    expect(() => control.execute({ action: "nudge_cursor", stagPeriodicMovement: true })).toThrow();
     expect(native.windows).toHaveLength(0);
     await control.execute(input, true);
     expect(driver.execute).toHaveBeenCalledExactlyOnceWith(input, true, expect.any(AbortSignal));

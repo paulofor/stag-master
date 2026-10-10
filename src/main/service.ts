@@ -24,10 +24,8 @@ import {
   desktopArguments,
   desktopApproval,
   desktopTool,
-  cursorPulseStatus,
   type DesktopTools,
   type ToolResult,
-  type CursorPulseResult,
 } from "./desktop-tools";
 import { assistantInstructions, localExecutionContext, threadPolicy, turnPolicy } from "./policy";
 import {
@@ -126,7 +124,6 @@ interface Options {
   openExternal: (url: string) => Promise<void>;
   desktop: Pick<DesktopTools, "execute" | "confirmationReason"> &
     Partial<Pick<DesktopTools, "cancel">>;
-  pulseCursor?: (signal: AbortSignal) => Promise<CursorPulseResult>;
   browser?: {
     execute: (
       args: BrowserArguments,
@@ -194,9 +191,6 @@ export class AssistantService extends EventEmitter {
   private finishContext: (() => void) | null = null;
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
-  private mouseTimer: NodeJS.Timeout | null = null;
-  private mouseEpoch = 0;
-  private mouseAbort: AbortController | null = null;
   private browserConsentThread: string | null = null;
   private contextInstructionsDirty = false;
   private disposed = false;
@@ -339,126 +333,7 @@ export class AssistantService extends EventEmitter {
         this.notifyWorkCompleted();
       });
   }
-  private disableMouseMovement(status = "Desligado"): void {
-    this.mouseEpoch++;
-    this.mouseAbort?.abort();
-    this.mouseAbort = null;
-    if (this.mouseTimer) clearTimeout(this.mouseTimer);
-    this.mouseTimer = null;
-    this.state.mouseMovement = {
-      enabled: false,
-      moves: 0,
-      skipped: 0,
-      status,
-      nextAttemptAt: null,
-    };
-  }
-  private ownsMouseMovement(threadId: string, epoch: number): boolean {
-    return (
-      !this.disposed &&
-      this.mouseEpoch === epoch &&
-      this.state.mouseMovement.enabled &&
-      this.state.platform === "win32" &&
-      this.state.mode === "windows" &&
-      this.windowsConsent &&
-      this.windowsConsentThread === threadId &&
-      this.state.threadId === threadId &&
-      this.state.connection === "ready" &&
-      !!this.state.account
-    );
-  }
-  private setMouseMovement(action: Extract<Action, { type: "mouseMovement" }>): void {
-    if (action.threadId !== this.state.threadId)
-      throw new Error("A conversa mudou. Confira o desktop na conversa atual.");
-    if (!action.enabled) {
-      this.disableMouseMovement();
-      return;
-    }
-    if (
-      !this.options.pulseCursor ||
-      this.state.platform !== "win32" ||
-      this.state.mode !== "windows" ||
-      !this.windowsConsent ||
-      this.windowsConsentThread !== action.threadId ||
-      this.state.connection !== "ready" ||
-      !this.state.account ||
-      this.disposed
-    )
-      throw new Error(
-        "Autorize o desktop e inicie uma conversa Windows antes de ativar o movimento do mouse.",
-      );
-    if (this.state.mouseMovement.enabled) return;
-    this.state.mouseMovement = {
-      enabled: true,
-      moves: 0,
-      skipped: 0,
-      status: "Ativo · a cada 5 min",
-      nextAttemptAt: null,
-    };
-    this.scheduleMouseMovement(action.threadId, ++this.mouseEpoch);
-  }
-  private scheduleMouseMovement(threadId: string, epoch: number): void {
-    this.state.mouseMovement.nextAttemptAt = Date.now() + 5 * 60 * 1000;
-    this.mouseTimer = setTimeout(
-      () => {
-        this.mouseTimer = null;
-        if (!this.ownsMouseMovement(threadId, epoch)) return;
-        this.state.mouseMovement.nextAttemptAt = null;
-        this.state.mouseMovement.status = "Aguardando a fila de ferramentas";
-        this.publish();
-        void this.moveMouse(threadId, epoch);
-      },
-      5 * 60 * 1000,
-    );
-    this.mouseTimer.unref();
-    this.publish();
-  }
-  private async moveMouse(threadId: string, epoch: number): Promise<void> {
-    const toolEpoch = this.toolEpoch;
-    const execution = this.toolQueue.then(async () => {
-      if (!this.ownsMouseMovement(threadId, epoch)) return;
-      const blocked =
-        this.changing ||
-        this.stopping ||
-        this.state.approvals.length > 0 ||
-        this.toolEpoch !== toolEpoch;
-      let result: CursorPulseResult = { moved: false };
-      if (!blocked) {
-        const controller = new AbortController();
-        this.mouseAbort = controller;
-        this.state.mouseMovement.status = "Movendo o mouse";
-        this.publish();
-        try {
-          result = await this.options.pulseCursor!(controller.signal);
-        } finally {
-          if (this.mouseAbort === controller) this.mouseAbort = null;
-        }
-      }
-      if (!this.ownsMouseMovement(threadId, epoch)) return;
-      const summary = this.state.mouseMovement;
-      if (result.moved) summary.moves++;
-      else summary.skipped++;
-      summary.status = blocked
-        ? "Intervalo omitido · aguardando aprovação ou mudança de contexto"
-        : cursorPulseStatus(result);
-      this.publish();
-    });
-    // One outstanding interval at most; all native/browser actions use the same queue.
-    this.toolQueue = execution.catch(() => {});
-    try {
-      await execution;
-    } catch {
-      if (this.ownsMouseMovement(threadId, epoch)) {
-        this.disableMouseMovement("Falha no movimento · ative novamente para tentar");
-        this.state.metrics.failures++;
-        this.publish();
-      }
-    } finally {
-      if (this.ownsMouseMovement(threadId, epoch)) this.scheduleMouseMovement(threadId, epoch);
-    }
-  }
   private recordSafetyBlock(kind: "assistant" | "status" = "status"): void {
-    this.disableMouseMovement();
     this.analysis?.detach();
     this.state.queuePaused = true;
     this.state.metrics.failures++;
@@ -553,7 +428,6 @@ export class AssistantService extends EventEmitter {
     const revokingBrowser =
       (action.type === "browserConsent" && !action.allow) ||
       (action.type === "browserVisibility" && !action.visible);
-    const disablingMouse = action.type === "mouseMovement" && !action.enabled;
     const revokingApis = action.type === "apiConsent" && !action.allow;
     const revokingDatabases = action.type === "databaseConsent" && !action.allow;
     if (
@@ -563,8 +437,7 @@ export class AssistantService extends EventEmitter {
       ) &&
       !revokingBrowser &&
       !revokingApis &&
-      !revokingDatabases &&
-      !disablingMouse
+      !revokingDatabases
     )
       throw new Error("Aguarde a ação em andamento.");
     const changesContext =
@@ -871,9 +744,6 @@ export class AssistantService extends EventEmitter {
           }
           break;
         }
-        case "mouseMovement":
-          this.setMouseMovement(action);
-          break;
         case "analyzeVideo":
           await this.startVideoAnalysis();
           break;
@@ -890,7 +760,6 @@ export class AssistantService extends EventEmitter {
           }
           if (action.control === "pause" || action.control === "cancel") {
             this.state.queuePaused = true;
-            this.disableMouseMovement();
           }
           await this.analysis.control(action.id, action.control);
           break;
@@ -1589,7 +1458,6 @@ export class AssistantService extends EventEmitter {
     this.revokeApis();
     this.revokeDatabases();
     this.databaseAbort?.abort();
-    this.disableMouseMovement();
     this.analysis?.detach();
     this.rejectAnalysisTurn();
     if (this.state.queuedMessages.length || this.state.busy || this.sending)
@@ -1636,7 +1504,6 @@ export class AssistantService extends EventEmitter {
       this.revokeDatabases();
       this.databaseAbort?.abort();
       this.branchController?.abort();
-      this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
       this.options.pdf?.cancel();
@@ -1686,7 +1553,6 @@ export class AssistantService extends EventEmitter {
     if (previousAccount && previousAccount.email !== this.state.account?.email) {
       this.revokeApis();
       this.revokeDatabases();
-      this.disableMouseMovement();
       this.analysis?.detach();
       this.rejectAnalysisTurn();
       this.clearMessageQueue();
@@ -1828,7 +1694,6 @@ export class AssistantService extends EventEmitter {
     if (this.state.busy || this.sending)
       throw new Error("Pare a execução antes de abrir outra conversa.");
     this.completedWork = null;
-    this.disableMouseMovement();
     this.analysis?.detach();
     this.toolEpoch++;
     this.options.desktop.cancel?.();
@@ -1968,7 +1833,6 @@ export class AssistantService extends EventEmitter {
     if (this.state.threadId !== id) {
       this.revokeApis();
       this.revokeDatabases();
-      this.disableMouseMovement();
       this.toolEpoch++;
       this.options.desktop.cancel?.();
       this.options.pdf?.cancel();
@@ -2240,7 +2104,6 @@ export class AssistantService extends EventEmitter {
     const databaseWork = this.databaseAbort ? this.databaseWork : null;
     this.databaseAbort?.abort();
     this.branchController?.abort();
-    this.disableMouseMovement();
     this.analysis?.detach();
     this.state.queuePaused = true;
     this.toolEpoch++;
@@ -3200,7 +3063,6 @@ export class AssistantService extends EventEmitter {
     this.completedWork = null;
     this.projectRefreshAbort?.abort();
     this.databaseAbort?.abort();
-    this.disableMouseMovement();
     this.disposed = true;
     this.analysis?.dispose();
     this.rejectAnalysisTurn();

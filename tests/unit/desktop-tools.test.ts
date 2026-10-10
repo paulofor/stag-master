@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DesktopTools,
-  cursorPulseStatus,
   desktopArguments,
   desktopConfirmationReason,
   desktopApproval,
@@ -35,123 +34,19 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe("movimento fixo pertencente ao main", () => {
-  it.each([4, 8])("vincula o gesto à janela nativa de %s bytes do próprio main", async (bytes) => {
-    const handle = Buffer.alloc(bytes);
-    if (bytes === 8) handle.writeBigUInt64LE(0x123456789n);
-    else handle.writeUInt32LE(0x12345678);
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: '{"moved":true}' }), { child }),
-    );
-    const provider = vi.fn(() => handle);
-    const tools = new DesktopTools("unused", "win32", provider);
-    await expect(tools.pulseCursor()).resolves.toEqual({ moved: true });
-    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
+describe("remoção da operação periódica", () => {
+  it.each([
+    { action: "nudge_cursor" },
+    { action: "nudge_cursor", stagPeriodicMovement: true, processId: 4242 },
+    {
       action: "nudge_cursor",
       stagPeriodicMovement: true,
-      stagHostProcessId: process.pid,
-      stagHostWindow: bytes === 8 ? "4886718345" : "305419896",
-    });
-    await tools.execute({ action: "list_windows" });
-    expect(provider).toHaveBeenCalledOnce();
-    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[1][0], "base64").toString("utf8"))).toEqual({
-      action: "list_windows",
-    });
-  });
-  it("relê o handle ao executar e não retém a janela fechada", async () => {
-    let handle: Buffer | null = Buffer.from([42, 0, 0, 0]);
-    runScript.mockImplementation(() =>
-      Object.assign(Promise.resolve({ stdout: '{"moved":false,"reason":"unverified_target"}' }), {
-        child,
-      }),
-    );
-    const tools = new DesktopTools("unused", "win32", () => handle);
-    await tools.pulseCursor();
-    handle = null;
-    await tools.pulseCursor();
-    const input = JSON.parse(Buffer.from(stdin.end.mock.calls[1][0], "base64").toString("utf8"));
-    expect(input).toEqual({ action: "nudge_cursor", stagPeriodicMovement: true });
-  });
-  it.each([Buffer.alloc(3), Buffer.alloc(4), Buffer.alloc(8, 255)])(
-    "binding nativo inválido falha antes de iniciar o processo: %j",
-    async (handle) => {
-      await expect(new DesktopTools("unused", "win32", () => handle).pulseCursor()).rejects.toThrow(
-        "Janela do STAG Plus indisponível",
-      );
-      expect(runScript).not.toHaveBeenCalled();
+      stagHostProcessId: 42,
+      stagHostWindow: "11001",
     },
-  );
-  it.each([
-    { moved: false, reason: "unverified_target" },
-    { moved: false, reason: "forticlient" },
-    { moved: false, reason: "buttons_pressed" },
-    { moved: false, reason: "cursor_outside" },
-    { moved: false, reason: "target_changed" },
-    { moved: false, reason: "pointer_busy" },
-  ])("mostra o motivo fixo de omissão sem falha: $reason", async (output) => {
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: JSON.stringify(output) }), { child }),
-    );
-    const result = await new DesktopTools("unused", "win32").pulseCursor();
-    expect(result).toEqual(output);
-    expect(cursorPulseStatus(result)).toMatch(/^Intervalo omitido · /);
-    expect(cursorPulseStatus(result)).not.toContain(output.reason);
-  });
-  it.each([
-    { moved: false, reason: "PRIVATE_PATH" },
-    { moved: true, reason: "cursor_outside" },
-    { moved: false, reason: "cursor_outside", processId: 42 },
-  ])("recusa diagnóstico livre, contraditório ou dados do alvo: %j", async (output) => {
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: JSON.stringify(output) }), { child }),
-    );
-    await expect(new DesktopTools("unused", "win32").pulseCursor()).rejects.toThrow();
-  });
-  it("passa somente o marcador interno e o sinal de cancelamento, sem coordenadas", async () => {
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.resolve({ stdout: '{"moved":true}' }), { child }),
-    );
-    const controller = new AbortController();
-    await expect(
-      new DesktopTools("unused", "win32").pulseCursor(controller.signal),
-    ).resolves.toEqual({ moved: true });
-    const received = runScript.mock.calls[0][2].signal as AbortSignal;
-    expect(received.aborted).toBe(false);
-    controller.abort();
-    expect(received.aborted).toBe(true);
-    expect(JSON.parse(Buffer.from(stdin.end.mock.calls[0][0], "base64").toString("utf8"))).toEqual({
-      action: "nudge_cursor",
-      stagPeriodicMovement: true,
-    });
-    expect(child.once).toHaveBeenCalledWith("close", expect.any(Function));
-  });
-  it("recusa resposta inválida e plataforma sem Windows", async () => {
-    await expect(new DesktopTools("unused", "linux").pulseCursor()).rejects.toThrow("Windows");
+  ])("recusa operação antiga antes de iniciar subprocesso: %j", async (input) => {
+    await expect(new DesktopTools("unused", "win32").execute(input)).rejects.toThrow();
     expect(runScript).not.toHaveBeenCalled();
-    await expect(new DesktopTools("unused", "win32").pulseCursor()).rejects.toThrow();
-  });
-  it("aguarda fechamento do subprocesso mesmo após cancelamento", async () => {
-    let close!: () => void;
-    runScript.mockImplementationOnce(() =>
-      Object.assign(Promise.reject(new Error("aborted")), {
-        child: {
-          stdin,
-          once: (_event: string, listener: () => void) => {
-            close = listener;
-          },
-        },
-      }),
-    );
-    let settled = false;
-    const work = new DesktopTools("unused", "win32").pulseCursor().catch(() => {
-      settled = true;
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    close();
-    await work;
-    expect(settled).toBe(true);
   });
 });
 

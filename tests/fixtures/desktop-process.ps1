@@ -13,19 +13,7 @@ if ($request.action -eq 'open_forticlient') {
     } else { throw 'STAG_DESKTOP_APPROVAL_REQUIRED: Synthetic console requires approval.' }
     return
 }
-if ($request.action -eq 'nudge_cursor') {
-    $fields = ($request.PSObject.Properties.Name | Sort-Object) -join ','
-    $hostBound = $fields -eq 'action,stagHostProcessId,stagHostWindow,stagPeriodicMovement'
-    if ($request.stagPeriodicMovement -ne $true -or
-        ($fields -ne 'action,stagPeriodicMovement' -and -not $hostBound) -or
-        ($hostBound -and ($request.stagHostProcessId -le 0 -or $request.stagHostWindow -cne '11001')) -or
-        (Get-ExecutionPolicy -Scope Process) -ne 'Bypass') {
-        throw 'Synthetic periodic driver contract failed.'
-    }
-    if ($hostBound) { '{"moved":false,"reason":"cursor_outside"}' }
-    else { '{"moved":false}' }
-    return
-}
+if ($request.action -eq 'nudge_cursor') { throw 'STAG_DESKTOP_DENIED: Operacao removida.' }
 @{
     request = $request
     processPolicy = (Get-ExecutionPolicy -Scope Process).ToString()

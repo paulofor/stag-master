@@ -1,4 +1,21 @@
-# Matriz de homologação da versão 0.4.54
+# Matriz de homologação da versão 0.4.55
+
+## Remoção do movimento automático do mouse — versão 0.4.55
+
+O cliente pediu a retirada do movimento a cada cinco minutos. Lacuna observada: ocultar o botão deixaria disponíveis o IPC e a operação privada do driver. Remover o fluxo completo e reutilizar os harness de serviço, interface, Electron e Windows para conferir a recusa de mensagens antigas e a preservação do controle autorizado. A regressão inicial do schema falhou com a versão anterior, comprovando que a ação antiga ainda era aceita. Matriz definida antes da validação da entrega.
+
+| Área                    | Cenário e aceite                                                                                                                | Evidência prevista                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Interface               | Sem botão, painel ou contagem do mouse em Projeto, Leitura e Windows; reload/nova conversa não restauram o recurso              | Playwright desktop/Pixel 7 e Electron                            |
+| Serviço e ociosidade    | IPC antigo de ativar/desativar recusado sem alterar thread, modo, métricas ou fila; quinze minutos ociosos não executam desktop | Schema, relógio controlado após handshake e serviço real         |
+| Driver e recuperação    | nudge_cursor recusado, inclusive com os marcadores antigos; nenhum subprocesso/entrada; operação legítima seguinte funciona     | DesktopTools, dispatcher Windows sintético e integração Electron |
+| Integrações             | Controle autorizado, bordas azuis, avisos sonoros, navegador e pausa/cancelamento de vídeo continuam funcionando                | Harness existentes de produção                                   |
+| Observabilidade e dados | Snapshots sem estado periódico, sem nova persistência/telemetria; somente contas, projetos, processos e páginas sintéticos      | Fixtures isoladas e métricas existentes                          |
+| Plataformas             | Janela compacta 360×600 sem overflow; Chromium/Pixel 7 e Electron Linux locais; execução e instalador Windows no CI             | check, test:desktop, format:check e workflows PR/main            |
+
+As matrizes históricas abaixo registram as versões anteriores; os cenários positivos do movimento periódico foram substituídos pelas regressões de remoção. Linux não comprova execução nativa Windows. O servidor de licenças permanece independente, sem novo destino de publicação.
+
+Evidência local: `npm run check` aprovado com 842 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 146 cenários Chromium desktop/Pixel 7. `xvfb-run -a npm run test:desktop` conferiu a recusa do IPC antigo pelo preload/main reais e preservou desktop, bordas, som de espera/conclusão, fila, duas abas, TLS, downloads, sessões, conexões e vídeo com retomada após reinício. O dispatcher de produção passou em 623 verificações sintéticas; parser de todos os PowerShell alterados e compilação C# de produção aprovados no PowerShell local, sem APIs gráficas. Formatação, sintaxe JavaScript, diff, `bash -n` e ShellCheck do backup existentes aprovados. `npm run test:licenses` passou usando o suporte existente de segredos por stdin na engine isolada, sem bind mounts, com namespace Compose exclusivo e limpeza aguardada. Node 22.23.3 somente em `.local/runtime`; instalação compartilhada preservada. Nenhum script shell ou servidor foi alterado, nenhum dado do cliente foi usado. O smoke declarou a restrição bwrap do kernel Linux; execução nativa Windows e instalador são conferidos nos jobs obrigatórios do PR/main.
 
 ## Acesso explícito a sites com certificado inválido — versão 0.4.54
 

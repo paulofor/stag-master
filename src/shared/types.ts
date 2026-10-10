@@ -97,13 +97,6 @@ export interface Snapshot {
   diff: string;
   metrics: { requests: number; failures: number; totalTokens: number; elapsedMs: number };
   platform: string;
-  mouseMovement: {
-    enabled: boolean;
-    moves: number;
-    skipped: number;
-    status: string;
-    nextAttemptAt: number | null;
-  };
   browser: BrowserState;
 }
 export const browserTabs = ["documentation", "system"] as const;
@@ -181,13 +174,6 @@ export const emptySnapshot: Snapshot = {
   diff: "",
   metrics: { requests: 0, failures: 0, totalTokens: 0, elapsedMs: 0 },
   platform: "browser",
-  mouseMovement: {
-    enabled: false,
-    moves: 0,
-    skipped: 0,
-    status: "Desligado",
-    nextAttemptAt: null,
-  },
   browser: {
     available: false,
     visible: true,
@@ -261,7 +247,6 @@ export type Action =
   | { type: "removeQueued"; threadId: string; id: string }
   | { type: "pauseQueue"; threadId: string; paused: boolean }
   | { type: "stop" }
-  | { type: "mouseMovement"; threadId: string; enabled: boolean }
   | { type: "answer"; id: string; accept?: boolean; answers?: Record<string, string> }
   | { type: "openLink"; url: string }
   | { type: "browserVisibility"; visible: boolean }

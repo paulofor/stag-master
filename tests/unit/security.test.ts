@@ -28,9 +28,12 @@ describe("fronteiras do cliente", () => {
     expect(() => actionSchema.parse({ type: "rpc", method: "command/exec" })).toThrow();
     expect(() => actionSchema.parse({ type: "connect", command: "unsafe" })).toThrow();
   });
-  it("movimento periódico só aceita a opção e o thread, sem comandos ou parâmetros nativos", () => {
+  it("recusa a ação removida de movimento periódico, inclusive mensagens antigas", () => {
+    for (const enabled of [true, false])
+      expect(() =>
+        actionSchema.parse({ type: "mouseMovement", threadId: "synthetic", enabled }),
+      ).toThrow();
     const action = { type: "mouseMovement", threadId: "synthetic", enabled: true };
-    expect(actionSchema.parse(action)).toEqual(action);
     for (const field of [
       "x",
       "y",
