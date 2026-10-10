@@ -1,12 +1,12 @@
 {
   "name": "stag-desktop",
-  "version": "0.4.51",
+  "version": "0.4.52",
   "description": "STAG Plus: assistente desktop Windows para programação, integrado ao Codex App Server.",
   "private": true,
   "type": "module",
   "main": "dist/main/index.cjs",
   "author": "Paulo Forestieri",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -50,7 +50,19 @@
     },
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "LICENSE",
+      "licenses/STAG-MIT-0.4.51.txt"
+    ],
+    "extraFiles": [
+      {
+        "from": ".local/license-docs/LICENSE.txt",
+        "to": "LICENSE.txt"
+      },
+      {
+        "from": ".local/license-docs/LICENSE-MIT-LEGACY.txt",
+        "to": "LICENSE-MIT-LEGACY.txt"
+      }
     ],
     "extraResources": [
       {
@@ -79,6 +91,7 @@
     },
     "nsis": {
       "include": "build/installer.nsh",
+      "license": "LICENSE",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

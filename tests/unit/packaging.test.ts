@@ -30,10 +30,11 @@ it.each([
   });
   expect(result.stdout).toContain("Artefato local sem publisher ou token de release: OK");
 });
-it("compila as boas-vindas reais com o desenvolvedor e a versão do pacote", async () => {
+it("compila boas-vindas e licença reais, preservando crédito, versão e MIT histórica", async () => {
   const result = await run(process.execPath, [resolve("tests/fixtures/installer-credit.mjs")], {
     env: fixtureEnv(),
     timeout: 60000,
   });
   expect(result.stdout).toContain("Boas-vindas NSIS compiladas com crédito e versão: OK");
+  expect(result.stdout).toContain("Licença proprietária compilada e MIT histórica preservada: OK");
 }, 60000);

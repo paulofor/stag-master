@@ -1,21 +1,65 @@
-MIT License
+STAG Plus Proprietary License
 
-Copyright (c) 2026 STAG
+Copyright (c) 2026 Paulo Forestieri. All rights reserved, subject to the
+pre-existing and third-party rights expressly preserved below.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Scope and effective boundary
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Starting with STAG Plus version 0.4.52, this license applies only to original
+additions and modifications owned by Paulo Forestieri made after the MIT
+baseline identified in section 4. It does not relicense that baseline or
+third-party material. No ownership of contributions by others is claimed.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Authorized use
+
+Use of the proprietary portions requires prior written authorization from
+Paulo Forestieri. An authorized user may install and run the designated build
+for personal evaluation, and keep a backup copy, within the purpose, period
+and device limits stated in that authorization. Other use requires a
+separate written authorization. Permissions are non-exclusive and
+non-transferable unless that authorization expressly states otherwise.
+
+Downloading, accessing the source, building, installing or accepting these
+terms does not by itself provide that authorization. There is no automatic
+public grant of evaluation, commercial use or redistribution rights.
+
+3. Restrictions and reserved rights
+
+Except as applicable law, a separate written authorization, or the licenses
+preserved in sections 4 and 5 permit, you may not copy beyond an authorized
+backup, modify, publish, distribute, sell, rent, sublicense or transfer the
+proprietary portions, or remove their copyright and license notices.
+All rights not expressly granted are reserved.
+
+4. Previously released MIT material
+
+STAG/STAG Plus versions up to and including 0.4.51, and all material released
+under MIT at or before commit
+5fa5d9f3f89714dd293684ee8df33fa4a2ea061d, remain available under the original
+MIT license. That license is reproduced without changes in
+licenses/STAG-MIT-0.4.51.txt in the source and LICENSE-MIT-LEGACY.txt in the
+distributed application. Its existing permissions are not revoked, including
+when that material is included in a later version or obtained later.
+The restrictions in this document apply only to the new proprietary portions.
+
+5. Third-party components, platforms and user projects
+
+Third-party components, including Electron, Chromium, Node.js, Codex, FFmpeg,
+whisper.cpp, models, libraries and the separate Langfuse stack, remain subject
+to their respective licenses and notices. This license does not restrict
+rights those licenses grant, including access to corresponding source where
+required. Media notices and source references are in native/media-NOTICES.md
+and resources/media/NOTICES.md in the distributed application.
+
+Rights to view and fork a public repository under GitHub's Terms of Service
+are preserved. Public access does not grant additional rights to the
+proprietary portions. This license does not change the ownership or licensing
+of users' projects or data.
+
+6. Warranty and liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE PROPRIETARY PORTIONS ARE
+PROVIDED "AS IS", WITHOUT WARRANTIES, INCLUDING MERCHANTABILITY, FITNESS FOR
+A PARTICULAR PURPOSE AND NON-INFRINGEMENT. TO THAT SAME EXTENT, THE COPYRIGHT
+HOLDER IS NOT LIABLE FOR DAMAGES ARISING FROM THEIR USE. NOTHING IN THESE
+TERMS EXCLUDES MANDATORY RIGHTS OR LIABILITIES UNDER APPLICABLE LAW.
