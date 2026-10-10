@@ -251,7 +251,9 @@ try {
         },
         ...turnPolicy(target.mode, project),
       });
-      assert.equal((await completed).status, "completed");
+      const finished = await completed;
+      if (provider.toolErrors.length) throw provider.toolErrors.at(-1);
+      assert.equal(finished.status, "completed");
     } finally {
       clearTimeout(timer);
       rpc.off("notification", listener);
@@ -455,19 +457,75 @@ try {
     sqlCalls++;
     return { columns: ["id"], rows: [[10039]], affectedRows: 0, truncated: false };
   });
-  const sqlData = { ...connections.snapshot(project), authorized: true };
+  let sqlData = { ...connections.snapshot(project), authorized: true };
   const requested = {
-    connectionId: sqlData.connections[0].id,
-    revision: sqlData.revision,
     operation: "query",
     sql: "SELECT @id AS id",
     parameters: [{ name: "id", type: "int", value: 10039 }],
     risk: "routine",
     intent: "Consultar remessa sintética autorizada",
   };
+  const queryFromCatalog = (catalog) => {
+    assert.equal(catalog.authorized, true);
+    assert.equal(catalog.canList, true);
+    const entry = catalog.connections.find((entry) => entry.database === "stag_synthetic");
+    assert.equal(entry.connectionId, sqlData.connections[0].id);
+    assert.equal(entry.revision, sqlData.revision);
+    assert.ok(!JSON.stringify(catalog).includes(sqlSecret));
+    return {
+      name: "stag_sql",
+      arguments: { ...requested, connectionId: entry.connectionId, revision: entry.revision },
+    };
+  };
+  const queryFromContext = (body) => {
+    // Responses Lite carries tool namespaces in additional_tools input items;
+    // code mode exposes dynamic tools as declarations on functions.exec.
+    const tools = [];
+    const collect = (tool) => {
+      tools.push(tool);
+      (tool.tools || []).forEach(collect);
+    };
+    (body.tools || []).forEach(collect);
+    body.input
+      .filter((item) => item.type === "additional_tools")
+      .flatMap((item) => item.tools || [])
+      .forEach(collect);
+    const direct = tools.find((tool) => tool.name === "stag_sql");
+    const declaration = tools
+      .map((tool) => tool.description || "")
+      .join("\n")
+      .match(/stag_sql\(args: ([\s\S]*?)\): Promise/);
+    const schema = direct ? JSON.stringify(direct.parameters) : declaration?.[1];
+    assert.ok(schema, "O schema SQL deve estar disponível ao modelo, inclusive em code mode.");
+    for (const field of ["list", "connectionId", "revision"]) assert.ok(schema.includes(field));
+    const context = body.input
+      .flatMap((item) => item.content || [])
+      .map(
+        (part) =>
+          part.text?.match(/<external_stag_databases>([\s\S]*?)<\/external_stag_databases>/)?.[1],
+      )
+      .filter(Boolean)
+      .at(-1);
+    assert.ok(context, "O catálogo deve chegar ao provedor, não somente ao RPC do cliente.");
+    return queryFromCatalog(JSON.parse(context));
+  };
+  let catalogCalls = 0;
   const sqlRequest = async (message) => {
     if (message.method !== "item/tool/call" || message.params.tool !== "stag_sql") {
       rpc.rejectRequest(message.id, "Somente a ferramenta SQL sintética está ativa nesta sonda.");
+      return;
+    }
+    if (message.params.arguments.operation === "list") {
+      catalogCalls++;
+      rpc.respond(message.id, {
+        success: true,
+        contentItems: [
+          {
+            type: "inputText",
+            text: databaseContext(sqlData, true, false, true).stag_databases.value,
+          },
+        ],
+      });
       return;
     }
     const result = await sql.execute(project, message.params.arguments, "project");
@@ -475,12 +533,12 @@ try {
   };
   rpc.on("request", sqlRequest);
   try {
-    provider.queueToolCall({ name: "stag_sql", arguments: requested });
+    provider.queueToolCall(queryFromContext);
     await syntheticTurn(
       [{ type: "text", text: "Consulte a remessa sintética usando stag_sql." }],
       sources,
       false,
-      databaseContext(sqlData, true),
+      databaseContext(sqlData, true, false, true),
     );
     assert.equal(
       sqlCalls,
@@ -488,13 +546,75 @@ try {
       "O Codex real deve despachar o schema de produção e receber o resultado SQL.",
     );
     assert.ok(JSON.stringify(provider.inputs.at(-1)).includes("10039"));
+    const recovery = await rpc.call("thread/start", {
+      cwd: project,
+      model: started.model,
+      ...threadPolicy("project", project),
+      developerInstructions: assistantInstructions(
+        "project",
+        process.platform,
+        false,
+        true,
+        project,
+        sources,
+      ),
+      dynamicTools: [sqlTool],
+    });
+    provider.queueToolCall((body) => {
+      assert.ok(!JSON.stringify(body.input).includes("<external_stag_databases>"));
+      return { name: "stag_sql", arguments: { operation: "list" } };
+    });
+    provider.queueToolCall((body) => {
+      const output = body.input.filter((item) => item.type === "function_call_output").at(-1);
+      assert.ok(output, "A recuperação exige o resultado real de stag_sql list.");
+      return queryFromCatalog(JSON.parse(output.output));
+    });
+    await syntheticTurn(
+      [{ type: "text", text: "Recupere o catálogo ausente e consulte na mesma conversa." }],
+      sources,
+      false,
+      {},
+      { threadId: recovery.thread.id, mode: "project" },
+    );
+    assert.equal(catalogCalls, 1);
+    assert.equal(sqlCalls, 2);
+    assert.equal(
+      provider.toolErrors.length,
+      0,
+      "Falhas ao conferir o catálogo não podem passar despercebidas.",
+    );
+    const oldRevision = sqlData.revision;
+    await connections.save(
+      project,
+      oldRevision,
+      sqlData.connections[0].id,
+      { ...sqlData.connections[0].config, name: "SQL sintético atualizado" },
+      sqlSecret,
+      false,
+    );
+    sqlData = { ...connections.snapshot(project), authorized: true };
+    assert.notEqual(sqlData.revision, oldRevision);
+    await rpc.call("thread/resume", {
+      threadId: started.thread.id,
+      cwd: project,
+      ...threadPolicy("project", project),
+    });
+    provider.queueToolCall(queryFromContext);
+    await syntheticTurn(
+      [{ type: "text", text: "Use a revisão vigente após retomada." }],
+      sources,
+      false,
+      databaseContext(sqlData, true, false, true),
+    );
+    assert.equal(sqlCalls, 3);
+    assert.equal(provider.toolErrors.length, 0);
     assert.ok(
       !JSON.stringify({ inputs: provider.inputs, instructions: provider.instructions }).includes(
         sqlSecret,
       ),
     );
     console.log(
-      "Codex real/provedor loopback: stag_sql parametrizado, contexto vigente e resultado sem senha aprovados.",
+      "Codex real/provedor loopback: ids/revisão descobertos no contexto recebido, listagem com contexto ausente, consulta na mesma conversa e retomada com revisão vigente aprovados, sem senha ou inferência paga.",
     );
   } finally {
     rpc.off("request", sqlRequest);

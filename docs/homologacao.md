@@ -1,4 +1,23 @@
-# Matriz de homologação da versão 0.4.56
+# Matriz de homologação da versão 0.4.57
+
+## Recuperação do catálogo SQL na conversa — versão 0.4.57
+
+Matriz definida antes dos testes da correção. O relato indica ferramenta SQL disponível sem identificador/revisão percebidos pelo modelo. O catálogo atual usa `id`, enquanto a ferramenta exige `connectionId`; o harness fornece esses argumentos prontos e não verifica sua descoberta no contexto entregue ao provedor. Conferir a transmissão real e permitir recuperar o catálogo pela própria `stag_sql`, sem conexão ao banco, senha no modelo ou nova conversa apenas para atualizar metadados.
+
+| Área                          | Cenário e aceite                                                                                                                         | Evidência prevista                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Caminho feliz                 | Catálogo traz `connectionId` e `revision` juntos; listar e consultar a conexão cadastrada na mesma conversa                              | Serviço, schema real e provedor loopback pelo Codex fixado                |
+| Recuperação                   | Contexto ausente ou desatualizado permite listar novamente; retomada e fila enviam catálogo vigente                                      | Contratos de serviço e smoke com argumentos obtidos do contexto/resultado |
+| Validações e falhas           | Listagem não aceita SQL, credenciais ou destinos; consulta ainda exige id/revisão válidos; revisão antiga é recusada                     | Schema, revisão modificada e recuperação sem repetir escrita              |
+| Segurança e isolamento        | Consentimento por conversa/projeto, revogação e históricos sem tool preservados; Leitura permite listar/consultar e recusa escrita       | Serviço, projetos/contas/credenciais sintéticos                           |
+| Integrações e observabilidade | Listagem usa fila compartilhada, não abre driver nem incrementa consultas ao banco; resultado sem usuário, senha, cifra ou outras pastas | Runner controlado, métricas e inspeção do payload real                    |
+| Plataformas e entrega         | Regressões Chromium amplo/compacto/Pixel 7 e Electron Linux; driver, DPAPI e instalador Windows nos jobs nativos                         | check, test:desktop, formato, diff e workflows PR/main                    |
+
+O harness determinístico comprova transmissão e recuperação dos metadados, sem prometer decisões semânticas do modelo. Nenhuma conexão do cliente será utilizada.
+
+Evidência local em 2026-10-10: as duas regressões iniciais falharam com o catálogo/schema anterior. Typecheck, 859 contratos e build passaram; decoder/ASR reais e Codex fixado/provedor loopback também. A sonda confirmou que id/revisão já chegavam antes da correção e agora deriva os argumentos do catálogo realmente recebido, do resultado de listagem com contexto ausente e da revisão atualizada após retomada. Verifica a declaração SQL entregue ao modelo em namespaces/Responses Lite e code mode; o provedor usa ids únicos para as chamadas sucessivas. Comparação de contrato na retomada passou a inspecionar o campo original, sem comparação indevida de texto escapado em JSON.
+
+Dos 146 cenários Chromium desktop/Pixel 7, 145 passaram na rodada inicial; um lançamento de Chromium falhou com `pthread_create: Resource temporarily unavailable`. O cgroup local limita a 512 processos/threads e registrou recusas durante a execução simultânea com Electron. O caso afetado passou isoladamente, e o harness Electron completo passou depois, em sequência, incluindo renderer/preload/main/fila e listagem sem consulta SQL. Sem alterações de política para contornar o limite. SQL Server Developer real passou com dados sintéticos e sessões encerradas; 15 contratos do servidor de licenças, PostgreSQL/Docker e painel desktop/mobile passaram, com limpeza de containers/volumes conferida. Formatação, sintaxe JavaScript, diff, `bash -n` e ShellCheck dos scripts shell existentes passaram. Node 22.23.3 somente no workspace; instalação compartilhada preservada. Linux declarou a limitação bwrap e não comprova execução nativa/DPAPI/instalador Windows, a conferir nos jobs do PR/main. Nenhuma conta, senha, configuração do Codex ou banco do cliente foi acessado.
 
 ## Repetição de testes e builds Angular após EPERM — versão 0.4.56
 

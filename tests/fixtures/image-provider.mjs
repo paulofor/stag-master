@@ -6,6 +6,8 @@ export async function startImageProvider() {
   const instructions = [];
   const traffic = [];
   const toolCalls = [];
+  const toolErrors = [];
+  let responseCount = 0;
   const server = createServer(async (request, response) => {
     if (request.method !== "POST" || !request.url.endsWith("/responses")) {
       response.writeHead(404).end();
@@ -26,25 +28,36 @@ export async function startImageProvider() {
     instructions.push(body.instructions);
     traffic.push({ bytes: size, reasoning: body.reasoning, text: body.text });
     const text = "Imagem sintética recebida pelo provedor local.";
-    const call = toolCalls.shift();
+    const queued = toolCalls.shift();
+    let call;
+    try {
+      // A probe may derive its tool arguments from what Codex actually sent,
+      // instead of supplying identifiers from the test's setup.
+      call = typeof queued === "function" ? queued(body) : queued;
+    } catch (error) {
+      toolErrors.push(error);
+      response.writeHead(400).end("Falha sintética ao conferir a entrada da ferramenta.");
+      return;
+    }
+    const sequence = ++responseCount;
     const item = call
       ? {
-          id: "fc_stag_fixture",
+          id: `fc_stag_fixture_${sequence}`,
           type: "function_call",
-          call_id: "call_stag_fixture",
+          call_id: `call_stag_fixture_${sequence}`,
           name: call.name,
           arguments: JSON.stringify(call.arguments),
           status: "completed",
         }
       : {
-          id: "msg_stag_image",
+          id: `msg_stag_image_${sequence}`,
           type: "message",
           role: "assistant",
           status: "completed",
           content: [{ type: "output_text", text, annotations: [] }],
         };
     const result = {
-      id: "resp_stag_image",
+      id: `resp_stag_image_${sequence}`,
       object: "response",
       created_at: 1,
       model: body.model,
@@ -130,6 +143,7 @@ export async function startImageProvider() {
     inputs,
     instructions,
     traffic,
+    toolErrors,
     queueToolCall: (call) => toolCalls.push(call),
     close: () =>
       new Promise((resolve) => {
