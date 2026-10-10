@@ -44,6 +44,39 @@ function setup(platform: NodeJS.Platform = "win32") {
 }
 
 describe("Som de conclusão do trabalho", () => {
+  it("usa o vínculo de produção para snapshots, conclusão e parada", () => {
+    const { controller, sound } = setup();
+    const source = new EventEmitter();
+    controller.bind(source);
+    source.emit("snapshot", state());
+    source.emit("workCompleted", { threadId: "thread-synthetic" });
+    expect(sound.play).not.toHaveBeenCalled();
+    source.emit("snapshot", state([], { busy: false }));
+    source.emit("workCompleted", { threadId: "thread-synthetic" });
+    expect(sound.play).toHaveBeenCalledOnce();
+    const before = sound.stop.mock.calls.length;
+    source.emit("workStopped");
+    expect(sound.stop).toHaveBeenCalledTimes(before + 1);
+    controller.dispose();
+    expect(source.eventNames()).toEqual([]);
+  });
+
+  it("desvincula o serviço anterior e não mantém listeners depois de fechar", () => {
+    const { controller, sound } = setup();
+    const previous = new EventEmitter();
+    const current = new EventEmitter();
+    controller.bind(previous);
+    controller.bind(current);
+    expect(previous.eventNames()).toEqual([]);
+    current.emit("snapshot", state([], { busy: false }));
+    previous.emit("workCompleted", { threadId: "thread-synthetic" });
+    expect(sound.play).not.toHaveBeenCalled();
+    current.emit("workCompleted", { threadId: "thread-synthetic" });
+    expect(sound.play).toHaveBeenCalledOnce();
+    controller.dispose();
+    controller.bind(current);
+    expect(current.eventNames()).toEqual([]);
+  });
   it.each([true, false])(
     "toca também com janela minimizada=%s sem indicação de espera",
     (minimized) => {

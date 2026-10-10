@@ -9,7 +9,13 @@ import { expect } from "@playwright/test";
 
 export async function buildTaskbarHarness(dir) {
   await build({
-    entryPoints: ["src/main/taskbar-attention.ts", "src/main/waiting-sound.ts"],
+    entryPoints: [
+      "src/main/taskbar-attention.ts",
+      "src/main/waiting-sound.ts",
+      "src/main/service.ts",
+      "src/main/settings.ts",
+      "src/main/rpc.ts",
+    ],
     outdir: dir,
     outExtension: { ".js": ".cjs" },
     bundle: true,
@@ -82,6 +88,110 @@ export function installTaskbarProbe(BrowserWindow, ChildProcess) {
       return original.apply(this, args);
     };
   }
+}
+
+// This fixture runs on both platforms: the Windows UI smoke intentionally has no account.
+// Use the same service-to-controller binding and the actual player, with a separate profile.
+export async function validateCompletionPlayer(application, page, options) {
+  const before = await page.evaluate(() => window.stag.getSnapshot());
+  const result = await application.evaluate(async ({ BrowserWindow }, options) => {
+    const { AssistantService, RpcClient, SettingsStore, WaitingSound, path, files } =
+      global.CompletionPlayerHarness;
+    const { join } = path;
+    const { mkdtemp, realpath, rm } = files;
+    const folder = await mkdtemp(join(options.directory, "completion-player-"));
+    const { TaskbarAttention } = global.TaskbarHarness;
+    const target = new BrowserWindow({
+      show: false,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    let rpc;
+    const service = new AssistantService({
+      createRpc: () =>
+        (rpc = new RpcClient({
+          command: options.node,
+          args: [options.fixture],
+          cwd: folder,
+          env: {
+            ...process.env,
+            CODEX_HOME: join(folder, "home"),
+            STAG_FIXTURE_STATE: join(folder, "state.json"),
+          },
+        })),
+      store: new SettingsStore(join(folder, "settings.json")),
+      selectProject: async () => realpath(options.project),
+      openExternal: async () => {},
+      desktop: {
+        execute: async () => ({ success: false, contentItems: [] }),
+        confirmationReason: async () => null,
+      },
+    });
+    const player = new WaitingSound(options.script);
+    const controller = new TaskbarAttention(target, process.platform, player);
+    controller.bind(service);
+    let completed = 0;
+    service.on("workCompleted", () => completed++);
+    const waitFor = async (condition) => {
+      const deadline = Date.now() + 30000;
+      while (!condition()) {
+        if (Date.now() >= deadline) throw new Error("Aviso de conclusão sintético não chegou.");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    };
+    try {
+      await service.init();
+      await service.request({ type: "connect" });
+      await service.request({ type: "login" });
+      await waitFor(() => service.snapshot().models.length > 0);
+      await service.request({ type: "selectProject" });
+      const initialSounds = global.attentionSounds;
+      await service.request({ type: "send", text: "conclusão sintética rápida" });
+      await waitFor(() => completed === 1);
+      await controller.settled();
+      const finishedSounds = global.attentionSounds;
+      const threadId = service.snapshot().threadId;
+      await service.request({ type: "resume", threadId });
+      await service.request({ type: "stop" });
+      await controller.settled();
+      const replayedSounds = global.attentionSounds;
+      await service.request({ type: "send", text: "execução sintética lenta lento" });
+      await service.request({ type: "stop" });
+      await waitFor(() => !service.snapshot().busy);
+      await controller.settled();
+      const interruptedSounds = global.attentionSounds;
+      await service.request({ type: "send", text: "conclusão sintética recuperada rápida" });
+      await waitFor(() => completed === 2);
+      await controller.settled();
+      return {
+        initialSounds,
+        finishedSounds,
+        replayedSounds,
+        interruptedSounds,
+        finalSounds: global.attentionSounds,
+        completed,
+        hidden: !target.isVisible(),
+      };
+    } finally {
+      controller.dispose();
+      service.dispose();
+      await controller.settled();
+      await service.mediaSettled();
+      await rpc?.shutdown();
+      target.destroy();
+      await rm(folder, { recursive: true, force: true });
+    }
+  }, options);
+  const plays = process.platform === "win32" ? 1 : 0;
+  assert.equal(result.finishedSounds - result.initialSounds, plays);
+  assert.equal(result.replayedSounds, result.finishedSounds);
+  assert.equal(result.interruptedSounds, result.finishedSounds);
+  assert.equal(result.finalSounds - result.initialSounds, plays * 2);
+  assert.equal(result.completed, 2);
+  assert.equal(result.hidden, true);
+  assert.deepEqual(await page.evaluate(() => window.stag.getSnapshot()), before);
+  console.log(
+    "Conclusão e player de produção: serviço/RPC/vínculo reais, janela oculta, duas conclusões, histórico sem repetição, interrupção e recuperação aprovados.",
+  );
 }
 
 export async function validateTaskbarAttention(application, page) {
