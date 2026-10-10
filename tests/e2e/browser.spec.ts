@@ -50,18 +50,34 @@ test("download exibe progresso, caminho confirmado e falha sem overflow", async 
   });
   await expect(status).toContainText("stag-downloads/download-sintetico/documento.pdf");
   await expect(status.getByRole("progressbar")).toHaveCount(0);
+  const destination = "relatorios/homologacao/retornos/" + "resultado-".repeat(7) + ".xlsx";
+  await page.evaluate((path) => {
+    void window.stag!.getSnapshot().then((state) => {
+      state.browser.download!.path = path;
+      state.browser.download!.receivedBytes = 3072;
+      state.browser.download!.totalBytes = 3072;
+      window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
+    });
+  }, destination);
+  await expect(status).toContainText(destination);
+  await expect(status).toContainText("3.0 KiB de 3.0 KiB");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: `.local/screenshots/${info.project.name}-browser-download-destination.png`,
+  });
   await page.evaluate(() => {
     void window.stag!.getSnapshot().then((state) => {
       state.browser.download = {
         status: "failed",
         receivedBytes: 0,
         totalBytes: null,
-        message: "O conteúdo recebido não é PDF nem ZIP.",
+        message: "O formato recebido não corresponde à extensão do destino.",
       };
       window.dispatchEvent(new CustomEvent("stag-fixture-snapshot", { detail: state }));
     });
   });
-  await expect(status).toContainText("não é PDF nem ZIP");
+  await expect(status).toContainText("não corresponde à extensão");
+  await expect(status).not.toContainText(destination);
   await expect(status).not.toContainText("stag-downloads/");
 });
 test("restaurar visualização durante execução só atualiza a área, preservando página e autorização", async ({

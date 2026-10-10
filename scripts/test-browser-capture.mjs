@@ -251,7 +251,9 @@ export async function validateBrowserCapture({ application, site, execute, snaps
     (_electron, url) => global.browserHarness.browser.view.webContents.downloadURL(url),
     `${site.url}download-pdf`,
   );
-  await expect.poll(async () => (await state()).error).toMatch(/Download bloqueado/);
+  await expect
+    .poll(async () => (await state()).error)
+    .toMatch(/download de stag_browser.*destino no projeto/);
   await navigate();
   assert.equal((await snapshot()).documentType, undefined);
   assert.equal((await state()).error, null);

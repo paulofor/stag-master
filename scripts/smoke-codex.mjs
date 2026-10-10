@@ -718,13 +718,15 @@ try {
         ref: "e1",
         risk: "routine",
         intent: "Consulta local sintética",
+        destination: `relatorios/${tab}/retorno.xlsx`,
+        trigger: "click",
       };
       provider.queueToolCall({ name: "stag_browser", arguments: args });
       await syntheticTurn(
         [
           {
             type: "text",
-            text: "Solicite download do PDF sintético; transporte substituído neste smoke.",
+            text: "Solicite exportação Excel com destino relativo escolhido; transporte substituído neste smoke.",
           },
         ],
         sources,

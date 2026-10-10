@@ -1936,6 +1936,7 @@ export class AssistantService extends EventEmitter {
         mode: this.state.mode,
         browserTool: !!this.options.browser,
         browserDownloads: !!this.options.browser,
+        browserDownloadDestinations: !!this.options.browser,
         httpTool: this.apisReady,
         sqlTool: this.databasesReady && !!this.options.databases?.tools,
         sqlCatalogTool: this.databasesReady && !!this.options.databases?.tools,
@@ -2046,7 +2047,9 @@ export class AssistantService extends EventEmitter {
               : this.state.mode === "read"
                 ? "Downloads desativados no modo Leitura: não gravar arquivos."
                 : this.state.browser.authorized
-                  ? "Download de PDF/ZIP disponível por stag_browser com pageId/ref atuais; salva até 100 MiB em stag-downloads no projeto atual. Consulte PDFs com stag_pdf disponível e ZIP com ferramentas locais após sucesso."
+                  ? this.settings.threads[this.state.threadId!]?.browserDownloadDestinations
+                    ? "Download disponível por stag_browser: pageId/ref atuais do link ou botão de exportação, destination com caminho relativo completo escolhido no projeto (exemplo relatorios/retorno.xlsx); trigger click para links JavaScript. Aceita PDF/ZIP/XLSX/XLS/CSV/TXT/JSON/XML até 100 MiB. Subpastas criadas, sem sobrescrita. Botões/blob/data exportam uma vez na sessão da aba. Em falha confira a página antes de repetir."
+                    : "Download de PDF/ZIP disponível por stag_browser com pageId/ref atuais; salva até 100 MiB em stag-downloads no projeto atual. Este histórico não possui destination/trigger: para escolher destino ou exportar por botão, solicite nova conversa; não invente parâmetros. Consulte PDFs com stag_pdf disponível e ZIP com ferramentas locais após sucesso."
                   : "Para baixar PDF/ZIP no projeto, solicite Autorizar navegador; nenhuma ferramenta alternativa amplia este acesso.",
           },
           stag_user_input: {
@@ -2500,6 +2503,15 @@ export class AssistantService extends EventEmitter {
             "Este histórico não possui download em stag_browser. Abra uma nova conversa e autorize o navegador.",
           );
         if (
+          ((args as BrowserArguments & { destination?: string; trigger?: string }).destination !==
+            undefined ||
+            (args as BrowserArguments & { trigger?: string }).trigger !== undefined) &&
+          !this.settings.threads[this.state.threadId!]?.browserDownloadDestinations
+        )
+          throw new Error(
+            "Este histórico não possui destino/exportação por clique. Abra uma nova conversa para usar destination e trigger, preservando a política original.",
+          );
+        if (
           this.state.mode === "read" ||
           !downloadProject ||
           this.state.project?.path !== downloadProject
@@ -2507,7 +2519,13 @@ export class AssistantService extends EventEmitter {
           throw new Error(
             "Downloads exigem escrita na pasta do projeto atual. O modo Leitura não salva arquivos.",
           );
-        return { project: downloadProject, readOnly: false };
+        return {
+          project: downloadProject,
+          readOnly: false,
+          ...(!this.settings.threads[this.state.threadId!]?.browserDownloadDestinations
+            ? { legacy: true }
+            : {}),
+        };
       };
       const waiting: PendingApproval = isBrowser
         ? {

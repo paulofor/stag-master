@@ -1350,6 +1350,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               ref: "e1",
               risk: input.includes("crítico") ? "critical" : "routine",
               intent: "Consultar PDF sintético no projeto",
+              ...(input.includes("destino")
+                ? { destination: "relatorios/retorno.xlsx", trigger: "click" }
+                : {}),
             },
             null,
             input.includes("duplicado"),
@@ -1455,16 +1458,19 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           if (input.includes("misto")) desktopCall(thread, turn, { action: "list_windows" }, next);
           else call({ action: "snapshot" }, next);
           call({ action: "scroll", delta: 200 }, next);
-        } else if (/fluxo real|envio real|senha real/.test(input)) {
-          const url = input.split(/fluxo real|envio real|senha real/)[1].trim();
+        } else if (/fluxo real|envio real|senha real|exportação real/.test(input)) {
+          const url = input.split(/fluxo real|envio real|senha real|exportação real/)[1].trim();
+          const exporting = input.includes("exportação real");
           call({ action: "navigate", url, risk: "routine", intent: "Ler site sintético" }, () => {
             call({ action: "snapshot" }, (answer) => {
               const doc = JSON.parse(answer.result?.contentItems?.[0]?.text || "{}");
-              const label = input.includes("envio real")
-                ? "Enviar sintético"
-                : input.includes("senha real")
-                  ? "Senha sintética"
-                  : "Texto local";
+              const label = exporting
+                ? "Baixar Excel"
+                : input.includes("envio real")
+                  ? "Enviar sintético"
+                  : input.includes("senha real")
+                    ? "Senha sintética"
+                    : "Texto local";
               const ref = doc.elements?.find((el) => el.label === label)?.ref;
               if (!ref) {
                 response(thread, turn, "Navegador: campo não encontrado.");
@@ -1472,14 +1478,27 @@ createInterface({ input: process.stdin }).on("line", (line) => {
               }
               call(
                 {
-                  action: input.includes("envio real") ? "click" : "fill",
+                  action: exporting ? "download" : input.includes("envio real") ? "click" : "fill",
                   pageId: doc.pageId,
                   ref,
-                  ...(!input.includes("envio real") ? { text: "feito pelo modelo" } : {}),
+                  ...(exporting
+                    ? { destination: "relatorios/retorno.xlsx", trigger: "click" }
+                    : !input.includes("envio real")
+                      ? { text: "feito pelo modelo" }
+                      : {}),
                   risk: "routine",
                   intent: `Interagir com ${label} no site sintético`,
                 },
-                () => response(thread, turn, "Navegador: campo preenchido pelo modelo."),
+                (answer) =>
+                  response(
+                    thread,
+                    turn,
+                    exporting
+                      ? answer.result?.success
+                        ? "Navegador: exportação salva em relatorios/retorno.xlsx."
+                        : "Navegador: exportação falhou."
+                      : "Navegador: campo preenchido pelo modelo.",
+                  ),
               );
             });
           });

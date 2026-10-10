@@ -12,6 +12,13 @@ import {
 } from "lucide-react";
 import { browserTabs, browserTabLabels, type Action, type BrowserState } from "../shared/types";
 
+const downloadSize = (bytes: number) =>
+  bytes < 1024
+    ? `${bytes} B`
+    : bytes < 1024 * 1024
+      ? `${(bytes / 1024).toFixed(1)} KiB`
+      : `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+
 export function BrowserPane({
   state,
   projectPath,
@@ -317,9 +324,8 @@ export function BrowserPane({
         <div className="browser-download" role="status" aria-label="Download do navegador">
           <strong>{state.download.message}</strong>
           <span>
-            {(state.download.receivedBytes / 1024 / 1024).toFixed(1)} MiB
-            {state.download.totalBytes !== null &&
-              ` de ${(state.download.totalBytes / 1024 / 1024).toFixed(1)} MiB`}
+            {downloadSize(state.download.receivedBytes)}
+            {state.download.totalBytes !== null && ` de ${downloadSize(state.download.totalBytes)}`}
           </span>
           {state.download.status === "downloading" && (
             <>

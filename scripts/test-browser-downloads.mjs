@@ -3,7 +3,11 @@ import { mkdir, readFile, readdir, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { expect } from "@playwright/test";
-import { startDownloadSite, syntheticBrowserZip } from "../tests/fixtures/browser-downloads.mjs";
+import {
+  startDownloadSite,
+  syntheticBrowserZip,
+  syntheticBrowserXlsx,
+} from "../tests/fixtures/browser-downloads.mjs";
 import { syntheticBrowserPdf } from "../tests/fixtures/browser-pdf.mjs";
 import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
 
@@ -36,11 +40,16 @@ export async function validateBrowserDownloads({
     );
   const target = async (name) => {
     const doc = await snapshot();
+    const element = doc.elements.find((el) => el.label === name);
+    assert.ok(
+      element,
+      `Alvo de download sintético ausente: ${name}; visíveis: ${doc.elements.map((el) => el.label).join(", ")}`,
+    );
     return {
       action: "download",
       tab: "documentation",
       pageId: doc.pageId,
-      ref: doc.elements.find((el) => el.label === name).ref,
+      ref: element.ref,
       risk: "routine",
       intent: "Consultar documento sintético no projeto",
     };
@@ -65,6 +74,73 @@ export async function validateBrowserDownloads({
     }
     assert.equal(await dom("document.querySelector('#draft').value"), "rascunho preservado");
     assert.deepEqual(await readdir(neighbor), []);
+    for (const [name, extension, expected, extra] of [
+      ["xlsx", "xlsx", syntheticBrowserXlsx(), {}],
+      ["Baixar Excel", "xlsx", syntheticBrowserXlsx(), {}],
+      ["Exportar POST", "csv", Buffer.from("empresa;valor\nSintetica;10\n"), {}],
+      ["Exportar por navegação", "xlsx", syntheticBrowserXlsx(), {}],
+      ["Link JavaScript", "xlsx", syntheticBrowserXlsx(), { trigger: "click" }],
+      ["Link data", "csv", Buffer.from("empresa;valor\nSintetica;10\n"), {}],
+      ["Link blob", "xlsx", syntheticBrowserXlsx(), {}],
+    ]) {
+      const args = {
+        ...(await target(name)),
+        destination: `relatorios/${name}/retorno.${extension}`,
+        ...extra,
+      };
+      const response = await download(args);
+      const result = JSON.parse(response.contentItems[0].text);
+      assert.equal(result.path, args.destination);
+      assert.deepEqual(await readFile(join(project, result.path)), expected);
+      assert.equal(result.sha256, createHash("sha256").update(expected).digest("hex"));
+      assert.equal((await state()).download.path, args.destination);
+      assert.equal((await state()).download.status, "completed");
+    }
+    assert.equal(site.counts["/post"], 1, "Exportação POST não deve ser repetida");
+    const countBefore = await dom("window.exportCount");
+    const refused = {
+      ...(await target("Baixar Excel")),
+      destination: "relatorios/Baixar Excel/retorno.xlsx",
+    };
+    await assert.rejects(download(refused), /já existe/);
+    assert.equal(await dom("window.exportCount"), countBefore, "Destino inválido não pode clicar");
+    await assert.rejects(download({ ...refused, destination: "../escape.xlsx" }));
+    await assert.rejects(
+      download({ ...refused, destination: "leitura.xlsx" }, { project, readOnly: true }),
+      /Leitura/,
+    );
+    await assert.rejects(
+      download(await target("Baixar Excel"), { project, readOnly: false, legacy: true }),
+      /nova conversa/,
+    );
+    assert.equal(await dom("window.exportCount"), countBefore);
+    const form = await target("Exportar formulário");
+    assert.match(
+      await application.evaluate(
+        async (_electron, args) => global.browserHarness.browser.confirmationReason(args),
+        form,
+      ),
+      /crítica/,
+    );
+    const oldButton = await target("Baixar Excel");
+    await dom("document.querySelector('#excel').innerText='Alvo alterado'");
+    await assert.rejects(download(oldButton), /alvo mudou/);
+    await navigate();
+    for (const name of ["Exportação inválida", "Arquivo bloqueado", "Exportação grande"]) {
+      const before = (await readdir(join(project, "stag-downloads"))).length;
+      await assert.rejects(download(await target(name)));
+      assert.equal((await readdir(join(project, "stag-downloads"))).length, before);
+      assert.equal((await state()).download.status, "failed");
+    }
+    const multi = await download({
+      ...(await target("Duas exportações")),
+      destination: "relatorios/unico.xlsx",
+    });
+    assert.equal(JSON.parse(multi.contentItems[0].text).path, "relatorios/unico.xlsx");
+    assert.deepEqual(
+      await readFile(join(project, "relatorios/unico.xlsx")),
+      syntheticBrowserXlsx(),
+    );
     await assert.rejects(download(await target("pdf"), { project, readOnly: true }), /Leitura/);
     for (const name of ["invalid", "large", "local", "loop"]) {
       const count = (await readdir(join(project, "stag-downloads"))).length;
@@ -127,54 +203,58 @@ export async function validateBrowserDownloads({
       await tls.close();
     }
 
-    for (const action of ["cancel", "reset", "navigate"]) {
-      await navigate();
-      const before = (await readdir(join(project, "stag-downloads"))).length;
-      const pending = download(await target("stream")).then(
-        () => null,
-        (e) => e,
-      );
-      await expect.poll(() => site.active.size).toBe(1);
-      await expect
-        .poll(async () => (await state()).download?.receivedBytes || 0)
-        .toBeGreaterThan(0);
-      if (action === "navigate") await navigate();
-      else
-        await application.evaluate(
-          (_electron, action) => global.browserHarness.browser[action](),
-          action,
+    for (const source of ["stream", "Exportação lenta"])
+      for (const action of ["cancel", "reset", "navigate"]) {
+        await navigate();
+        const before = (await readdir(join(project, "stag-downloads"))).length;
+        const pending = download(await target(source)).then(
+          () => null,
+          (e) => e,
         );
-      assert.ok(await pending, "Interrupção não retorna caminho antigo");
-      await expect.poll(() => site.active.size).toBe(0);
-      assert.equal((await readdir(join(project, "stag-downloads"))).length, before);
-      if (action === "reset") assert.equal((await state()).download, undefined);
-      await navigate();
-      await download(await target("pdf"));
-    }
+        await expect.poll(() => site.active.size).toBe(1);
+        await expect
+          .poll(async () => (await state()).download?.receivedBytes || 0)
+          .toBeGreaterThan(0);
+        if (action === "navigate") await navigate();
+        else
+          await application.evaluate(
+            (_electron, action) => global.browserHarness.browser[action](),
+            action,
+          );
+        assert.ok(await pending, "Interrupção não retorna caminho antigo");
+        await expect.poll(() => site.active.size).toBe(0);
+        assert.equal((await readdir(join(project, "stag-downloads"))).length, before);
+        if (action === "reset") assert.equal((await state()).download, undefined);
+        await navigate();
+        await download(await target("pdf"));
+      }
     // Trigger the production deadline only once the loopback request is established.
     await navigate();
-    const timeoutArgs = await target("hang");
-    await application.evaluate(() => {
-      global.downloadSetTimeout = global.setTimeout;
-      global.setTimeout = (fn, delay, ...args) => {
-        if (delay === 120000) global.downloadDeadline = fn;
-        return global.downloadSetTimeout(fn, delay, ...args);
-      };
-    });
-    try {
-      const pending = download(timeoutArgs).then(
-        () => null,
-        (e) => e,
-      );
-      await expect.poll(() => site.active.size).toBe(1);
-      await application.evaluate(() => global.downloadDeadline());
-      assert.ok(await pending);
-      assert.equal((await state()).download.status, "canceled");
-      await expect.poll(() => site.active.size).toBe(0);
-    } finally {
+    for (const name of ["hang", "Sem arquivo"]) {
+      const timeoutArgs = await target(name);
       await application.evaluate(() => {
-        global.setTimeout = global.downloadSetTimeout;
+        global.downloadSetTimeout = global.setTimeout;
+        global.setTimeout = (fn, delay, ...args) => {
+          if (delay === 120000) global.downloadDeadline = fn;
+          return global.downloadSetTimeout(fn, delay, ...args);
+        };
       });
+      try {
+        const pending = download(timeoutArgs).then(
+          () => null,
+          (e) => e,
+        );
+        if (name === "hang") await expect.poll(() => site.active.size).toBe(1);
+        else await expect.poll(() => dom("window.noExport || 0")).toBe(1);
+        await application.evaluate(() => global.downloadDeadline());
+        assert.ok(await pending);
+        assert.equal((await state()).download.status, "canceled");
+        await expect.poll(() => site.active.size).toBe(0);
+      } finally {
+        await application.evaluate(() => {
+          global.setTimeout = global.downloadSetTimeout;
+        });
+      }
     }
     await execute({
       action: "navigate",
@@ -226,7 +306,7 @@ export async function validateBrowserDownloads({
       }
     }
     console.log(
-      "Browser downloads: PDF/ZIP íntegros, sessão da aba, redirect, Leitura, tipos/limites, refs, cancelamento, timeout após handshake e recuperação aprovados.",
+      "Browser downloads: PDF/ZIP/Excel/CSV, destino escolhido, botão/blob/POST, sessão, redirect, Leitura, tipos/limites, refs, cancelamento nativo, timeout e recuperação aprovados.",
     );
   } finally {
     await site.close();
