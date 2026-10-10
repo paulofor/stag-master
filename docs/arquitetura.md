@@ -1,5 +1,9 @@
 # Arquitetura inicial
 
+## Validação local — versão 0.4.50
+
+O contrato de desenvolvimento de `engineering-policy.ts` e a descrição de `stag_ask_user` explicitam testes automatizados, build e execução local do Angular como parte da tarefa autorizada em Projeto/Windows. São enviados em start/resume, sem novo executor ou mudança de sandbox, raízes, consentimentos ou aprovação. Scripts e destinos devem ser conferidos; runners headless de teste não dão ao modelo navegação interativa nem sessões pessoais. Falhas locais relacionadas devem ser corrigidas e validadas antes da publicação. Execução local já permitida, inclusive no modo Windows sem sandbox, não gera outra pergunta. Requests reais do App Server continuam bloqueantes e recusáveis pelo fluxo existente; não são aceitos automaticamente nem duplicados por perguntas conversacionais. Leitura não executa builds/testes com escrita de artefatos, caches ou relatórios. Corpus sintético e perda parcial/recuperação verificam transmissão e isolamento, sem alegar obediência semântica absoluta.
+
 ## Nome e compatibilidade — versão 0.4.41
 
 O produto passa a se chamar STAG Plus, mantendo a sequência de versões. A identidade interna `stag-desktop`, o appId `io.stag.desktop`, o protocolo/IPC, os nomes das ferramentas e `.stag` permanecem estáveis para atualizar a aplicação existente. Antes de inicializar sessões, o main preserva o userData usado pelo STAG e então aplica o nome público do pacote; um perfil explícito do launcher também é preservado. Settings, Codex, conexões, segredos protegidos, sessões do navegador e checkpoints continuam no mesmo perfil. O marcador histórico `Análise STAG` permanece compatível com a conciliação de vídeos já iniciados. A futura aplicação simplificada precisará de identidade e perfil próprios; não é criada nesta entrega. [Referência Electron](https://www.electronjs.org/docs/latest/api/app#appgetpathname).

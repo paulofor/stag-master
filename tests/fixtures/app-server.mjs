@@ -906,10 +906,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       if (/aprovar|recusar/.test(input)) {
         const localRestart = input === "aprovar reinício local";
+        const localBuild = input === "aprovar build Angular local";
         const item = {
           id: `command-${count}`,
           type: "commandExecution",
-          command: localRestart ? "npm run dev" : "npm test",
+          command: localRestart ? "npm run dev" : localBuild ? "npm run build" : "npm test",
           cwd: p.cwd,
           status: "inProgress",
         };
@@ -936,7 +937,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             availableDecisions: ["accept", "decline"],
             reason: localRestart
               ? "Reiniciar somente a API local autorizada; request real do sandbox sintético."
-              : "Executar a validação local.",
+              : localBuild
+                ? "Build Angular local autorizado; request real do sandbox sintético."
+                : "Executar a validação local.",
           },
         });
         break;

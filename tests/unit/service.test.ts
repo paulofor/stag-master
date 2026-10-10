@@ -2512,48 +2512,54 @@ describe("memória persistente do projeto", () => {
   });
 });
 describe("engenharia e limite de assuntos", () => {
-  it("reinício rotineiro não dispensa request real de aprovação, recusa ou recuperação", async () => {
-    await ready();
-    const scenario = engineeringCorpus.scenarios.find((s) => s.id === "local-process-restart")!;
-    await send(scenario.input);
-    await complete();
-    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
-    expect(service.snapshot().approvals).toEqual([]);
-    for (const accept of [false, true]) {
-      await send("aprovar reinício local");
-      await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
-      expect(service.snapshot().approvals[0]).toMatchObject({
-        kind: "command",
-        detail: expect.stringContaining("request real do sandbox sintético"),
-      });
-      expect(service.snapshot().busy).toBe(true);
+  it.each([
+    ["local-process-restart", "aprovar reinício local", "npm run dev"],
+    ["local-validation-angular", "aprovar build Angular local", "npm run build"],
+  ])(
+    "rotina de %s não dispensa request real de aprovação, recusa ou recuperação",
+    async (id, input, command) => {
+      await ready();
+      const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+      expect(service.snapshot().approvals).toEqual([]);
+      for (const accept of [false, true]) {
+        await send(input);
+        await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+        expect(service.snapshot().approvals[0]).toMatchObject({
+          kind: "command",
+          detail: expect.stringContaining("request real do sandbox sintético"),
+        });
+        expect(service.snapshot().approvals[0].detail).toContain(command);
+        expect(service.snapshot().busy).toBe(true);
+        expect(
+          service
+            .snapshot()
+            .items.filter((i) => i.kind === "command")
+            .at(-1)?.status,
+        ).toBe("inProgress");
+        await approve(accept);
+        expect(
+          service
+            .snapshot()
+            .items.filter((i) => i.kind === "command")
+            .at(-1)?.status,
+        ).toBe(accept ? "completed" : "declined");
+      }
+      const calls = await rpc.call<{ result?: { decision?: string } }[]>("_fixture/readCalls");
       expect(
-        service
-          .snapshot()
-          .items.filter((i) => i.kind === "command")
-          .at(-1)?.status,
-      ).toBe("inProgress");
-      await approve(accept);
-      expect(
-        service
-          .snapshot()
-          .items.filter((i) => i.kind === "command")
-          .at(-1)?.status,
-      ).toBe(accept ? "completed" : "declined");
-    }
-    const calls = await rpc.call<{ result?: { decision?: string } }[]>("_fixture/readCalls");
-    expect(calls.flatMap((call) => (call.result?.decision ? [call.result.decision] : []))).toEqual([
-      "decline",
-      "accept",
-    ]);
-    await service.request({ type: "connect" });
-    await send(scenario.input);
-    await complete();
-    expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
-    expect(service.snapshot().approvals).toEqual([]);
-    expect(desktop.execute).not.toHaveBeenCalled();
-    expect(browser.execute).not.toHaveBeenCalled();
-  });
+        calls.flatMap((call) => (call.result?.decision ? [call.result.decision] : [])),
+      ).toEqual(["decline", "accept"]);
+      await service.request({ type: "connect" });
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["read", "project", "windows"] as const)(
     "transmite o contrato e recupera a conversa após redirecionamento no modo %s",
@@ -2610,6 +2616,19 @@ describe("engenharia e limite de assuntos", () => {
     ["conexão interna", "não exige nova confirmação só por reiniciar"],
     ["reinício em Leitura", "No modo Leitura, não inicie, pare ou reinicie processos da aplicação"],
     ["aprovações reais", "esta orientação não aprova requests automaticamente"],
+    ["validação Angular", "testes automatizados, build local e execução local do Angular"],
+    [
+      "sem pergunta redundante",
+      "Não use stag_ask_user nem perguntas em texto para confirmar novamente esse ciclo local",
+    ],
+    ["runner headless", "Testes automatizados pelo runner headless local do projeto"],
+    [
+      "execução fora da sandbox",
+      "Uma execução fora da sandbox só pode ocorrer pelo fluxo nativo de aprovação",
+    ],
+    ["acesso Windows vigente", "inclusive no modo Windows sem sandbox, não peça nova permissão"],
+    ["build em Leitura", "No modo Leitura, não execute builds ou testes que gravem artefatos"],
+    ["falha de build", "não use commit, push, pipeline ou deploy para descobrir o próximo erro"],
     [
       "desenvolvimento e homologação",
       "Adaptações autorizadas de controle de acesso na aplicação em desenvolvimento ou homologação são permitidas",
@@ -2682,6 +2701,7 @@ describe("engenharia e limite de assuntos", () => {
     "development-clarified",
     "development-restore-full-workflow",
     "local-process-known-context",
+    "local-validation-known-context",
   ])("preserva contexto de %s ao retomar sem transferir a outra conversa", async (id) => {
     await ready();
     const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;

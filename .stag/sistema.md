@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-09 — Validação local 0.4.50: contrato e descrição de stag_ask_user incluem testes, build e servidor Angular, investigação/correção iterativa, scripts/destinos conferidos e runner headless local. Não mudam políticas de thread/turn, raízes ou aprovações reais; Leitura mantém restrição de escrita. Corpus existente inclui retomada/isolamento, perda parcial do contrato, falhas e efeitos externos, mais request bidirecional de build recusável. Fonte: implementação desta solicitação e matriz de homologação; nenhum projeto ou processo do cliente acessado.
+
 2026-10-09 — Leitor PDF 0.4.49: stag_pdf info/read/render para arquivos relativos no projeto, parser PDF.js e canvas fixados no lockfile. Worker descartável recebe somente bytes validados, sem URL/caminho/credenciais; texto paginado e imagem de uma página são resultados não confiáveis. Leitura consulta PDFs existentes; downloads continuam exclusivos do navegador e exigem escrita. Fonte: solicitação, código e matriz desta entrega.
 
 2026-10-09 — Downloads 0.4.48: stag_browser recebe download com pageId/ref ou PDF atual, salva PDF/ZIP HTTP(S) até 100 MiB em stag-downloads no projeto e retorna caminho/bytes/SHA. Sessão da aba, fila, Leitura, confirmações e isolamento preservados. Stream com backpressure, redirects validados, prazo/cancelamento com limpeza e progresso por aba. ZIP não extraído/executado; leitura local depende de parser/OCR disponível. Fonte: solicitação atual, código e testes sintéticos locais; nenhum documento ou conta real usado.

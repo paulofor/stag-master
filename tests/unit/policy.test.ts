@@ -50,8 +50,48 @@ it("orienta reinícios locais sem pergunta redundante, preservando Leitura e apr
     }
   }
   expect(userInputTool.description).toContain(
-    "Não use para confirmar novamente testes ou reinícios rotineiros",
+    "Não use para confirmar novamente testes, build local, execução Angular ou reinícios rotineiros",
   );
+});
+
+it("inclui validação Angular sem pergunta redundante e mantém a política efetiva", () => {
+  for (const mode of ["read", "project", "windows"] as const) {
+    const root = "C:\\synthetic";
+    const instructions = assistantInstructions(mode, "win32", false, true, root);
+    for (const fragment of [
+      "testes automatizados, build local e execução local do Angular",
+      "npm test, ng test, npm run build, ng build e ng serve",
+      "Não use stag_ask_user nem perguntas em texto para confirmar novamente esse ciclo local",
+      "Confira os scripts e configurações do projeto, a raiz, os destinos e os efeitos",
+      "Testes automatizados pelo runner headless local do projeto",
+      "Uma execução fora da sandbox só pode ocorrer pelo fluxo nativo de aprovação",
+      "inclusive no modo Windows sem sandbox, não peça nova permissão",
+      "No modo Leitura, não execute builds ou testes que gravem artefatos",
+      "não use commit, push, pipeline ou deploy para descobrir o próximo erro",
+      "Para abrir, visualizar ou interagir com páginas web, use exclusivamente stag_browser",
+    ])
+      expect(instructions.includes(fragment), fragment).toBe(true);
+    expect(threadPolicy(mode, root)).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      runtimeWorkspaceRoots: [root],
+      sandbox:
+        mode === "read"
+          ? "read-only"
+          : mode === "project"
+            ? "workspace-write"
+            : "danger-full-access",
+    });
+    expect(turnPolicy(mode, root)).toMatchObject({
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      runtimeWorkspaceRoots: [root],
+      sandboxPolicy: {
+        type:
+          mode === "read" ? "readOnly" : mode === "project" ? "workspaceWrite" : "dangerFullAccess",
+      },
+    });
+  }
 });
 
 describe("contrato de engenharia e escopo de negócio", () => {
