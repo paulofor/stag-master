@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, readFile, writeFile, appendFile, readdir } from "no
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AssistantService } from "../../src/main/service";
+import { browserTestingInstructions } from "../../src/main/browser-testing";
 import { browserCaptureError } from "../../src/main/browser-capture";
 import { pdfInstructions } from "../../src/main/pdf-tools";
 import { RpcClient, type RpcMessage } from "../../src/main/rpc";
@@ -96,12 +97,15 @@ const browser = {
     async (
       _args: BrowserArguments,
       _downloadContext?: BrowserDownloadContext,
+      _testOrigin?: string,
     ): Promise<ToolResult> => ({
       success: true,
       contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
     }),
   ),
-  confirmationReason: vi.fn(async (args: BrowserArguments) => browserConfirmationReason(args)),
+  confirmationReason: vi.fn(async (args: BrowserArguments, origin?: string) =>
+    browserConfirmationReason(args, !!origin),
+  ),
   control: vi.fn(async () => {}),
   reset: vi.fn(),
   setProfile: vi.fn(),
@@ -240,7 +244,9 @@ afterEach(async () => {
     success: true,
     contentItems: [{ type: "inputText", text: "synthetic-browser-result" }],
   });
-  browser.confirmationReason.mockImplementation(async (args) => browserConfirmationReason(args));
+  browser.confirmationReason.mockImplementation(async (args, origin) =>
+    browserConfirmationReason(args, !!origin),
+  );
   await rm(dir, { recursive: true, force: true });
 });
 async function ready() {
@@ -3386,6 +3392,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain(browserTabsInstructions);
       expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
       expect(call.params.developerInstructions).toContain(browserDateInstructions);
+      expect(call.params.developerInstructions).toContain(browserTestingInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -3433,6 +3440,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.sandbox).toBe("workspace-write");
       expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
       expect(call.params.developerInstructions).toContain(browserDateInstructions);
+      expect(call.params.developerInstructions).toContain(browserTestingInstructions);
       if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
     }
     expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
@@ -5092,5 +5100,193 @@ describe("tela de branches integrada ao serviço e ao agente", () => {
         .projectBranches!.repositories[0].branches.some((branch) => branch.name === "feature"),
     ).toBe(false);
     expect(service.snapshot().metrics.failures).toBeGreaterThan(0);
+  });
+});
+
+describe("autorização de testes por origem na aba Sistema", () => {
+  const origin = "https://test.synthetic.invalid:8443";
+  function page(url = origin + "/form") {
+    const info = service.snapshot().browser;
+    info.activeTab = "system";
+    info.tabs.system = { ...info.tabs.system, url, error: null, loading: false };
+    service.updateBrowser(info);
+  }
+  async function authorize() {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    page();
+    await service.request({
+      type: "browserTesting",
+      projectPath: service.snapshot().project!.path,
+      threadId: service.snapshot().threadId,
+      allow: true,
+      origin,
+    });
+  }
+  it("vincula antes do primeiro turno, executa sem card e reforça contexto na fila/retomada", async () => {
+    await authorize();
+    await send("navegador teste autorizado");
+    await complete();
+    expect(service.snapshot().approvals).toEqual([]);
+    expect(browser.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "press", tab: "system" }),
+      undefined,
+      origin,
+    );
+    expect(service.snapshot().metrics.failures).toBe(0);
+    const threadId = service.snapshot().threadId!;
+    await service.request({ type: "resume", threadId });
+    await send("navegador teste autorizado");
+    await service.request({
+      type: "enqueue",
+      threadId,
+      id: randomUUID(),
+      text: "navegador teste autorizado",
+    });
+    await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledTimes(3), { timeout: 5000 });
+    await complete();
+    const calls = await rpc.call<
+      {
+        method: string;
+        params: {
+          additionalContext?: Record<string, { value: string }>;
+          developerInstructions?: string;
+        };
+      }[]
+    >("_fixture/readCalls");
+    for (const turn of calls.filter((c) => c.method === "turn/start"))
+      expect(turn.params.additionalContext?.stag_browser_testing.value).toContain(
+        JSON.stringify(origin),
+      );
+    expect(calls.find((c) => c.method === "thread/resume")?.params.developerInstructions).toContain(
+      browserTestingInstructions,
+    );
+    expect(JSON.stringify(await store.load())).not.toContain(origin);
+    expect(service.snapshot().browser.testOrigin).toBe(origin);
+  });
+  it.each(["documentação", "crítico"])("preserva confirmação para %s", async (kind) => {
+    await authorize();
+    await send("navegador teste autorizado " + kind);
+    await approve(false);
+    expect(browser.execute).not.toHaveBeenCalled();
+    await send("navegador teste autorizado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+  });
+  it("não infere autoridade e recusa origem velha, ausência de consentimento e Leitura", async () => {
+    await ready();
+    page();
+    const action = {
+      type: "browserTesting",
+      projectPath: service.snapshot().project!.path,
+      threadId: service.snapshot().threadId,
+      allow: true,
+      origin,
+    } as const;
+    await expect(service.request(action)).rejects.toThrow("autorize o navegador");
+    await service.request({ type: "browserConsent", allow: true });
+    await expect(service.request({ ...action, origin: "https://other.invalid" })).rejects.toThrow(
+      "Abra o site",
+    );
+    await service.request({ type: "preferences", mode: "read" });
+    await service.request({ type: "browserConsent", allow: true });
+    page();
+    await expect(
+      service.request({ ...action, threadId: service.snapshot().threadId }),
+    ).rejects.toThrow("Projeto ou Windows");
+    expect(service.snapshot().browser.testOrigin).toBeUndefined();
+  });
+  it.each(["https://test.synthetic.invalid:8444/form", "https://other.invalid/form"])(
+    "outra origem/porta revoga e voltar não restaura: %s",
+    async (url) => {
+      await authorize();
+      page(url);
+      page();
+      expect(service.snapshot().browser.testOrigin).toBeUndefined();
+      await send("navegador teste autorizado");
+      await approve(false);
+      expect(browser.execute).not.toHaveBeenCalled();
+    },
+  );
+  it("recusa seleção de teste de uma conversa ou pasta antiga, mesmo na mesma origem", async () => {
+    await authorize();
+    const current = {
+      type: "browserTesting",
+      allow: true,
+      origin,
+      projectPath: service.snapshot().project!.path,
+      threadId: service.snapshot().threadId,
+    } as const;
+    await expect(service.request({ ...current, threadId: "old-thread" })).rejects.toThrow(
+      "conversa ou pasta mudou",
+    );
+    await expect(
+      service.request({ ...current, projectPath: current.projectPath + "/other" }),
+    ).rejects.toThrow("conversa ou pasta mudou");
+    expect(service.snapshot().browser.testOrigin).toBe(origin);
+  });
+  it.each(["newChat", "connect"] as const)(
+    "%s descarta a autorização sem persistência",
+    async (type) => {
+      await authorize();
+      await send("analise");
+      await complete();
+      await service.request({ type });
+      expect(service.snapshot().browser.testOrigin).toBeUndefined();
+    },
+  );
+  it("revogação durante inspeção espera limpeza e descarta ação antiga, permitindo recuperar", async () => {
+    await authorize();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    browser.confirmationReason.mockImplementationOnce(async () => {
+      await gate;
+      return null;
+    });
+    await send("navegador teste autorizado");
+    await vi.waitFor(() => expect(browser.confirmationReason).toHaveBeenCalledOnce());
+    let finished = false;
+    const revoke = service
+      .request({
+        type: "browserTesting",
+        projectPath: service.snapshot().project!.path,
+        threadId: service.snapshot().threadId,
+        allow: false,
+        origin,
+      })
+      .then(() => {
+        finished = true;
+      });
+    await vi.waitFor(() => expect(browser.cancel).toHaveBeenCalled());
+    expect(finished).toBe(false);
+    release();
+    await revoke;
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().browser.testOrigin).toBeUndefined();
+    await service.request({
+      type: "browserTesting",
+      projectPath: service.snapshot().project!.path,
+      threadId: service.snapshot().threadId,
+      allow: true,
+      origin,
+    });
+    await send("navegador teste autorizado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+  });
+  it("origem alterada durante inspeção bloqueia o caminho sem aprovação", async () => {
+    await authorize();
+    browser.confirmationReason.mockImplementationOnce(async () => {
+      page("https://other.invalid");
+      return null;
+    });
+    await send("navegador teste autorizado");
+    await complete();
+    expect(browser.execute).not.toHaveBeenCalled();
+    expect(service.snapshot().metrics.failures).toBe(1);
+    expect(service.snapshot().browser.testOrigin).toBeUndefined();
   });
 });

@@ -22,6 +22,8 @@ const downloadSize = (bytes: number) =>
 export function BrowserPane({
   state,
   projectPath,
+  readOnly,
+  threadId,
   busy,
   pending,
   obscured = false,
@@ -30,6 +32,8 @@ export function BrowserPane({
 }: {
   state: BrowserState;
   projectPath?: string;
+  readOnly: boolean;
+  threadId: string | null;
   busy: boolean;
   pending: boolean;
   obscured?: boolean;
@@ -86,6 +90,12 @@ export function BrowserPane({
     };
   }, [viewBounds]);
   const manualDisabled = busy || pending || obscured;
+  let siteOrigin = "";
+  try {
+    siteOrigin = new URL(state.tabs.system.url).origin;
+  } catch {
+    /* No current site. */
+  }
   return (
     <section className="browser-panel" aria-label="Navegador do assistente">
       <header className="browser-heading">
@@ -229,7 +239,9 @@ export function BrowserPane({
         <span className={state.authorized ? "browser-authorized" : ""}>
           <ShieldCheck size={13} />
           {state.authorized
-            ? "Modelo autorizado · confirmações críticas"
+            ? state.testOrigin && state.activeTab === "system"
+              ? "Testes autorizados neste site"
+              : "Modelo autorizado · confirmações críticas"
             : "Controle do modelo desativado"}
         </span>
         <button
@@ -240,6 +252,43 @@ export function BrowserPane({
           {state.authorized ? "Revogar navegador" : "Autorizar navegador"}
         </button>
       </div>
+      {state.activeTab === "system" && (
+        <div className="browser-session-settings browser-testing-settings">
+          <label>
+            <input
+              type="checkbox"
+              checked={!!state.testOrigin}
+              disabled={
+                !state.testOrigin &&
+                (manualDisabled ||
+                  readOnly ||
+                  !state.authorized ||
+                  !projectPath ||
+                  !siteOrigin ||
+                  state.loading ||
+                  !!state.error)
+              }
+              onChange={(event) =>
+                void run({
+                  type: "browserTesting",
+                  projectPath: projectPath!,
+                  threadId,
+                  origin: state.testOrigin || siteOrigin,
+                  allow: event.target.checked,
+                })
+              }
+            />
+            Autorizar testes neste site
+          </label>
+          <small>
+            {state.testOrigin || siteOrigin || "Abra o sistema de teste."}
+            {" · "}Permite cadastros, edições e exclusões de teste sem perguntar a cada ação, nesta
+            conversa. Confirme que o sistema e seus destinos usam dados de teste. Login, pagamentos
+            reais, publicação e efeitos externos continuam com confirmação.
+          </small>
+          {readOnly && <small>Indisponível no modo Leitura.</small>}
+        </div>
+      )}
       <div className="browser-session-settings">
         <label>
           <input

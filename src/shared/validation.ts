@@ -162,6 +162,15 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("openLink"), url: z.string().max(8000) }).strict(),
   z.object({ type: z.literal("browserVisibility"), visible: z.boolean() }).strict(),
   z.object({ type: z.literal("browserConsent"), allow: z.boolean() }).strict(),
+  z
+    .object({
+      type: z.literal("browserTesting"),
+      projectPath: z.string().min(1).max(4000),
+      threadId: z.string().min(1).max(200).nullable(),
+      origin: z.string().min(1).max(2000),
+      allow: z.boolean(),
+    })
+    .strict(),
   z.object({ type: z.literal("browserTab"), tab: browserTabSchema }).strict(),
   z
     .object({

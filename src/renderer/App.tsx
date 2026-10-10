@@ -1132,6 +1132,8 @@ export function App() {
       {state.browser.available && state.browser.visible && (
         <BrowserPane
           state={state.browser}
+          readOnly={state.mode === "read"}
+          threadId={state.threadId}
           projectPath={state.project?.path}
           busy={state.busy}
           pending={pending}

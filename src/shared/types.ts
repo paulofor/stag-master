@@ -110,6 +110,7 @@ export interface BrowserState extends BrowserInfo {
   visible: boolean;
   authorized: boolean;
   remember: boolean;
+  testOrigin?: string;
 }
 export interface BrowserPageInfo {
   url: string;
@@ -251,6 +252,13 @@ export type Action =
   | { type: "openLink"; url: string }
   | { type: "browserVisibility"; visible: boolean }
   | { type: "browserConsent"; allow: boolean }
+  | {
+      type: "browserTesting";
+      origin: string;
+      allow: boolean;
+      projectPath: string;
+      threadId: string | null;
+    }
   | { type: "browserTab"; tab: BrowserTab }
   | { type: "browserSession"; projectPath: string; remember: boolean }
   | { type: "browserControl"; control: BrowserControl }

@@ -26,8 +26,53 @@ export async function startBrowserSite() {
       jsx: "automatic",
     })
   ).outputFiles[0].text;
-  const effects = { submissions: 0, downloads: 0, hangs: 0 };
+  const effects = { submissions: 0, downloads: 0, hangs: 0, testWrites: 0 };
+  let testRows = [];
   const server = createServer((request, response) => {
+    if (request.url === "/testing/write" && request.method === "POST") {
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        const params = new URLSearchParams(body);
+        if (params.get("operation") === "delete") testRows = [];
+        else testRows = [params.get("name") + ":" + params.get("date")];
+        effects.testWrites++;
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ rows: testRows, writes: effects.testWrites }));
+      });
+      return;
+    }
+    if (request.url === "/testing") {
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><html lang="pt-BR"><meta charset="utf-8"><body>
+        <h1>Sistema sintético de homologação</h1>
+        <form id="testing" action="/testing/write" method="post">
+          <label>Nome de teste <input name="name" value="Registro sintético"></label>
+          <label>Data de teste <input type="date" name="date" value="2026-10-10"></label>
+          <button type="submit">Cadastrar</button>
+          <button type="button" id="edit">Salvar edição</button>
+          <button type="button" id="delete">Excluir registro de teste</button>
+        </form>
+        <output id="rows"></output>
+        <button id="publish">Publicar</button><button id="pay">Pagar</button>
+        <button id="security">Segurança</button>
+        <a href="https://external.invalid/submit">Enviar para terceiro</a>
+        <form action="/testing/write" method="post"><label>Senha <input type="password"></label><button>Continuar</button></form>
+        <script>
+          const form=document.querySelector('#testing');
+          async function write(operation) {
+            const body=new URLSearchParams(new FormData(form)); body.set('operation',operation);
+            const data=await fetch(form.action,{method:'POST',body}).then(r=>r.json());
+            document.querySelector('#rows').textContent=JSON.stringify(data);
+          }
+          form.addEventListener('submit',e=>{e.preventDefault();void write('create');});
+          document.querySelector('#edit').onclick=()=>write('edit');
+          document.querySelector('#delete').onclick=()=>write('delete');
+        </script></body></html>`);
+      return;
+    }
     if (request.url === "/dates.js" || request.url === "/dates.css") {
       response.writeHead(200, {
         "Content-Type": request.url.endsWith(".js") ? "text/javascript" : "text/css",

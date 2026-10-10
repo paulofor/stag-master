@@ -298,6 +298,7 @@ async function start(): Promise<void> {
         "newChat",
         "resume",
         "browserConsent",
+        "browserTesting",
         "browserVisibility",
         "browserSession",
         "apiConsent",
@@ -410,7 +411,7 @@ async function start(): Promise<void> {
         title: "Controle do navegador",
         message: "Permitir que o modelo controle o navegador nesta conversa?",
         detail:
-          "O modelo poderá navegar, ler páginas, clicar e preencher campos no navegador ao lado, inclusive sites já conectados. Texto e capturas das páginas serão enviados ao ChatGPT. Também poderá baixar PDFs e ZIPs para a pasta do projeto, respeitando o modo Leitura, sem executar os arquivos. Ações rotineiras não pedirão confirmação; envio de dados, exclusão, publicação, pagamentos, credenciais e ações incertas terão confirmação específica. Revogar acesso, fechar o navegador ou abrir outra conversa sempre encerra a autorização. Dados de sites só são mantidos se Lembrar sessões neste projeto estiver ativado; use Esquecer logins para apagá-los. O navegador usa uma sessão separada dos seus outros navegadores.",
+          "O modelo poderá navegar, ler páginas, clicar e preencher campos no navegador ao lado, inclusive sites já conectados. Texto e capturas das páginas serão enviados ao ChatGPT. Também poderá baixar PDFs e ZIPs para a pasta do projeto, respeitando o modo Leitura, sem executar os arquivos. Ações rotineiras não pedirão confirmação. Você poderá autorizar testes uma vez para o site aberto na aba Sistema, incluindo alterações de registros de teste sem confirmação por ação. Fora desse alcance, envio de dados e exclusão exigem confirmação; publicação, pagamentos reais, credenciais e ações incertas continuam com confirmação específica. Revogar acesso, fechar o navegador ou abrir outra conversa sempre encerra a autorização. Dados de sites só são mantidos se Lembrar sessões neste projeto estiver ativado; use Esquecer logins para apagá-los. O navegador usa uma sessão separada dos seus outros navegadores.",
         buttons: ["Cancelar", "Autorizar navegador"],
         defaultId: 0,
         cancelId: 0,

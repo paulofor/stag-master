@@ -28,6 +28,7 @@ import {
   type ToolResult,
 } from "./desktop-tools";
 import { assistantInstructions, localExecutionContext, threadPolicy, turnPolicy } from "./policy";
+import { browserOrigin, browserTestAction, browserTestingCapability } from "./browser-testing";
 import {
   userInputQuestions,
   userInputTool,
@@ -129,8 +130,9 @@ interface Options {
     execute: (
       args: BrowserArguments,
       downloadContext?: BrowserDownloadContext,
+      testOrigin?: string,
     ) => Promise<ToolResult>;
-    confirmationReason: (args: BrowserArguments) => Promise<string | null>;
+    confirmationReason: (args: BrowserArguments, testOrigin?: string) => Promise<string | null>;
     control: (args: BrowserControl) => Promise<void>;
     reset: () => void;
     setProfile: (id: string | null) => void;
@@ -193,6 +195,12 @@ export class AssistantService extends EventEmitter {
   private windowsConsent = false;
   private windowsConsentThread: string | null = null;
   private browserConsentThread: string | null = null;
+  private browserTestScope: {
+    origin: string;
+    project: string;
+    thread: string | null;
+    mode: AccessMode;
+  } | null = null;
   private contextInstructionsDirty = false;
   private disposed = false;
   private sandboxReady = false;
@@ -289,7 +297,28 @@ export class AssistantService extends EventEmitter {
   }
   updateBrowser(info: BrowserInfo): void {
     Object.assign(this.state.browser, info, { download: info.download });
+    if (
+      this.browserTestScope &&
+      browserOrigin(info.tabs.system.url) !== this.browserTestScope.origin
+    )
+      this.clearBrowserTesting();
     this.publish();
+  }
+  private clearBrowserTesting(): void {
+    this.browserTestScope = null;
+    delete this.state.browser.testOrigin;
+  }
+  private browserTestingOrigin(): string | undefined {
+    const scope = this.browserTestScope;
+    return scope &&
+      this.state.browser.authorized &&
+      this.state.mode !== "read" &&
+      scope.mode === this.state.mode &&
+      scope.thread === this.state.threadId &&
+      scope.project === this.state.project?.path &&
+      browserOrigin(this.state.browser.tabs.system.url) === scope.origin
+      ? scope.origin
+      : undefined;
   }
   private publish(): void {
     if (this.disposed) return;
@@ -427,6 +456,7 @@ export class AssistantService extends EventEmitter {
     const selectionThread = this.state.threadId;
     const selectionTurn = this.turnId;
     const revokingBrowser =
+      (action.type === "browserTesting" && !action.allow) ||
       (action.type === "browserConsent" && !action.allow) ||
       (action.type === "browserVisibility" && !action.visible);
     const revokingApis = action.type === "apiConsent" && !action.allow;
@@ -463,6 +493,7 @@ export class AssistantService extends EventEmitter {
         "analyzeVideo",
       ].includes(action.type) ||
       (action.type === "browserConsent" && action.allow) ||
+      (action.type === "browserTesting" && action.allow) ||
       (action.type === "apiConsent" && action.allow) ||
       (action.type === "databaseConsent" && action.allow) ||
       action.type === "browserControl" ||
@@ -874,6 +905,46 @@ export class AssistantService extends EventEmitter {
         case "browserConsent":
           await this.browserConsent(action.allow);
           break;
+        case "browserTesting": {
+          if (
+            action.projectPath !== this.state.project?.path ||
+            action.threadId !== this.state.threadId
+          )
+            throw new Error(
+              "A conversa ou pasta mudou. Confira o site de teste no contexto atual.",
+            );
+          if (!action.allow) {
+            this.clearBrowserTesting();
+            this.state.queuePaused = true;
+            await this.stop();
+            await this.toolQueue;
+            break;
+          }
+          const origin = browserOrigin(this.state.browser.tabs.system.url);
+          if (
+            !this.options.browser ||
+            !this.state.browser.authorized ||
+            !this.state.project ||
+            this.state.mode === "read" ||
+            this.state.approvals.length ||
+            this.state.browser.activeTab !== "system" ||
+            !origin ||
+            action.origin !== origin ||
+            this.state.browser.tabs.system.loading ||
+            this.state.browser.tabs.system.error
+          )
+            throw new Error(
+              "Abra o site de teste na aba Sistema, autorize o navegador e use Projeto ou Windows antes de autorizar testes.",
+            );
+          this.browserTestScope = {
+            origin,
+            project: this.state.project.path,
+            thread: this.state.threadId,
+            mode: this.state.mode,
+          };
+          this.state.browser.testOrigin = origin;
+          break;
+        }
         case "browserSession": {
           const path = this.state.project?.path;
           const browser = this.options.browser;
@@ -888,6 +959,7 @@ export class AssistantService extends EventEmitter {
           this.options.databases?.tools?.cancel();
           this.databaseImportAbort?.abort();
           this.state.browser.authorized = false;
+          this.clearBrowserTesting();
           this.browserConsentThread = null;
           this.contextInstructionsDirty = true;
           this.state.queuePaused = true;
@@ -1454,6 +1526,7 @@ export class AssistantService extends EventEmitter {
     return this.rpc.call<T>(method, params);
   }
   private async connect(): Promise<void> {
+    this.clearBrowserTesting();
     this.completedWork = null;
     this.projectRefreshAbort?.abort();
     this.revokeApis();
@@ -1500,6 +1573,7 @@ export class AssistantService extends EventEmitter {
     });
     rpc.on("closed", (error: Error) => {
       if (this.disposed || this.rpc !== rpc) return;
+      this.clearBrowserTesting();
       this.projectRefreshAbort?.abort();
       this.revokeApis();
       this.revokeDatabases();
@@ -1719,6 +1793,7 @@ export class AssistantService extends EventEmitter {
     this.revokeApis();
     this.revokeDatabases();
     this.state.browser.authorized = false;
+    this.clearBrowserTesting();
     this.browserConsentThread = null;
     this.contextInstructionsDirty = false;
     this.options.browser?.reset();
@@ -1727,6 +1802,7 @@ export class AssistantService extends EventEmitter {
     this.state.metrics.elapsedMs = 0;
   }
   private async browserConsent(allow: boolean): Promise<void> {
+    if (!allow) this.clearBrowserTesting();
     if (!allow) this.databaseAbort?.abort();
     if (!this.options.browser)
       throw new Error("Navegador disponível somente no STAG Plus desktop.");
@@ -1756,6 +1832,7 @@ export class AssistantService extends EventEmitter {
         await this.resume(this.state.threadId);
       } catch (error) {
         this.state.browser.authorized = false;
+        this.clearBrowserTesting();
         this.browserConsentThread = null;
         throw error;
       }
@@ -1842,6 +1919,7 @@ export class AssistantService extends EventEmitter {
       this.databaseImportAbort?.abort();
       this.toolRequests.clear();
       this.state.browser.authorized = false;
+      this.clearBrowserTesting();
       this.browserConsentThread = null;
       this.options.browser?.reset();
     }
@@ -1929,6 +2007,8 @@ export class AssistantService extends EventEmitter {
       this.contextInstructionsDirty = false;
       if (this.state.mode === "windows") this.windowsConsentThread = result.thread.id;
       if (this.state.browser.authorized) this.browserConsentThread = result.thread.id;
+      if (this.browserTestScope && this.browserTestScope.thread === null)
+        this.browserTestScope.thread = result.thread.id;
       if (this.state.projectApis?.authorized) this.apiConsentThread = result.thread.id;
       if (this.state.projectDatabases?.authorized) this.databaseConsentThread = result.thread.id;
       this.settings.threads[result.thread.id] = {
@@ -2033,6 +2113,7 @@ export class AssistantService extends EventEmitter {
         effort: this.state.effort,
         additionalContext: {
           ...localExecutionContext(this.state.mode),
+          ...browserTestingCapability(this.state.mode, this.browserTestingOrigin()),
           ...pdfCapability(
             !!this.options.pdf && !!this.settings.threads[this.state.threadId!]?.pdfTool,
           ),
@@ -2527,20 +2608,42 @@ export class AssistantService extends EventEmitter {
             : {}),
         };
       };
+      let testedOrigin: string | undefined;
       const waiting: PendingApproval = isBrowser
         ? {
             message,
             safety,
             tool: "browser",
-            execute: () => {
+            execute: (approved) => {
               const context = downloadContext();
+              if (!approved && testedOrigin) {
+                if (testedOrigin !== this.browserTestingOrigin())
+                  throw new Error(
+                    "A autorização de testes mudou. Confira o site e a conversa antes de continuar.",
+                  );
+                return this.options.browser!.execute(
+                  args as BrowserArguments,
+                  context,
+                  testedOrigin,
+                );
+              }
               return context
                 ? this.options.browser!.execute(args as BrowserArguments, context)
                 : this.options.browser!.execute(args as BrowserArguments);
             },
             confirmation: () => {
               downloadContext();
-              return this.options.browser!.confirmationReason(args as BrowserArguments);
+              const origin = this.browserTestingOrigin();
+              testedOrigin = browserTestAction(
+                args as BrowserArguments,
+                origin,
+                this.state.browser.tabs.system.url,
+              )
+                ? origin
+                : undefined;
+              return testedOrigin
+                ? this.options.browser!.confirmationReason(args as BrowserArguments, testedOrigin)
+                : this.options.browser!.confirmationReason(args as BrowserArguments);
             },
             approval: (reason) => browserApproval(args as BrowserArguments, reason),
           }

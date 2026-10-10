@@ -1,4 +1,23 @@
-# Matriz de homologação da versão 0.4.60
+# Matriz de homologação da versão 0.4.61
+
+## Testes na aba Sistema — versão 0.4.61
+
+Matriz definida antes dos testes. Lacuna observada: o driver pede confirmação para envio de qualquer formulário e Enter/Delete mesmo em homologação; o harness não distingue uma autorização de testes por origem. Acrescentar opção explícita na aba Sistema, válida somente em memória para pasta/conversa/modo e origem exata. O cliente identifica o ambiente e destinos de teste; não inferir autorização de localhost, URL ou conteúdo remoto.
+
+| Área            | Cenário e aceite                                                                                                                                            | Evidência prevista                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| Fluxo completo  | Autorizar uma vez; preencher, escolher data, cadastrar, editar e excluir dados sintéticos sem cards; conferir resultado                                     | Serviço, Electron e formulário loopback reais         |
+| Limites         | Ausência/recusa da autorização, Leitura, outra aba/origem/porta, credenciais, pagamentos, publicação, destino externo e efeito critical conservam controles | Schema, driver e serviço                              |
+| Recuperação     | Alvo alterado entre inspeção/execução, revogação em fila, reload, falha e nova tentativa sem repetir mutações; troca/reinício perde autorização             | Harness existentes com gates e referências atuais     |
+| Contratos       | Início/retomada e capacidade vigente em cada turno/fila; página não autoriza ações, históricas mantêm schema                                                | Serviço e Codex real com provedor loopback            |
+| Observabilidade | Origem e autorização visíveis; contadores existentes verificam zero cards rotineiros e falha/recuperação; sem novas métricas ou segredos                    | Snapshots, UI e fixtures sintéticas                   |
+| Plataformas     | Electron Linux e Windows; Chromium desktop/Pixel 7 sem overflow; instalador da mesma versão                                                                 | check, test:desktop, format:check e workflows PR/main |
+
+A rodada Electron também reproduziu Enter com keydown/keyup, mas sem keypress/submissão. Incluir o evento nativo de caractere e verificar envio real e preventDefault, preservando confirmação fora do teste e revalidação de página antes da tecla.
+
+Nenhum sistema, conta ou dado do cliente será acessado. Filtros de DOM não comprovam ausência de efeitos indiretos do backend nem obediência semântica do modelo; ambiente/destinos continuam sujeitos à verificação na tarefa. Linux não comprova Windows nativo.
+
+Evidência local em 2026-10-10: `npm run check` completo aprovado (917 contratos na rodada completa, 152 cenários Chromium desktop/Pixel 7, build, decoder/ASR e Codex real/provedor loopback). Após vincular explicitamente o IPC à pasta/thread, os 11 contratos do escopo e typecheck passaram novamente. `xvfb-run -a npm run test:desktop` aprovado com cadastro real pelo renderer/preload/main, zero cards, reload/revogação e CRUD no driver; a sonda reproduziu keydown/keyup sem keypress e confirmou a correção de Enter, inclusive preventDefault, referências alteradas e ausência de efeitos fora do teste. O harness aguarda o estado do main após clicar no checkbox assíncrono, sem nova tentativa do clique. Build final, formatação, sintaxe JavaScript, diff, bash -n e ShellCheck aprovados. Servidor de licenças: 15 contratos e integração Docker/PostgreSQL/painel, backup/restauração e recuperação aprovados; namespace Compose exclusivo limpo. Node 22.23.3 ficou somente no workspace; instalação compartilhada preservada. O smoke informou restrição de namespaces bwrap no Linux; Windows nativo e instalador dependem dos workflows PR/main. Nenhum sistema, dado ou credencial do cliente foi usado.
 
 ## Escolha de datas e competências — versão 0.4.60
 

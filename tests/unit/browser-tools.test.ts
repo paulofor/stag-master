@@ -7,6 +7,12 @@ import {
   browserTool,
   browserCaptureCapability,
 } from "../../src/main/browser-tools";
+import {
+  browserTestAction,
+  browserOrigin,
+  browserTestingCapability,
+  browserTestingInstructions,
+} from "../../src/main/browser-testing";
 import { actionSchema } from "../../src/shared/validation";
 
 describe("contrato do navegador", () => {
@@ -202,4 +208,37 @@ describe("contrato do navegador", () => {
       actionSchema.safeParse({ type: "browserConsent", allow: true, threadId: "other" }).success,
     ).toBe(false);
   });
+});
+
+it("autorização de teste não pode vir do modelo, da URL ou de um risco incerto", () => {
+  const origin = "https://test.invalid:8443";
+  const action = browserArguments.parse({
+    action: "press",
+    tab: "system",
+    pageId: "page",
+    ref: "e1",
+    key: "Enter",
+    risk: "routine",
+    intent: "Cadastrar registro sintético",
+  });
+  expect(browserTestAction(action, origin, origin + "/form")).toBe(true);
+  expect(browserConfirmationReason(action, true)).toBeNull();
+  expect(browserConfirmationReason(action)).toBeTruthy();
+  for (const [args, grant, url] of [
+    [{ ...action, tab: "documentation" }, origin, origin],
+    [action, undefined, origin],
+    [action, origin, "https://test.invalid:8444"],
+    [{ ...action, risk: "critical" }, origin, origin],
+    [{ ...action, intent: undefined }, origin, origin],
+  ] as const)
+    expect(browserTestAction(browserArguments.parse(args), grant, url)).toBe(false);
+  expect(browserArguments.safeParse({ ...action, testOrigin: origin }).success).toBe(false);
+  expect(browserArguments.safeParse({ action: "authorizeTesting", origin }).success).toBe(false);
+  expect(browserOrigin("https://user:secret@test.invalid")).toBeUndefined();
+  expect(browserOrigin("file:///project")).toBeUndefined();
+  expect(browserTool.description).toContain(browserTestingInstructions);
+  expect(browserTestingCapability("read", origin).stag_browser_testing.value).not.toContain(origin);
+  expect(browserTestingCapability("project").stag_browser_testing.value).toContain(
+    "Nenhuma origem autorizada",
+  );
 });

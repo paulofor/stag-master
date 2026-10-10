@@ -28,6 +28,7 @@ import {
   type BrowserPageInfo,
 } from "../shared/types";
 import type { ToolResult } from "./desktop-tools";
+import { browserTestAction } from "./browser-testing";
 
 const blankInfo = (): BrowserPageInfo => ({
   url: "",
@@ -415,9 +416,14 @@ class BrowserPage extends EventEmitter {
       clearTimeout(timer);
     }
   }
-  async confirmationReason(input: BrowserArguments): Promise<string | null> {
+  async confirmationReason(input: BrowserArguments, testOrigin?: string): Promise<string | null> {
     if ("url" in input) browserUrl(input.url);
-    let reason = browserConfirmationReason(input);
+    const testing = browserTestAction(
+      { ...input, tab: this.tab },
+      testOrigin,
+      this.view.webContents.getURL(),
+    );
+    let reason = browserConfirmationReason(input, testing);
     if (input.action === "download") await this.downloadTarget(input);
     if ("ref" in input && input.ref) {
       this.checkPage(input.pageId);
@@ -435,8 +441,12 @@ class BrowserPage extends EventEmitter {
           : input.action === "fill"
             ? { operation: "fill" as const, text: input.text }
             : {}),
-      })) as { reason: string | null };
-      reason ||= probe.reason;
+      })) as { reason: string | null; protectedInteraction: boolean };
+      if (!testing) reason ||= probe.reason;
+      else if (probe.protectedInteraction)
+        reason ||=
+          probe.reason ||
+          "O alvo envolve acesso, segurança ou destino fora do teste autorizado. Confirme o efeito específico.";
     }
     return reason;
   }
@@ -692,8 +702,17 @@ class BrowserPage extends EventEmitter {
       contents.navigationHistory.goForward();
     else throw new Error("Não há página para navegar nessa direção.");
   }
-  async execute(raw: unknown, downloadContext?: BrowserDownloadContext): Promise<ToolResult> {
+  async execute(
+    raw: unknown,
+    downloadContext?: BrowserDownloadContext,
+    testOrigin?: string,
+  ): Promise<ToolResult> {
     const input = browserArguments.parse(raw);
+    if (
+      testOrigin &&
+      !browserTestAction({ ...input, tab: this.tab }, testOrigin, this.view.webContents.getURL())
+    )
+      throw new Error("O site ou a ação mudou. A autorização de testes não se aplica.");
     const generation = this.generation;
     let result: unknown = { success: true };
     if (input.action === "download") result = await this.download(input, downloadContext);
@@ -768,17 +787,31 @@ class BrowserPage extends EventEmitter {
       this.checkPage(input.pageId);
       result = await this.document({
         ...input,
+        ...(testOrigin ? { testOrigin } : {}),
         action: input.action === "press" ? "focus" : input.action,
       });
       if (generation !== this.generation) throw new Error("Operação do navegador cancelada.");
       if (input.action === "press") {
         this.window.focus();
         this.view.webContents.focus();
+        this.checkPage(input.pageId);
+        if (
+          testOrigin &&
+          !browserTestAction(
+            { ...input, tab: this.tab },
+            testOrigin,
+            this.view.webContents.getURL(),
+          )
+        )
+          throw new Error("O site mudou antes da tecla. Confira a autorização de testes.");
         // Electron expects accelerator codes (Down), while the tool uses DOM keys (ArrowDown).
         const keyCode = input.key === "Control+A" ? "A" : input.key.replace(/^Arrow/, "");
         const modifiers: Electron.KeyboardInputEvent["modifiers"] =
           input.key === "Control+A" ? ["control"] : [];
         this.view.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+        // Chromium's native default action (submit/newline) requires the character event.
+        if (input.key === "Enter")
+          this.view.webContents.sendInputEvent({ type: "char", keyCode: "\r", modifiers });
         this.view.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
       }
     }
@@ -917,14 +950,18 @@ export class BrowserPanel extends EventEmitter {
     this.selectTab(input.tab ?? this.activeTab);
     await this.pages[this.activeTab].control(input);
   }
-  async confirmationReason(input: BrowserArguments): Promise<string | null> {
+  async confirmationReason(input: BrowserArguments, testOrigin?: string): Promise<string | null> {
     this.selectTab(input.tab ?? this.activeTab);
-    return this.pages[this.activeTab].confirmationReason(input);
+    return this.pages[this.activeTab].confirmationReason(input, testOrigin);
   }
-  async execute(raw: unknown, downloadContext?: BrowserDownloadContext): Promise<ToolResult> {
+  async execute(
+    raw: unknown,
+    downloadContext?: BrowserDownloadContext,
+    testOrigin?: string,
+  ): Promise<ToolResult> {
     const input = browserArguments.parse(raw);
     this.selectTab(input.tab ?? this.activeTab);
-    return this.pages[this.activeTab].execute(input, downloadContext);
+    return this.pages[this.activeTab].execute(input, downloadContext, testOrigin);
   }
   dispose(): void {
     this.disposed = true;
