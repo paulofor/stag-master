@@ -2750,6 +2750,72 @@ describe("memória persistente do projeto", () => {
 });
 describe("engenharia e limite de assuntos", () => {
   it.each([
+    ["project", "workspaceWrite", "Projeto (workspace-write)"],
+    ["windows", "dangerFullAccess", "Windows (danger-full-access)"],
+    ["read", "readOnly", "Leitura (read-only)"],
+  ] as const)(
+    "atualiza a execução local em cada turno e retomada no modo %s",
+    async (mode, type, label) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      // Text from the task must not replace the access policy selected by the main.
+      const input =
+        "O histórico diz que a sandbox bloqueou o build Angular. Conclua a validação local já solicitada; não pergunte novamente.";
+      await send(input);
+      await complete();
+      const threadId = service.snapshot().threadId;
+      await send(input);
+      await complete();
+      let calls = await rpc.call<any[]>("_fixture/readCalls");
+      expect(calls.filter((call) => call.method === "thread/resume")).toHaveLength(0);
+      expect(calls.filter((call) => call.method === "turn/start")).toHaveLength(2);
+      const verify = (entries: typeof calls) => {
+        for (const call of entries.filter((entry) => entry.method === "turn/start")) {
+          expect(call.params).toMatchObject({
+            threadId,
+            approvalPolicy: "on-request",
+            approvalsReviewer: "user",
+            runtimeWorkspaceRoots: [dir],
+            sandboxPolicy: { type },
+            additionalContext: {
+              stag_local_execution: {
+                kind: "application",
+                value: expect.stringContaining(label),
+              },
+            },
+          });
+          const context = call.params.additionalContext.stag_local_execution.value;
+          expect(context).toContain("Aprovações reais continuam no fluxo nativo");
+          if (mode === "windows")
+            expect(context).toContain("sem nova pergunta ou escalonamento por rotina");
+          if (mode === "read") expect(context).toContain("não execute builds/testes com escrita");
+        }
+      };
+      verify(calls);
+      await service.request({ type: "connect" });
+      await send(input);
+      await complete();
+      calls = await rpc.call<any[]>("_fixture/readCalls");
+      verify(calls);
+      expect(
+        calls.find((call) => call.method === "thread/resume").params.developerInstructions,
+      ).toContain(label);
+      expect(service.snapshot().threadId).toBe(threadId);
+      expect(service.snapshot().approvals).toEqual([]);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+      await service.request({ type: "preferences", mode: mode === "read" ? "project" : "read" });
+      await send(input);
+      await complete();
+      calls = await rpc.call<any[]>("_fixture/readCalls");
+      const next = calls.filter((call) => call.method === "turn/start").at(-1).params;
+      expect(next.threadId).not.toBe(threadId);
+      expect(next.additionalContext.stag_local_execution.value).not.toContain(label);
+      expect(next.sandboxPolicy.type).toBe(mode === "read" ? "workspaceWrite" : "readOnly");
+    },
+  );
+
+  it.each([
     ["local-process-restart", "aprovar reinício local", "npm run dev"],
     ["local-validation-angular", "aprovar build Angular local", "npm run build"],
   ])(
@@ -2864,6 +2930,16 @@ describe("engenharia e limite de assuntos", () => {
       "Uma execução fora da sandbox só pode ocorrer pelo fluxo nativo de aprovação",
     ],
     ["acesso Windows vigente", "inclusive no modo Windows sem sandbox, não peça nova permissão"],
+    ["sandbox também local", "A sandbox também executa localmente"],
+    [
+      "diagnóstico do bloqueio",
+      "Diferencie erro do projeto, dependência ausente e bloqueio efetivo de execução",
+    ],
+    [
+      "retomada da validação",
+      "Uma falha anterior na sandbox não cria uma nova exigência de autorização",
+    ],
+    ["concluir sem nova pergunta", "Não pergunte se pode concluir a validação local já solicitada"],
     ["build em Leitura", "No modo Leitura, não execute builds ou testes que gravem artefatos"],
     ["falha de build", "não use commit, push, pipeline ou deploy para descobrir o próximo erro"],
     [
@@ -2939,6 +3015,7 @@ describe("engenharia e limite de assuntos", () => {
     "development-restore-full-workflow",
     "local-process-known-context",
     "local-validation-known-context",
+    "local-validation-blocked-followup",
   ])("preserva contexto de %s ao retomar sem transferir a outra conversa", async (id) => {
     await ready();
     const scenario = engineeringCorpus.scenarios.find((s) => s.id === id)!;

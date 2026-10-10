@@ -73,9 +73,13 @@ try {
   const { videoContext, videoMessage, videoImages } = await import(
     pathToFileURL(join(dir, "request-video.mjs")).href
   );
-  const { assistantInstructions, threadPolicy, turnPolicy, codexEnvironment } = await import(
-    pathToFileURL(join(dir, "policy.mjs")).href
-  );
+  const {
+    assistantInstructions,
+    localExecutionContext,
+    threadPolicy,
+    turnPolicy,
+    codexEnvironment,
+  } = await import(pathToFileURL(join(dir, "policy.mjs")).href);
   const { modelTrafficArguments } = await import(
     pathToFileURL(join(dir, "model-traffic.mjs")).href
   );
@@ -234,6 +238,7 @@ try {
         cwd: project,
         input,
         additionalContext: {
+          ...localExecutionContext("project"),
           ...projectBranchesContext(projectBranches),
           ...projectSourcesContext(project, sourceList, authorized, true),
           ...extraContext,
@@ -618,6 +623,12 @@ try {
         delivered.includes(fragment),
         `Contrato de engenharia/desenvolvimento local não chegou ao provedor: ${fragment}`,
       );
+    assert.ok(
+      JSON.stringify(provider.inputs.at(-1)).includes(
+        localExecutionContext("project").stag_local_execution.value,
+      ),
+      "O contexto vigente de execução local deve chegar em cada turno, inclusive após retomada.",
+    );
   }
   verifyEngineeringContract();
   function verifyBranchesContract() {

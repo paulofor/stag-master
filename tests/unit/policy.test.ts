@@ -94,6 +94,25 @@ it("inclui validação Angular sem pergunta redundante e mantém a política efe
   }
 });
 
+it("distingue falha da sandbox de nova autorização para concluir o build local", () => {
+  for (const mode of ["read", "project", "windows"] as const) {
+    const instructions = assistantInstructions(mode, "win32", false, true, "C:\\synthetic");
+    for (const fragment of [
+      "A sandbox também executa localmente",
+      "Não presuma que o Windows sempre bloqueia comandos",
+      "Diferencie erro do projeto, dependência ausente e bloqueio efetivo de execução",
+      "Uma falha anterior na sandbox não cria uma nova exigência de autorização",
+      "Não pergunte se pode concluir a validação local já solicitada",
+      "Ação manual só é necessária quando o impedimento efetivo não puder ser resolvido",
+    ])
+      expect(instructions, fragment).toContain(fragment);
+    expect(instructions).not.toContain(
+      "Se uma operação for bloqueada, relate o caminho e o erro e indique a ação manual necessária",
+    );
+  }
+  expect(userInputTool.description).toContain("falha anterior na sandbox");
+});
+
 describe("contrato de engenharia e escopo de negócio", () => {
   it("mantém especialização e limites em todos os modos, plataformas e estados do navegador", () => {
     for (const mode of ["read", "project", "windows"] as const)

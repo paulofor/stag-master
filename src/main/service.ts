@@ -29,7 +29,7 @@ import {
   type ToolResult,
   type CursorPulseResult,
 } from "./desktop-tools";
-import { assistantInstructions, threadPolicy, turnPolicy } from "./policy";
+import { assistantInstructions, localExecutionContext, threadPolicy, turnPolicy } from "./policy";
 import {
   userInputQuestions,
   userInputTool,
@@ -2165,6 +2165,7 @@ export class AssistantService extends EventEmitter {
         model: this.state.model,
         effort: this.state.effort,
         additionalContext: {
+          ...localExecutionContext(this.state.mode),
           ...pdfCapability(
             !!this.options.pdf && !!this.settings.threads[this.state.threadId!]?.pdfTool,
           ),

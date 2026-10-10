@@ -1,8 +1,10 @@
 # Arquitetura inicial
 
-## Validação local — versão 0.4.50
+## Validação local — versão 0.4.53
 
 O contrato de desenvolvimento de `engineering-policy.ts` e a descrição de `stag_ask_user` explicitam testes automatizados, build e execução local do Angular como parte da tarefa autorizada em Projeto/Windows. São enviados em start/resume, sem novo executor ou mudança de sandbox, raízes, consentimentos ou aprovação. Scripts e destinos devem ser conferidos; runners headless de teste não dão ao modelo navegação interativa nem sessões pessoais. Falhas locais relacionadas devem ser corrigidas e validadas antes da publicação. Execução local já permitida, inclusive no modo Windows sem sandbox, não gera outra pergunta. Requests reais do App Server continuam bloqueantes e recusáveis pelo fluxo existente; não são aceitos automaticamente nem duplicados por perguntas conversacionais. Leitura não executa builds/testes com escrita de artefatos, caches ou relatórios. Corpus sintético e perda parcial/recuperação verificam transmissão e isolamento, sem alegar obediência semântica absoluta.
+
+O main envia `stag_local_execution` como contexto da aplicação em cada `turn/start`, derivado do modo da conversa, inclusive quando o thread já está carregado. A mesma informação acompanha start/resume. A orientação da pasta não encaminha toda falha para ação manual: o assistente diferencia erro de projeto, dependência e restrição efetiva, continuando os testes autorizados. O contexto não muda `threadPolicy`/`turnPolicy`, não aprova comandos e não interpreta texto do cliente como seleção de modo. Regressões conferem correspondência entre contexto/política, retomada, troca de modo, ausência de cards redundantes e requests reais recusáveis.
 
 ## Nome e compatibilidade — versão 0.4.41
 
