@@ -1,0 +1,114 @@
+x-build: &build
+  context: ..
+  dockerfile: license-server/Dockerfile
+
+x-runtime: &runtime
+  restart: unless-stopped
+  stop_grace_period: 30s
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "5m"
+      max-file: "3"
+
+services:
+  license-server:
+    <<: *runtime
+    build: *build
+    read_only: true
+    cap_drop: [ALL]
+    mem_limit: 384m
+    pids_limit: 80
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:-http://127.0.0.1:8080}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      OFFLINE_HOURS: ${OFFLINE_HOURS:-48}
+      PGHOST: postgres
+      PGDATABASE: stag_licenses
+      PGUSER: stag_license_app
+      PGPASSWORD_FILE: /run/secrets/postgres_password
+      ADMIN_PASSWORD_HASH_FILE: /run/secrets/admin_password_hash
+      SIGNING_KEY_FILE: /run/secrets/signing_key
+    secrets: [postgres_password, admin_password_hash, signing_key]
+    ports:
+      - "127.0.0.1:${LICENSE_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 8s
+      retries: 12
+      start_period: 10s
+    networks: [data, web]
+
+  postgres:
+    <<: *runtime
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    mem_limit: 256m
+    pids_limit: 100
+    environment:
+      POSTGRES_DB: stag_licenses
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets: [postgres_password, postgres_admin_password]
+    volumes:
+      - license-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d stag_licenses"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [data]
+
+  setup:
+    profiles: [setup]
+    build: *build
+    user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
+    entrypoint: [node, scripts/init.mjs]
+    command:
+      [
+        --directory,
+        /setup/.secrets,
+        --output-env,
+        /setup/.env,
+        --url,
+        "${PUBLIC_URL:-http://127.0.0.1:8080}",
+        --username,
+        "${ADMIN_USERNAME:-admin}",
+      ]
+    volumes:
+      - "${LICENSE_SETUP_DIR:-.}:/setup"
+    network_mode: none
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  postgres_admin_password:
+    file: ${LICENSE_SECRETS_DIR:-./.secrets}/postgres-admin-password.txt
+  postgres_password:
+    file: ${LICENSE_SECRETS_DIR:-./.secrets}/postgres-password.txt
+  admin_password_hash:
+    file: ${LICENSE_SECRETS_DIR:-./.secrets}/admin-password-hash.txt
+  signing_key:
+    file: ${LICENSE_SECRETS_DIR:-./.secrets}/signing-key.pem
+
+volumes:
+  license-data:
+
+networks:
+  data:
+    internal: true
+  web:

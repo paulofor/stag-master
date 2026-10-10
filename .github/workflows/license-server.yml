@@ -1,0 +1,47 @@
+name: License Server CI
+on:
+  pull_request:
+    paths:
+      - "license-server/**"
+      - "server/test/images.mjs"
+      - "package*.json"
+      - ".github/workflows/license-server.yml"
+  push:
+    branches: [main]
+    paths:
+      - "license-server/**"
+      - "server/test/images.mjs"
+      - "package*.json"
+      - ".github/workflows/license-server.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: License API, PostgreSQL and browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            license-server/package-lock.json
+      - run: npm ci --include=dev --ignore-scripts
+      - run: npm ci --prefix license-server --include=dev --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:licenses
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: license-server-validation
+          path: |
+            .local/license-validation.json
+            .local/license-test-*/*.png
+          include-hidden-files: true
+          if-no-files-found: ignore

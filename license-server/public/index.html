@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Licenças · STAG Plus</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="STAG Plus Licenças"
+        ><span class="brand-mark">S+</span
+        ><span>STAG <strong>Plus</strong><small>Administração de licenças</small></span></a
+      >
+      <span id="working" class="muted" role="status" hidden>Processando…</span>
+      <div id="account" hidden>
+        <span id="username"></span><button id="password-button" class="quiet">Alterar senha</button
+        ><button id="logout" class="quiet">Sair</button>
+      </div>
+    </header>
+    <main>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <section id="login-view" class="login-card">
+        <span class="eyebrow">ACESSO ADMINISTRATIVO</span>
+        <h1>Controle quem usa<br />o STAG Plus.</h1>
+        <p>
+          Emita licenças de avaliação, acompanhe as ativações e administre a validade de cada
+          acesso.
+        </p>
+        <form id="login-form">
+          <label
+            >Usuário<input
+              name="username"
+              autocomplete="username"
+              required
+              minlength="3"
+              maxlength="80"
+          /></label>
+          <label
+            >Senha<input
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+              maxlength="128"
+          /></label>
+          <button type="submit" class="primary">Entrar no painel</button>
+        </form>
+        <small>Credenciais iniciais são preparadas no servidor. Não há cadastro público.</small>
+      </section>
+      <section id="dashboard" hidden>
+        <div class="heading">
+          <div>
+            <span class="eyebrow">PAINEL DE CONTROLE</span>
+            <h1>Licenças</h1>
+            <p>Uma visão clara dos acessos ao seu aplicativo.</p>
+          </div>
+          <button id="new-license" class="primary">
+            <span aria-hidden="true">+</span> Nova licença
+          </button>
+        </div>
+        <div class="stats" aria-label="Resumo das licenças">
+          <article>
+            <span>Licenças ativas</span><strong id="stat-active">—</strong
+            ><small id="stat-total">—</small>
+          </article>
+          <article>
+            <span>Computadores ativos</span><strong id="stat-devices">—</strong
+            ><small>Nas licenças vigentes</small>
+          </article>
+          <article>
+            <span>Vencem em 7 dias</span><strong id="stat-expiring">—</strong
+            ><small>Confira antes de prorrogar</small>
+          </article>
+          <article>
+            <span>Encerradas</span><strong id="stat-ended">—</strong
+            ><small id="stat-ended-detail">—</small>
+          </article>
+        </div>
+        <div class="workspace">
+          <section class="card license-list" aria-label="Lista de licenças">
+            <form id="search-form" class="search">
+              <label class="sr-only" for="search">Buscar licença</label
+              ><input
+                id="search"
+                name="search"
+                type="search"
+                placeholder="Buscar por nome…"
+                maxlength="120"
+              /><button class="quiet">Buscar</button
+              ><button id="reload" type="button" class="quiet">Atualizar</button>
+            </form>
+            <div id="licenses" class="rows"></div>
+            <div class="pagination">
+              <button id="previous" class="quiet">Anterior</button><span id="page-label"></span
+              ><button id="next" class="quiet">Próxima</button>
+            </div>
+          </section>
+          <section class="card detail" aria-label="Detalhes da licença">
+            <div id="empty-detail" class="empty">
+              <span class="empty-icon" aria-hidden="true">◇</span>
+              <h2>Selecione uma licença</h2>
+              <p>Consulte a validade, ajuste os limites e gerencie os computadores vinculados.</p>
+            </div>
+            <div id="selected-detail" hidden>
+              <div class="detail-heading">
+                <h2 id="detail-title"></h2>
+                <span id="detail-status" class="badge"></span>
+              </div>
+              <p class="muted" id="detail-hint"></p>
+              <form id="edit-form">
+                <label>Nome ou identificação<input name="label" required maxlength="120" /></label>
+                <label
+                  >Validade (horário local)<input name="expiresAt" type="datetime-local" required
+                /></label>
+                <div class="form-row">
+                  <label
+                    >Limite de computadores<input
+                      name="maxDevices"
+                      type="number"
+                      min="1"
+                      max="100"
+                      required /></label
+                  ><button id="extend" type="button" class="quiet">+ 30 dias</button>
+                </div>
+                <button class="primary" type="submit">Salvar alterações</button>
+              </form>
+              <div class="device-section">
+                <div class="subheading">
+                  <h3>Computadores</h3>
+                  <span id="device-count" class="muted"></span>
+                </div>
+                <div id="devices"></div>
+              </div>
+              <div class="actions">
+                <button id="revoke" class="danger">Revogar licença</button
+                ><button id="restore" class="quiet" hidden>Reativar licença</button
+                ><button id="rotate" class="quiet">Gerar novo código</button>
+              </div>
+              <p class="fineprint" id="offline-note"></p>
+            </div>
+          </section>
+        </div>
+        <details class="card audit">
+          <summary>Atividade recente</summary>
+          <button id="load-audit" class="quiet">Carregar atividade</button>
+          <ol id="audit-list"></ol>
+        </details>
+      </section>
+      <footer>
+        STAG Plus · Servidor de licenças 0.1.0 <span>Desenvolvido por Paulo Forestieri</span>
+      </footer>
+    </main>
+    <dialog id="create-dialog">
+      <form id="create-form">
+        <span class="eyebrow">NOVO ACESSO</span>
+        <h2>Emitir licença</h2>
+        <p>O código será exibido uma única vez.</p>
+        <label
+          >Nome ou identificação<input
+            name="label"
+            required
+            maxlength="120"
+            placeholder="Ex.: Avaliação equipe 01"
+        /></label>
+        <div class="form-row">
+          <label
+            >Prazo em dias<input
+              name="durationDays"
+              type="number"
+              value="30"
+              min="1"
+              max="3650"
+              required /></label
+          ><label
+            >Computadores<input
+              name="maxDevices"
+              type="number"
+              value="1"
+              min="1"
+              max="100"
+              required
+          /></label>
+        </div>
+        <p id="create-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" data-close="create-dialog" class="quiet">Cancelar</button
+          ><button type="submit" class="primary">Emitir licença</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="key-dialog">
+      <span class="eyebrow">LICENÇA EMITIDA</span>
+      <h2>Guarde este código</h2>
+      <p>Envie-o somente à pessoa autorizada. Ele não poderá ser consultado novamente.</p>
+      <label
+        >Código da licença<textarea
+          id="license-key"
+          rows="2"
+          readonly
+          spellcheck="false"
+        ></textarea>
+      </label>
+      <p id="copy-status" role="status"></p>
+      <div class="dialog-actions">
+        <button id="copy-key" class="primary">Copiar código</button
+        ><button data-close="key-dialog" class="quiet">Concluir</button>
+      </div>
+    </dialog>
+    <dialog id="confirm-dialog">
+      <h2 id="confirm-title"></h2>
+      <p id="confirm-text"></p>
+      <div class="dialog-actions">
+        <button id="confirm-no" class="quiet">Cancelar</button
+        ><button id="confirm-yes" class="danger">Confirmar</button>
+      </div>
+    </dialog>
+    <dialog id="password-dialog">
+      <form id="password-form">
+        <h2>Alterar senha</h2>
+        <p>As sessões atuais serão encerradas.</p>
+        <label
+          >Senha atual<input
+            name="currentPassword"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength="128" /></label
+        ><label
+          >Nova senha<input
+            name="newPassword"
+            type="password"
+            autocomplete="new-password"
+            required
+            minlength="12"
+            maxlength="128"
+        /></label>
+        <p id="password-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" data-close="password-dialog" class="quiet">Cancelar</button
+          ><button type="submit" class="primary">Alterar senha</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

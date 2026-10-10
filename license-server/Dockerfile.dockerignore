@@ -1,0 +1,14 @@
+**
+!LICENSE
+!license-server/
+!license-server/package.json
+!license-server/package-lock.json
+!license-server/tsconfig.json
+!license-server/src/
+!license-server/src/**
+!license-server/public/
+!license-server/public/**
+!license-server/scripts/
+!license-server/scripts/init.mjs
+!license-server/client/
+!license-server/client/**
