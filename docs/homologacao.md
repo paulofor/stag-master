@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.51
+# Matriz de homologação da versão 0.4.52
+
+## Licença proprietária do STAG Plus — versão 0.4.52
+
+Matriz definida antes dos testes. Lacuna observada: o pacote ainda declara MIT e o harness do instalador só confere crédito/versão, sem validar apresentação ou distribuição dos termos. Aplicar a licença proprietária somente às novas contribuições próprias, preservando o material já publicado sob MIT e as licenças dos componentes de terceiros. Reutilizar o compilador NSIS e o teste do pacote existentes.
+
+| Área                              | Cenário e aceite                                                                                                                                               | Evidência prevista                                                  |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Termos e caminho feliz            | Novas contribuições próprias a partir de 0.4.52 exigem autorização escrita; avaliação pessoal sem redistribuição; prazo e dispositivos dependem da autorização | Revisão de LICENSE, README e metadados                              |
+| Histórico e terceiros             | MIT até 0.4.51 preservada integralmente; dependências mantêm suas licenças, avisos e fontes                                                                    | Licença histórica com hash conferido e avisos existentes            |
+| Instalador                        | Compilador real incorpora os termos em página de licença antes da instalação, preservando nome/crédito/versão                                                  | Fixture NSIS existente ampliada, compilação sem executar instalador |
+| Distribuição e falhas             | Pacote contém LICENSE.txt e LICENSE-MIT-LEGACY.txt idênticos às fontes; ausência/alteração dos arquivos reprova a validação                                    | Builder real e harness do pacote existente                          |
+| Integrações e recuperação         | Aplicação, perfil, conexões, consentimentos e histórico preservados; cancelar instalação não concede autorização de uso                                        | Contratos e Electron existentes; termos sem ativação técnica        |
+| Observabilidade, métricas e dados | Sem servidor de licenças, identificação de máquina, telemetria ou segredos novos                                                                               | Diff e builds/testes locais sem conta real                          |
+| Plataformas                       | Chromium desktop/Pixel 7 e Electron Linux preservados; instalador/pacote Windows conferidos no CI nativo                                                       | check, test:desktop, format:check e CI PR/main                      |
+
+A alteração dos termos não remove permissões das cópias MIT já distribuídas nem implementa controle técnico de ativação/revogação. O repositório permanece com sua visibilidade atual; os direitos de visualização/fork previstos nos termos do GitHub são preservados. Linux valida lógica, compilação NSIS e arquivos do pacote, sem comprovar a interface nativa do instalador Windows.
+
+Evidência local: `npm run check` passou com 862 contratos, typecheck, build, decoder/ASR reais, schema do Codex fixado/provedor loopback e 148 cenários Chromium/Pixel 7. `xvfb-run -a npm run test:desktop` passou com perfil/conta/projetos sintéticos, recuperação e isolamento. A fixture ampliada compilou a página NSIS real, conferiu termos/crédito/versão, recusou recurso ausente e confirmou o SHA-256 original da MIT histórica. Um checkout Git sintético com autocrlf reproduziu alteração dos bytes; os atributos LF preservaram o hash sem mudar configuração global.
+
+O primeiro pacote local revelou que o builder exclui de app.asar as fontes usadas em extraFiles. Corrigida a preparação no build versionado: cópias externas passam por staging privado em .local, mantendo os originais no pacote interno. Novo build/builder Linux e harness do pacote aprovaram as quatro cópias por bytes e o leitor PDF empacotado. Remoção e adulteração sintéticas de licença foram recusadas; restauração recuperou o teste. Os quatro contratos focais de empacotamento passaram após o ajuste. Sintaxe JavaScript, formatação e diff conferidos; nenhum script shell alterado. Node 22.23.3 usado somente no workspace, sem substituir executáveis compartilhados. O smoke declara a limitação de namespaces bwrap no kernel Linux; execução/NTFS e empacotamento Windows dependem dos jobs nativos do PR/main. Nenhuma conta, projeto ou credencial do cliente foi usada nos testes.
 
 ## Aviso sonoro ao concluir o trabalho — versão 0.4.51
 
