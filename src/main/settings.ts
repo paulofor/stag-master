@@ -18,6 +18,7 @@ const settingsSchema = z.object({
         pdfTool: z.boolean().optional(),
         httpTool: z.boolean().optional(),
         sqlTool: z.boolean().optional(),
+        sqlCatalogTool: z.boolean().optional(),
         databaseTool: z.boolean().optional(),
         userInputTool: z.boolean().optional(),
         backgroundVideo: z.boolean().optional(),

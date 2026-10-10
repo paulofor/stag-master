@@ -72,7 +72,14 @@ it("registra schema real e contratos de engenharia/segurança; catálogo não ex
   expect(JSON.parse(context.stag_databases.value)).toMatchObject({
     available: true,
     authorized: false,
-    connections: [{ database: "stag_fixture", credentialAvailable: true }],
+    connections: [
+      {
+        connectionId: store.snapshot(dir).connections[0].id,
+        revision: store.snapshot(dir).revision,
+        database: "stag_fixture",
+        credentialAvailable: true,
+      },
+    ],
   });
   for (const secret of [password, '"user"', "encryptedPassword"])
     expect(context.stag_databases.value).not.toContain(secret);
@@ -84,6 +91,12 @@ it("registra schema real e contratos de engenharia/segurança; catálogo não ex
     { parameters: [{ name: "id", type: "int", value: 1.5 }] },
   ])
     expect(sqlArguments.safeParse({ ...args(), ...patch }).success).toBe(false);
+});
+it("recupera o catálogo sem exigir id/revisão ou aceitar SQL e segredos na listagem", () => {
+  expect(sqlArguments.safeParse({ operation: "list" }).success).toBe(true);
+  for (const patch of [{ sql: "SELECT 1" }, { password }, { server: "other" }])
+    expect(sqlArguments.safeParse({ operation: "list", ...patch }).success).toBe(false);
+  expect(sqlArguments.safeParse({ operation: "query", sql: "SELECT 1" }).success).toBe(false);
 });
 it.each([
   "SELECT 1",

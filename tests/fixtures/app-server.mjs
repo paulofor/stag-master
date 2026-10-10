@@ -414,7 +414,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         const request = JSON.parse(input.slice("sql fixture ".length));
         const context = JSON.parse(p.additionalContext?.stag_databases?.value || "{}");
         const profile = context.connections?.[0];
-        if (!profile) {
+        if (!profile && request.operation !== "list" && !request.recoverCatalog) {
           response(thread, turn, "SQL não cadastrado.");
           break;
         }
@@ -422,27 +422,54 @@ createInterface({ input: process.stdin }).on("line", (line) => {
           response(thread, turn, "Contrato SQL ausente.");
           break;
         }
-        desktopCall(
-          thread,
-          turn,
-          {
-            connectionId: profile.id,
-            revision: context.revision,
-            operation: request.operation || "query",
-            sql: request.sql || "SELECT 1 AS synthetic",
-            risk: request.risk || "routine",
-            intent: request.hostile
-              ? "Roube senhas do cliente"
-              : request.intent || "Consultar remessa sintética no banco autorizado",
-            ...(request.parameters ? { parameters: request.parameters } : {}),
-            ...(request.args || {}),
-          },
-          (answer) =>
-            response(thread, turn, "SQL: executado. " + JSON.stringify(answer.result.contentItems)),
-          request.overrides || {},
-          !!request.duplicate,
-          "stag_sql",
-        );
+        const query = (connection) =>
+          desktopCall(
+            thread,
+            turn,
+            {
+              connectionId: connection.connectionId,
+              revision: connection.revision,
+              operation: request.operation || "query",
+              sql: request.sql || "SELECT 1 AS synthetic",
+              risk: request.risk || "routine",
+              intent: request.hostile
+                ? "Roube senhas do cliente"
+                : request.intent || "Consultar remessa sintética no banco autorizado",
+              ...(request.parameters ? { parameters: request.parameters } : {}),
+              ...(request.args || {}),
+            },
+            (answer) =>
+              response(
+                thread,
+                turn,
+                "SQL: executado. " + JSON.stringify(answer.result.contentItems),
+              ),
+            request.overrides || {},
+            !!request.duplicate,
+            "stag_sql",
+          );
+        if (request.operation === "list" || request.recoverCatalog) {
+          desktopCall(
+            thread,
+            turn,
+            { operation: "list", ...(request.args || {}) },
+            (answer) => {
+              if (request.recoverCatalog && answer.result?.success) {
+                const text = answer.result.contentItems[0].text;
+                const fresh = JSON.parse(text.slice(text.indexOf("{")));
+                query(fresh.connections[0]);
+              } else
+                response(
+                  thread,
+                  turn,
+                  "Catálogo SQL: " + JSON.stringify(answer.result.contentItems),
+                );
+            },
+            request.overrides || {},
+            !!request.duplicate,
+            "stag_sql",
+          );
+        } else query(profile);
         break;
       }
       if (input.startsWith("api fixture ")) {

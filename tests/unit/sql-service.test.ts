@@ -344,6 +344,8 @@ it("registro real, consentimento e contexto vigente em cada turno; não procura 
     available: true,
     authorized: true,
     revision: project().revision,
+    canList: true,
+    connections: [{ connectionId: project().connections[0].id, revision: project().revision }],
   });
   for (const value of [
     JSON.stringify(service.snapshot()),
@@ -353,6 +355,122 @@ it("registro real, consentimento e contexto vigente em cada turno; não procura 
   ])
     expect(value).not.toContain(password);
   expect(project().metrics).toMatchObject({ requests: 1, failures: 0, lastRows: 1 });
+});
+it("lista sem abrir banco nem incrementar consultas e recupera os argumentos no mesmo turno", async () => {
+  await authorize();
+  await send({ operation: "list", duplicate: true });
+  await done();
+  expect(runner).not.toHaveBeenCalled();
+  expect(project().metrics.requests).toBe(0);
+  const output = service.snapshot().items.at(-1)!.text;
+  expect(output).toContain(project().connections[0].id);
+  expect(output).toContain(project().revision);
+  for (const secret of [password, '"user"', "encryptedPassword", "recoverySources"])
+    expect(output).not.toContain(secret);
+  const id = service.snapshot().threadId;
+  await send({ recoverCatalog: true });
+  await done();
+  expect(service.snapshot().threadId).toBe(id);
+  expect(runner).toHaveBeenCalledTimes(1);
+  expect(runner.mock.calls[0][2]).toMatchObject({
+    connectionId: project().connections[0].id,
+    revision: project().revision,
+  });
+});
+it("listagem exige autorização, respeita Leitura e recusa campos extras sem abrir driver", async () => {
+  await send({ operation: "list" });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain("Autorizar bancos");
+  await service.request({ type: "preferences", mode: "read" });
+  await authorize();
+  await send({ operation: "list" });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain(project().connections[0].id);
+  await send({ operation: "list", args: { sql: "SELECT 1" } });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain("Argumentos SQL inválidos");
+  expect(runner).not.toHaveBeenCalled();
+  await authorize(false);
+  await send({ operation: "list" });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain("não autorizado");
+});
+it("retomada e fila usam revisão vigente; históricos SQL anteriores continuam com catálogo explícito", async () => {
+  await authorize();
+  await send({ operation: "list" });
+  await done();
+  const id = service.snapshot().threadId!;
+  const oldRevision = project().revision;
+  await service.request({
+    type: "saveDatabase",
+    projectPath: dir,
+    revision: oldRevision,
+    connectionId: project().connections[0].id,
+    config: { ...config, name: "Atualizada" },
+    password: "",
+    rememberPassword: true,
+  });
+  await authorize();
+  await service.request({ type: "resume", threadId: id });
+  await send({ args: { revision: oldRevision } });
+  await done();
+  expect(runner).not.toHaveBeenCalled();
+  await service.request({
+    type: "enqueue",
+    threadId: id,
+    id: randomUUID(),
+    text: 'sql fixture {"recoverCatalog":true}',
+  });
+  await vi.waitFor(() => expect(runner).toHaveBeenCalledTimes(1));
+  await done();
+  expect(runner.mock.calls[0][2].revision).toBe(project().revision);
+  const data = await settings.load();
+  delete data.threads[id].sqlCatalogTool;
+  await settings.save(data);
+  await service.init();
+  await service.request({ type: "resume", threadId: id });
+  await authorize();
+  await send({ operation: "list" });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain("schema SQL anterior");
+  await send();
+  await done();
+  expect(runner).toHaveBeenCalledTimes(2);
+  const turn = calls.filter((call) => call.method === "turn/start").at(-1)!.params as {
+    additionalContext: { stag_databases: { value: string } };
+  };
+  expect(JSON.parse(turn.additionalContext.stag_databases.value)).toMatchObject({
+    canList: false,
+    connections: [{ connectionId: project().connections[0].id, revision: project().revision }],
+  });
+});
+it("listagem aguarda a fila e descarta a autorização revogada; requests antigos não revelam catálogo", async () => {
+  await authorize();
+  let release!: () => void;
+  (service as unknown as { toolQueue: Promise<void> }).toolQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await send({ operation: "list", duplicate: true });
+  let completed = false;
+  const revoking = authorize(false).then(() => {
+    completed = true;
+  });
+  await vi.waitFor(() => expect(project().authorized).toBe(false));
+  expect(completed).toBe(false);
+  release();
+  await revoking;
+  await done();
+  expect(runner).not.toHaveBeenCalled();
+  await authorize();
+  for (const overrides of [{ threadId: "other" }, { turnId: "other" }, { namespace: "other" }]) {
+    await send({ operation: "list", overrides });
+    await done();
+    expect(service.snapshot().items.at(-1)!.text).not.toContain("Catálogo SQL vigente");
+  }
+  await send({ operation: "list" });
+  await done();
+  expect(service.snapshot().items.at(-1)!.text).toContain("Catálogo SQL vigente");
+  expect(runner).not.toHaveBeenCalled();
 });
 it("INSERT routine pede aprovação concreta; recusa resolve e aprovação/duplicata executam uma vez", async () => {
   await authorize();
@@ -588,9 +706,10 @@ it("cancelar seleção preserva; projeto/conversa/reinício não herdam consenti
   expect(project().authorized).toBe(true);
   await service.request({ type: "resume", threadId: id });
   expect(project().authorized).toBe(true);
-  expect(JSON.stringify(calls.filter((call) => call.method === "thread/resume"))).toContain(
-    sqlInstructions,
-  );
+  const resumed = calls.filter((call) => call.method === "thread/resume").at(-1)!.params as {
+    developerInstructions: string;
+  };
+  expect(resumed.developerInstructions).toContain(sqlInstructions);
   await service.request({ type: "newChat" });
   expect(project().authorized).toBe(false);
   await service.request({ type: "resume", threadId: id });

@@ -194,6 +194,22 @@ export async function validateDatabaseConnections(
         });
       }, importedProfile);
       await rm(join(project, "application-import.properties"));
+      const beforeCatalog = await page.evaluate(() => window.stag.getSnapshot());
+      await page.evaluate(() =>
+        window.stag.request({ type: "send", text: 'sql fixture {"operation":"list"}' }),
+      );
+      await expect
+        .poll(() => page.evaluate(() => window.stag.getSnapshot().then((s) => s.busy)))
+        .toBe(false);
+      const catalogState = await page.evaluate(() => window.stag.getSnapshot());
+      const catalogOutput = catalogState.items.at(-1).text;
+      assert.ok(catalogOutput.includes(beforeCatalog.projectDatabases.connections[0].id));
+      assert.ok(catalogOutput.includes(beforeCatalog.projectDatabases.revision));
+      assert.equal(
+        catalogState.projectDatabases.metrics.requests,
+        beforeCatalog.projectDatabases.metrics.requests,
+      );
+      assert.equal(catalogOutput.includes(password), false);
       // Await turn/start's response before interruption; busy alone is not a handshake.
       await page.evaluate(() => window.stag.request({ type: "send", text: "perguntar stack" }));
       assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
