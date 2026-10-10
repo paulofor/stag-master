@@ -35,7 +35,7 @@ export function syntheticBrowserZip() {
   return Buffer.concat([local, name, body, central, name, end]);
 }
 
-export async function startDownloadSite() {
+export async function startDownloadSite({ redirectTarget } = {}) {
   const counts = {},
     active = new Set();
   let url = "";
@@ -52,7 +52,12 @@ export async function startDownloadSite() {
       );
     } else if (path === "/redirect" || path === "/loop" || path === "/local") {
       response.writeHead(302, {
-        Location: path === "/local" ? "file:///private" : path === "/loop" ? "/loop" : "/zip",
+        Location:
+          path === "/local"
+            ? "file:///private"
+            : path === "/loop"
+              ? "/loop"
+              : redirectTarget || "/zip",
       });
       response.end();
     } else if (

@@ -1612,6 +1612,23 @@ summary::-webkit-details-marker {
   background: #fff6e9;
   font-size: 11px;
 }
+.browser-certificate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 8px 17px;
+  color: #824c0c;
+  background: #fff0da;
+  border-bottom: 1px solid #e7c99e;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.browser-certificate strong,
+.browser-certificate span {
+  flex-basis: 100%;
+  min-width: 0;
+}
 .browser-viewport {
   position: relative;
   flex: 1;

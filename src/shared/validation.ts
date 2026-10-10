@@ -190,8 +190,15 @@ export const actionSchema = z.discriminatedUnion("type", [
           .strict(),
         z
           .object({
-            action: z.enum(["back", "forward", "reload"]),
+            action: z.enum(["back", "forward", "reload", "clearCertificateExceptions"]),
             tab: browserTabSchema.optional(),
+          })
+          .strict(),
+        z
+          .object({
+            action: z.literal("trustCertificate"),
+            certificateId: z.string().uuid(),
+            tab: browserTabSchema,
           })
           .strict(),
       ]),

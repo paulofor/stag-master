@@ -75,15 +75,21 @@ export async function validateBrowserVisibility({
   );
   // A timeout uses the real slow loopback endpoint; advance only after the HTTP handshake.
   const hangs = site.effects.hangs;
-  await application.evaluate((_electron, url) => {
+  await application.evaluate(async (_electron, url) => {
     const original = global.setTimeout;
+    let installed;
+    const ready = new Promise((resolve) => {
+      installed = resolve;
+    });
     global.setTimeout = (callback, ms, ...args) => {
       const timer = original(callback, ms, ...args);
-      if (ms === 30000)
+      if (ms === 30000) {
         global.fireBrowserTimeout = () => {
           clearTimeout(timer);
           callback(...args);
         };
+        installed();
+      }
       return timer;
     };
     try {
@@ -98,6 +104,14 @@ export async function validateBrowserVisibility({
           () => null,
           (error) => error.message,
         );
+      // Navigation first awaits cleanup of the previous session. Keep the probe
+      // installed until the production timeout exists, rather than assuming a synchronous call.
+      await Promise.race([
+        ready,
+        global.browserTimeoutResult.then(() => {
+          throw new Error("Navegação terminou antes de instalar o timeout sintético.");
+        }),
+      ]);
     } finally {
       global.setTimeout = original;
     }

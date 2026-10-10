@@ -3912,6 +3912,17 @@ describe("fluxo local do assistente", () => {
     await expect(
       service.request({
         type: "browserControl",
+        control: {
+          action: "trustCertificate",
+          tab: "documentation",
+          certificateId: "00000000-0000-4000-8000-000000000001",
+        },
+      }),
+    ).rejects.toThrow("Pare");
+    expect(browser.control).not.toHaveBeenCalled();
+    await expect(
+      service.request({
+        type: "browserControl",
         control: { action: "navigate", url: "https://fixture.invalid" },
       }),
     ).rejects.toThrow("Pare");

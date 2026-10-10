@@ -1,4 +1,21 @@
-# Matriz de homologação da versão 0.4.53
+# Matriz de homologação da versão 0.4.54
+
+## Acesso explícito a sites com certificado inválido — versão 0.4.54
+
+Matriz definida antes dos testes. Lacuna observada: navegador e harness só permitem recusar TLS inválido; não existe ação do cliente para acessar um sistema conhecido com certificado corporativo não reconhecido. Acrescentar exceção temporária por origem, certificado e aba, com confirmação na interface e aviso permanente durante o acesso.
+
+| Área                       | Cenário e aceite                                                                                                                           | Evidência prevista                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Caminho feliz              | Erro HTTPS mostra origem e opção de continuar; confirmação abre a página e permite leitura pelo modelo já autorizado                       | HTTPS loopback e Electron de produção        |
+| Validações e falhas        | Recusa não envia HTTP; id antigo, certificado alterado, erro revogado e destino diferente continuam bloqueados                             | Contratos e certificados sintéticos          |
+| Isolamento                 | Exceção não atravessa abas, projetos, conversas, fechamento ou reinício, inclusive com sessões lembradas; APIs/downloads mantêm TLS padrão | Electron, perfis e rede sintética            |
+| Recuperação e integração   | Cancelar/Parar durante confirmação não aplica resposta antiga; fila compartilhada, consentimento e leitura preservados                     | Serviço, IPC e driver reais                  |
+| Observabilidade e métricas | Aviso Não seguro visível; erro sem query/segredos; métricas existentes contabilizam falha; nenhuma telemetria nova                         | Snapshots, contadores e fixture sintética    |
+| Plataformas                | Layout desktop/Pixel 7 sem rolagem horizontal, Electron Linux local e Windows no CI                                                        | Playwright, test:desktop e workflows PR/main |
+
+Nenhum site ou credencial do cliente será acessado. O teste determinístico verifica contratos e execução, sem garantir decisões semânticas do modelo.
+
+Evidência local: `npm run check` aprovado com 878 contratos, build, vídeo/ASR reais, Codex fixado/provedor loopback e 152 cenários Chromium desktop/Pixel 7. `xvfb-run -a npm run test:desktop` confirmou a abertura pelo renderer/preload/fila/diálogo/driver reais, leitura com aviso, recusa, id antigo, certificado alterado, porta/aba isoladas, descarte com login preservado e downloads/redirects bloqueados. O teste inicialmente reproduziu reuso de socket aceito após reset e em net.request; a implementação passou após aguardar closeAllConnections e conferir cada origem de download. Ajustado o harness de timeout para aguardar a instalação do temporizador após essa limpeza assíncrona. Métricas de rede da fixture contam o arquivo alvo separadamente de favicon. `npm run test:licenses` passou com PostgreSQL/Docker e UI sintéticos; limpeza do Compose exclusivo conferida. Formatação, sintaxe JavaScript e diff aprovados. Node 22 somente em `.local/runtime`, instalação compartilhada saudável; nenhum script shell alterado. Linux declara restrição de namespaces bwrap no smoke e não comprova Windows nativo, a ser conferido no job Windows installer do PR/main.
 
 ## Retomada do build local após bloqueio — versão 0.4.53
 
