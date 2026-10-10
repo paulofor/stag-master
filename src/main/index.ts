@@ -261,6 +261,10 @@ async function start(): Promise<void> {
     taskbarAttention?.update(snapshot);
     if (window && !window.isDestroyed()) window.webContents.send("stag:snapshot", snapshot);
   });
+  service.on("workCompleted", ({ threadId }: { threadId: string }) => {
+    taskbarAttention?.completed(threadId);
+  });
+  service.on("workStopped", () => taskbarAttention?.stopSound());
   function trusted(event: Electron.IpcMainInvokeEvent): void {
     const frame = event.senderFrame;
     const mainFrame = window?.webContents.mainFrame;

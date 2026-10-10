@@ -1,5 +1,7 @@
 # Sistema
 
+2026-10-10 — Aviso de conclusão 0.4.51: serviço emite workCompleted somente após turn/completed bem-sucedido da conversa ativa, resposta de envio e fila compartilhada encerradas, sem continuidade automática. Vídeo aguarda checkpoint final e inatividade do manager. TaskbarAttention reutiliza o player fixo de cinco segundos, sem sinal visual de pergunta ou novo IPC; foco, novo trabalho, parada, desconexão, troca e fechamento cancelam. Fonte: solicitação atual, implementação e matriz sintética; Windows nativo requer CI, sem sessão do cliente.
+
 2026-10-09 — Validação local 0.4.50: contrato e descrição de stag_ask_user incluem testes, build e servidor Angular, investigação/correção iterativa, scripts/destinos conferidos e runner headless local. Não mudam políticas de thread/turn, raízes ou aprovações reais; Leitura mantém restrição de escrita. Corpus existente inclui retomada/isolamento, perda parcial do contrato, falhas e efeitos externos, mais request bidirecional de build recusável. Fonte: implementação desta solicitação e matriz de homologação; nenhum projeto ou processo do cliente acessado.
 
 2026-10-09 — Leitor PDF 0.4.49: stag_pdf info/read/render para arquivos relativos no projeto, parser PDF.js e canvas fixados no lockfile. Worker descartável recebe somente bytes validados, sem URL/caminho/credenciais; texto paginado e imagem de uma página são resultados não confiáveis. Leitura consulta PDFs existentes; downloads continuam exclusivos do navegador e exigem escrita. Fonte: solicitação, código e matriz desta entrega.

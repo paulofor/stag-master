@@ -57,8 +57,18 @@ export async function validateWaitingAudio(dir) {
 }
 
 // Observe and forward the actual native APIs, installed only in the isolated test boot.
-export function installTaskbarProbe(BrowserWindow) {
+export function installTaskbarProbe(BrowserWindow, ChildProcess) {
   global.taskbarCalls = [];
+  global.attentionSounds = 0;
+  const spawn = ChildProcess.prototype.spawn;
+  ChildProcess.prototype.spawn = function (options) {
+    if (
+      options.file === "powershell.exe" &&
+      options.args.some((arg) => /[/\\]waiting-sound\.ps1$/.test(arg))
+    )
+      global.attentionSounds++;
+    return spawn.call(this, options);
+  };
   for (const method of ["flashFrame", "setOverlayIcon"]) {
     const original = BrowserWindow.prototype[method];
     if (!original) continue;
@@ -76,7 +86,7 @@ export function installTaskbarProbe(BrowserWindow) {
 
 export async function validateTaskbarAttention(application, page) {
   const before = await page.evaluate(() => window.stag.getSnapshot());
-  const result = await application.evaluate(async ({ BrowserWindow }) => {
+  const result = await application.evaluate(async ({ BrowserWindow }, before) => {
     const { TaskbarAttention, attentionIcon, waitingTitle } = global.TaskbarHarness;
     const icon = attentionIcon();
     const pixels = icon.toBitmap();
@@ -98,8 +108,13 @@ export async function validateTaskbarAttention(application, page) {
       settled: async () => {},
     });
     const state = {
+      ...before,
       connection: "ready",
       threadId: "synthetic",
+      busy: true,
+      queuedMessages: [],
+      queuePaused: false,
+      videoAnalysis: null,
       approvals: [{ id: "q", kind: "questions" }],
     };
     try {
@@ -156,6 +171,14 @@ export async function validateTaskbarAttention(application, page) {
           title: target.getTitle(),
         };
       }
+      const idle = { ...state, busy: false, approvals: [] };
+      attention.update(idle);
+      attention.completed(state.threadId);
+      const soundsCompleted = soundPlays;
+      attention.update(idle);
+      attention.completed("old-thread");
+      const completionTitle = target.getTitle();
+      attention.stopSound();
       attention.dispose();
       await attention.settled();
       const calls = global.taskbarCalls.filter((call) => call.id === target.id);
@@ -175,12 +198,14 @@ export async function validateTaskbarAttention(application, page) {
         soundsStarted,
         soundPlays,
         soundStops,
+        soundsCompleted,
+        completionTitle,
       };
     } finally {
       attention.dispose();
       target.destroy();
     }
-  });
+  }, before);
   assert.deepEqual(result.size, { width: 16, height: 16 });
   assert.equal(result.corner[3], 0);
   assert.deepEqual(result.amber, [6, 119, 217, 255]);
@@ -195,7 +220,12 @@ export async function validateTaskbarAttention(application, page) {
   assert.equal(result.calls.at(-1).value, false);
   if (process.platform === "win32") {
     assert.equal(result.soundsStarted, 1, "Snapshots e várias pendências não repetem áudio.");
-    assert.equal(result.soundPlays, 2, "Novo período de espera pode tocar novamente.");
+    assert.equal(
+      result.soundsCompleted,
+      3,
+      "A conclusão toca o mesmo áudio após os dois períodos de espera.",
+    );
+    assert.equal(result.soundPlays, 3, "Atualizações e conclusão antiga não repetem áudio.");
     assert.ok(result.soundStops >= 4, "Foco, resolução e encerramento interrompem o áudio.");
     assert.deepEqual(result.nativeFocus, {
       minimized: true,
@@ -210,6 +240,7 @@ export async function validateTaskbarAttention(application, page) {
     assert.equal(result.calls.at(-1).method, "setOverlayIcon");
     assert.equal(result.calls.at(-1).description, "");
   } else assert.equal(result.soundPlays, 0);
+  assert.equal(result.completionTitle, "STAG Plus", "Conclusão não indica pergunta pendente.");
   assert.deepEqual(await page.evaluate(() => window.stag.getSnapshot()), before);
   console.log(
     "Barra de tarefas: NativeImage real, APIs de produção, ausência de foco/ativação, espera, som por período, deduplicação, resolução e descarte conferidos.",
@@ -287,7 +318,45 @@ export async function validateTaskbarService(application, page) {
     .toBe(false);
   await request({ type: "newChat" });
   await expect.poll(title).toBe("STAG Plus");
+  const sounds = () => application.evaluate(() => global.attentionSounds);
+  // A barrier lets any cancelled player close before counting the next work period.
+  await application.evaluate(() => new Promise((resolve) => setImmediate(resolve)));
+  const initialSounds = await sounds();
+  await request({ type: "send", text: "trabalho sintético rápido" });
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+    .toBe(false);
+  if (process.platform === "win32") await expect.poll(sounds).toBe(initialSounds + 1);
+  else assert.equal(await sounds(), initialSounds);
+  const completedSounds = await sounds();
+  const completedThread = (await page.evaluate(() => window.stag.getSnapshot())).threadId;
+  await page.reload();
+  await request({ type: "resume", threadId: completedThread });
+  await request({ type: "stop" });
+  assert.equal(
+    await sounds(),
+    completedSounds,
+    "Reload, histórico e parada ociosa não repetem o som.",
+  );
+  await request({ type: "send", text: "trabalho sintético lento" });
+  assert.equal((await page.evaluate(() => window.stag.getSnapshot())).busy, true);
+  assert.equal(
+    await sounds(),
+    completedSounds,
+    "Trabalho em andamento não toca aviso de conclusão.",
+  );
+  await request({ type: "stop" });
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+    .toBe(false);
+  assert.equal(await sounds(), completedSounds, "Interrupção não anuncia conclusão.");
+  await request({ type: "send", text: "trabalho sintético recuperado rápido" });
+  await expect
+    .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+    .toBe(false);
+  if (process.platform === "win32") await expect.poll(sounds).toBe(completedSounds + 1);
+  await request({ type: "newChat" });
   console.log(
-    "Espera ponta a ponta: request de pergunta, reload, resposta, aprovação, recusa, parada e conversa nova com fixture bidirecional OK.",
+    "Avisos ponta a ponta: pergunta, conclusão ociosa, reload, histórico, aprovação, recusa, parada e recuperação com fixture bidirecional OK.",
   );
 }

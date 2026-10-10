@@ -43,6 +43,89 @@ function setup(platform: NodeJS.Platform = "win32") {
   return { window, controller, sound };
 }
 
+describe("Som de conclusão do trabalho", () => {
+  it.each([true, false])(
+    "toca também com janela minimizada=%s sem indicação de espera",
+    (minimized) => {
+      const { window, controller, sound } = setup();
+      window.minimized = minimized;
+      window.focused = !minimized;
+      controller.update(state([], { busy: false }));
+      controller.completed("thread-synthetic");
+      controller.update(state([], { busy: false }));
+      window.emit("blur");
+      expect(sound.play).toHaveBeenCalledOnce();
+      expect(window.setOverlayIcon).not.toHaveBeenCalled();
+      expect(window.flashFrame).not.toHaveBeenCalled();
+      expect(window.setTitle).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { busy: true },
+    { connection: "disconnected" as const },
+    { threadId: "other-thread" },
+    { approvals: [approval()] },
+    { queuedMessages: [{ id: "q", text: "synthetic", status: "pending" as const }] },
+  ])("recusa conclusão antiga ou durante trabalho/espera: %j", (patch) => {
+    const { controller, sound } = setup();
+    controller.update(state([], { busy: false, ...patch }));
+    const before = sound.play.mock.calls.length;
+    controller.completed("thread-synthetic");
+    expect(sound.play).toHaveBeenCalledTimes(before);
+  });
+
+  it("interrompe com novo trabalho, foco, parada e troca; conclusão posterior pode tocar", () => {
+    const { window, controller, sound } = setup();
+    controller.update(state([], { busy: false }));
+    controller.completed("thread-synthetic");
+    const before = sound.stop.mock.calls.length;
+    controller.update(state());
+    expect(sound.stop).toHaveBeenCalledTimes(before + 1);
+    controller.update(state([], { busy: false }));
+    controller.completed("thread-synthetic");
+    window.focused = true;
+    window.minimized = false;
+    window.emit("focus");
+    expect(sound.stop).toHaveBeenCalledTimes(before + 2);
+    controller.stopSound();
+    expect(sound.stop).toHaveBeenCalledTimes(before + 3);
+    controller.update(state([], { busy: false, threadId: "other-thread" }));
+    expect(sound.stop).toHaveBeenCalledTimes(before + 4);
+    controller.completed("thread-synthetic");
+    expect(sound.play).toHaveBeenCalledTimes(2);
+    controller.completed("other-thread");
+    expect(sound.play).toHaveBeenCalledTimes(3);
+    controller.dispose();
+    controller.completed("other-thread");
+    expect(sound.play).toHaveBeenCalledTimes(3);
+  });
+
+  it("preserva som da pergunta e toca novamente somente na conclusão ociosa", () => {
+    const { window, controller, sound } = setup();
+    controller.update(state([approval()]));
+    controller.completed("thread-synthetic");
+    expect(sound.play).toHaveBeenCalledOnce();
+    controller.update(state());
+    controller.update(state([], { busy: false }));
+    controller.completed("thread-synthetic");
+    expect(sound.play).toHaveBeenCalledTimes(2);
+    expect(window.setOverlayIcon).toHaveBeenLastCalledWith(null, "");
+  });
+
+  it("não toca no Linux, em janela destruída ou depois do fechamento", () => {
+    for (const platform of ["linux", "win32"] as const) {
+      const { window, controller, sound } = setup(platform);
+      controller.update(state([], { busy: false }));
+      if (platform === "win32") window.destroyed = true;
+      controller.completed("thread-synthetic");
+      window.emit("closed");
+      controller.completed("thread-synthetic");
+      expect(sound.play).not.toHaveBeenCalled();
+    }
+  });
+});
+
 describe("Aviso de espera do usuário na barra de tarefas", () => {
   it.each(["questions", "command", "file", "desktop", "browser"] as const)(
     "indica %s em todos os modos sem dados privados",
