@@ -24,6 +24,7 @@ import {
   installTaskbarProbe,
   validateTaskbarAttention,
   validateTaskbarService,
+  validateCompletionPlayer,
 } from "./test-taskbar-attention.mjs";
 import {
   buildDesktopIndicatorHarness,
@@ -108,7 +109,7 @@ try {
   );
   await writeFile(
     join(dir, "boot.cjs"),
-    `const {app,dialog,BrowserWindow} = require('electron'); global.PdfHarness = require('./pdf-reader.cjs').PdfReader; global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); (${installTaskbarProbe.toString()})(BrowserWindow, require('node:child_process').ChildProcess); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('appData', ${JSON.stringify(profile)}); require('./dist/main/index.cjs');`,
+    `const {app,dialog,BrowserWindow} = require('electron'); global.PdfHarness = require('./pdf-reader.cjs').PdfReader; global.ModelImageHarness = require('./model-images.cjs'); global.BrowserHarnessDriver = require('./browser-panel.cjs').BrowserPanel; global.DesktopIndicatorHarness = require('./desktop-indicator.cjs'); global.DesktopDriverHarness = require('./desktop-tools.cjs'); global.TaskbarHarness = require('./taskbar-attention.cjs'); global.CompletionPlayerHarness = { ...require('./service.cjs'), ...require('./rpc.cjs'), ...require('./settings.cjs'), ...require('./waiting-sound.cjs'), path: require('node:path'), files: require('node:fs/promises') }; (${installTaskbarProbe.toString()})(BrowserWindow, require('node:child_process').ChildProcess); dialog.showErrorBox = (title,message) => console.error(title + ': ' + message); app.setPath('appData', ${JSON.stringify(profile)}); require('./dist/main/index.cjs');`,
   );
   if (process.platform === "win32") {
     // Native Windows validates renderer/preload/IPC and actual server startup, without OAuth.
@@ -370,6 +371,13 @@ try {
   await validateResponseCopy(application, page);
   await validateDesktopIndicator(application, page);
   await validateTaskbarAttention(application, page);
+  await validateCompletionPlayer(application, page, {
+    node: process.execPath,
+    fixture: resolve("tests/fixtures/app-server.mjs"),
+    directory: dir,
+    project,
+    script: resolve("native/waiting-sound.ps1"),
+  });
   const imageInput = page.getByLabel("Mensagem para o assistente");
   await application.evaluate(async ({ clipboard }) =>
     clipboard.writeText("Tarefa sintética colada"),

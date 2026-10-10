@@ -1,4 +1,5 @@
 import { nativeImage, type BrowserWindow } from "electron";
+import type { EventEmitter } from "node:events";
 import type { Snapshot } from "../shared/types";
 import type { AttentionSound } from "./waiting-sound";
 import { build } from "../../package.json";
@@ -27,6 +28,7 @@ export class TaskbarAttention {
   private disposed = false;
   private thread: string | null = null;
   private working = false;
+  private unbind: (() => void) | null = null;
   private readonly icon = attentionIcon();
   private readonly refresh = () => {
     if (this.window.isFocused() && !this.window.isMinimized() && this.window.isVisible())
@@ -82,6 +84,23 @@ export class TaskbarAttention {
     this.updateFlash();
   }
 
+  bind(source: EventEmitter): void {
+    this.unbind?.();
+    if (this.disposed) return;
+    const update = (snapshot: Snapshot) => this.update(snapshot);
+    const completed = ({ threadId }: { threadId: string }) => this.completed(threadId);
+    const stopped = () => this.stopSound();
+    source.on("snapshot", update);
+    source.on("workCompleted", completed);
+    source.on("workStopped", stopped);
+    this.unbind = () => {
+      source.removeListener("snapshot", update);
+      source.removeListener("workCompleted", completed);
+      source.removeListener("workStopped", stopped);
+      this.unbind = null;
+    };
+  }
+
   completed(threadId: string): void {
     if (
       this.disposed ||
@@ -111,6 +130,7 @@ export class TaskbarAttention {
 
   readonly dispose = (): void => {
     if (this.disposed) return;
+    this.unbind?.();
     this.window.removeListener("focus", this.refresh);
     this.window.removeListener("blur", this.refresh);
     this.window.removeListener("minimize", this.refresh);
