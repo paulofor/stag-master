@@ -102,13 +102,6 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume"), threadId: z.string().min(1).max(200) }).strict(),
   z
     .object({
-      type: z.literal("mouseMovement"),
-      threadId: z.string().min(1).max(200),
-      enabled: z.boolean(),
-    })
-    .strict(),
-  z
-    .object({
       type: z.literal("enqueue"),
       threadId: z.string().min(1).max(200),
       id: z.uuid(),

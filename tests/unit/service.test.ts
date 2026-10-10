@@ -33,7 +33,6 @@ import {
   desktopConfirmationReason,
   type DesktopArguments,
   type ToolResult,
-  type CursorPulseResult,
 } from "../../src/main/desktop-tools";
 import {
   browserConfirmationReason,
@@ -90,9 +89,6 @@ const desktop = {
     contentItems: [{ type: "inputText" as const, text: "[]" }],
   })),
 };
-const pulseCursor = vi.fn(async (_signal: AbortSignal): Promise<CursorPulseResult> => ({
-  moved: true,
-}));
 const browser = {
   execute: vi.fn(
     async (
@@ -212,7 +208,6 @@ beforeEach(async () => {
     )),
     confirmBranchDeletion,
     desktop,
-    pulseCursor,
     browser,
     pdf,
     video,
@@ -238,7 +233,6 @@ afterEach(async () => {
     success: true,
     contentItems: [{ type: "inputText", text: "[]" }],
   });
-  pulseCursor.mockResolvedValue({ moved: true });
   confirmBranchDeletion.mockResolvedValue(true);
   browser.execute.mockResolvedValue({
     success: true,
@@ -661,260 +655,35 @@ describe("perguntas bloqueantes no modo normal", () => {
   });
 });
 
-describe("movimento periódico do mouse", () => {
-  async function enable() {
-    await ready();
-    await service.request({ type: "preferences", mode: "windows", windowsConsent: true });
-    await send("Explique a arquitetura");
-    await complete();
-    // The process handshake and thread creation use their normal startup deadlines.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const threadId = service.snapshot().threadId!;
-    await service.request({ type: "mouseMovement", threadId, enabled: true });
-    return threadId;
-  }
-  it("exige consentimento Windows do thread correto e mantém Leitura/Projeto intactos", async () => {
-    await ready();
-    await send("Explique a arquitetura");
-    await complete();
-    for (const mode of ["project", "read"] as const) {
-      if (mode === "read") {
-        await service.request({ type: "preferences", mode });
-        await send("Explique a arquitetura");
-        await complete();
-      }
-      await expect(
-        service.request({
-          type: "mouseMovement",
-          threadId: service.snapshot().threadId!,
-          enabled: true,
-        }),
-      ).rejects.toThrow("Autorize o desktop");
+describe("remoção do movimento periódico do mouse", () => {
+  it.each(["project", "read", "windows"] as const)(
+    "recusa IPC antigo em %s e mantém a conversa utilizável sem ações ociosas",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      await send("Explique a arquitetura");
+      await complete();
+      const before = service.snapshot();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      for (const enabled of [true, false])
+        await expect(
+          service.request({
+            type: "mouseMovement",
+            threadId: before.threadId!,
+            enabled,
+          } as unknown as Parameters<typeof service.request>[0]),
+        ).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(service.snapshot()).toEqual(before);
+      expect(service.snapshot()).not.toHaveProperty("mouseMovement");
+      vi.useRealTimers();
+      await send("Explique a arquitetura novamente");
+      await complete();
+      expect(service.snapshot().threadId).toBe(before.threadId);
       expect(service.snapshot().mode).toBe(mode);
-    }
-    expect(pulseCursor).not.toHaveBeenCalled();
-  });
-  it("aguarda cinco minutos, habilita uma vez e preserva métricas do modelo", async () => {
-    const threadId = await enable();
-    const metrics = service.snapshot().metrics;
-    const firstAttempt = Date.now() + 300000;
-    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(firstAttempt);
-    await service.request({ type: "mouseMovement", threadId, enabled: true });
-    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(firstAttempt);
-    expect(pulseCursor).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(299999);
-    expect(pulseCursor).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(pulseCursor).toHaveBeenCalledOnce();
-    expect(service.snapshot().mouseMovement.moves).toBe(1);
-    expect(service.snapshot().mouseMovement.nextAttemptAt).toBe(Date.now() + 300000);
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).toHaveBeenCalledTimes(2);
-    expect(service.snapshot().metrics).toEqual(metrics);
-  });
-  it("omite alvo ocupado sem falha e desliga em erro, sem expor argumentos nem repetir", async () => {
-    const threadId = await enable();
-    pulseCursor.mockResolvedValueOnce({ moved: false });
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(service.snapshot().mouseMovement).toMatchObject({ enabled: true, moves: 0, skipped: 1 });
-    const failures = service.snapshot().metrics.failures;
-    pulseCursor.mockRejectedValueOnce(new Error("synthetic-private-path-and-command"));
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(service.snapshot().mouseMovement.enabled).toBe(false);
-    expect(JSON.stringify(service.snapshot())).not.toContain("synthetic-private-path-and-command");
-    expect(service.snapshot().metrics.failures).toBe(failures + 1);
-    await vi.advanceTimersByTimeAsync(600000);
-    expect(pulseCursor).toHaveBeenCalledTimes(2);
-    await service.request({ type: "mouseMovement", threadId, enabled: true });
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(service.snapshot().mouseMovement.moves).toBe(1);
-  });
-  it.each([
-    ["unverified_target", "use STAG Plus"],
-    ["forticlient", "FortiClient não recebe movimento automático"],
-    ["buttons_pressed", "botão do mouse pressionado"],
-    ["cursor_outside", "cursor fora da janela ativa"],
-    ["target_changed", "janela, foco ou destino mudou"],
-    ["pointer_busy", "mouse em uso"],
-  ] as const)(
-    "explica %s e recupera no intervalo seguinte, sem alterar métricas LLM",
-    async (reason, text) => {
-      await enable();
-      const metrics = service.snapshot().metrics;
-      pulseCursor.mockResolvedValueOnce({ moved: false, reason });
-      await vi.advanceTimersByTimeAsync(300000);
-      expect(service.snapshot().mouseMovement).toMatchObject({
-        enabled: true,
-        moves: 0,
-        skipped: 1,
-        status: expect.stringContaining(text),
-      });
-      await vi.advanceTimersByTimeAsync(300000);
-      expect(service.snapshot().mouseMovement).toEqual({
-        enabled: true,
-        moves: 1,
-        skipped: 1,
-        status: "Mouse movido · próximo em 5 min",
-        nextAttemptAt: Date.now() + 300000,
-      });
-      expect(service.snapshot().metrics).toEqual(metrics);
     },
   );
-  it.each(["disable", "stop", "newChat", "revoke", "connect", "disconnect", "dispose"] as const)(
-    "descarta intervalos ao %s",
-    async (action) => {
-      const threadId = await enable();
-      if (action === "disable")
-        await service.request({ type: "mouseMovement", threadId, enabled: false });
-      if (action === "stop") await service.request({ type: "stop" });
-      if (action === "newChat") await service.request({ type: "newChat" });
-      if (action === "revoke") await service.request({ type: "preferences", mode: "project" });
-      if (action === "connect") await service.request({ type: "connect" });
-      if (action === "disconnect") rpc.close();
-      if (action === "dispose") service.dispose();
-      await vi.advanceTimersByTimeAsync(900000);
-      expect(pulseCursor).not.toHaveBeenCalled();
-      expect(service.snapshot().mouseMovement.enabled).toBe(false);
-      expect(service.snapshot().mouseMovement.nextAttemptAt).toBeNull();
-    },
-  );
-  it("cancela o subprocesso em curso e ignora resultado antigo após reativar", async () => {
-    const threadId = await enable();
-    let release!: (result: { moved: boolean }) => void;
-    let signal!: AbortSignal;
-    pulseCursor.mockImplementationOnce(async (received) => {
-      signal = received;
-      return new Promise((resolve) => {
-        release = resolve;
-      });
-    });
-    await vi.advanceTimersByTimeAsync(300000);
-    await service.request({ type: "mouseMovement", threadId, enabled: false });
-    expect(signal.aborted).toBe(true);
-    await service.request({ type: "mouseMovement", threadId, enabled: true });
-    release({ moved: true });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(service.snapshot().mouseMovement.moves).toBe(0);
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).toHaveBeenCalledTimes(2);
-    expect(service.snapshot().mouseMovement.moves).toBe(1);
-  });
-  it("não acumula intervalos durante operação lenta e rejeita IPC de outra conversa", async () => {
-    const threadId = await enable();
-    let release!: (result: { moved: boolean }) => void;
-    pulseCursor.mockImplementationOnce(
-      async () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    await vi.advanceTimersByTimeAsync(900000);
-    expect(pulseCursor).toHaveBeenCalledOnce();
-    await expect(
-      service.request({ type: "mouseMovement", threadId: "old-thread", enabled: false }),
-    ).rejects.toThrow("conversa mudou");
-    expect(service.snapshot().mouseMovement.enabled).toBe(true);
-    release({ moved: true });
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(299999);
-    expect(pulseCursor).toHaveBeenCalledOnce();
-    await service.request({ type: "mouseMovement", threadId, enabled: false });
-  });
-  it("compartilha a fila com o navegador e descarta gesto pendente após desligar", async () => {
-    const threadId = await enable();
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    browser.control.mockImplementationOnce(async () => {
-      await gate;
-    });
-    const navigation = service.request({ type: "browserControl", control: { action: "reload" } });
-    try {
-      await vi.advanceTimersByTimeAsync(900000);
-      expect(browser.control).toHaveBeenCalledOnce();
-      expect(pulseCursor).not.toHaveBeenCalled();
-      expect(service.snapshot().mouseMovement).toMatchObject({
-        status: "Aguardando a fila de ferramentas",
-        nextAttemptAt: null,
-        moves: 0,
-        skipped: 0,
-      });
-      await service.request({ type: "mouseMovement", threadId, enabled: false });
-    } finally {
-      release();
-      await navigation;
-    }
-    await vi.advanceTimersByTimeAsync(0);
-    expect(pulseCursor).not.toHaveBeenCalled();
-  });
-  it("navegador aguarda movimento em curso e encerramento aguarda a mesma fila", async () => {
-    await enable();
-    let release!: (result: { moved: boolean }) => void;
-    pulseCursor.mockImplementationOnce(
-      async () =>
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-    );
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(service.snapshot().mouseMovement).toMatchObject({
-      status: "Movendo o mouse",
-      nextAttemptAt: null,
-    });
-    const navigation = service.request({ type: "browserControl", control: { action: "reload" } });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(browser.control).not.toHaveBeenCalled();
-    let settled = false;
-    service.dispose();
-    const cleanup = service.mediaSettled().then(() => {
-      settled = true;
-    });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(settled).toBe(false);
-    release({ moved: true });
-    await expect(navigation).rejects.toThrow("cancelada");
-    await cleanup;
-    expect(browser.control).not.toHaveBeenCalled();
-    expect(service.snapshot().mouseMovement.moves).toBe(0);
-  });
-  it("aprovação pendente omite movimento e recusa não executa o gesto", async () => {
-    await enable();
-    await send("desktop crítico");
-    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).not.toHaveBeenCalled();
-    expect(service.snapshot().mouseMovement.skipped).toBe(1);
-    expect(service.snapshot().mouseMovement.status).toContain("aguardando aprovação");
-    await approve(false);
-    await service.request({ type: "stop" });
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).not.toHaveBeenCalled();
-  });
-  it("cancelar seleção preserva o temporizador; projeto efetivamente diferente desliga", async () => {
-    await enable();
-    selectProject.mockResolvedValueOnce(null);
-    await service.request({ type: "selectProject" });
-    expect(service.snapshot().mouseMovement.enabled).toBe(true);
-    const other = resolve(dir, "another-project");
-    await mkdir(other);
-    selectProject.mockResolvedValueOnce(other);
-    await service.request({ type: "selectProject" });
-    expect(service.snapshot().mouseMovement.enabled).toBe(false);
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).not.toHaveBeenCalled();
-  });
-  it("getSnapshot preserva a opção no main, mas settings não persiste autorização", async () => {
-    await enable();
-    expect(service.snapshot().mouseMovement.enabled).toBe(true);
-    expect(JSON.stringify(await store.load())).not.toMatch(/mouseMovement|stagPeriodicMovement/);
-    const threadId = service.snapshot().threadId!;
-    await service.request({ type: "connect" });
-    expect(service.snapshot().threadId).toBe(threadId);
-    expect(service.snapshot().mouseMovement.enabled).toBe(false);
-    await vi.advanceTimersByTimeAsync(300000);
-    expect(pulseCursor).not.toHaveBeenCalled();
-  });
 });
 
 it("conexão fica em preparação enquanto setup Windows aguarda resposta após handshake", async () => {

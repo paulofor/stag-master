@@ -128,14 +128,8 @@ describe("contrato de engenharia e escopo de negócio", () => {
           expect(instructions).toContain(browserSessionInstructions);
           expect(instructions).toContain(browserCertificateInstructions);
           expect(instructions).toContain(browserTabsInstructions);
-          expect(instructions).toContain("Mover mouse a cada 5 min");
-          expect(instructions).toContain(
-            "janela principal do próprio STAG Plus, inclusive o navegador integrado",
-          );
-          expect(instructions).toContain(
-            "isso não concede à ferramenta desktop acesso ao STAG Plus nem autorização de navegação",
-          );
-          expect(instructions).toContain("não recrie movimentos periódicos por comandos");
+          expect(instructions).not.toContain("Mover mouse a cada 5 min");
+          expect(instructions).not.toContain("O movimento periódico do mouse");
           for (const fragment of engineeringCorpus.requiredInstructions)
             expect(instructions).toContain(fragment);
           expect(instructions).toContain(cyberSafetyInstructions);

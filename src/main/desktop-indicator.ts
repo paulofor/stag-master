@@ -157,7 +157,7 @@ export class DesktopControlIndicator {
 /** The same production wiring is used by main and the Electron harness. Inspection never shows a border. */
 export function createDesktopControl(
   window: Parameters<typeof withoutAssistantWindow>[0],
-  desktop: Pick<DesktopTools, "execute" | "confirmationReason" | "cancel" | "pulseCursor">,
+  desktop: Pick<DesktopTools, "execute" | "confirmationReason" | "cancel">,
   indicator = new DesktopControlIndicator(),
 ) {
   return {
@@ -174,8 +174,6 @@ export function createDesktopControl(
           : execute();
       });
     },
-    pulseCursor: (signal: AbortSignal) =>
-      indicator.run((operation) => desktop.pulseCursor(operation), signal),
     cancel: () => {
       indicator.cancel();
       desktop.cancel();

@@ -229,7 +229,7 @@ test("controles de vídeo longo cabem na janela mínima", async ({ page }, info)
   await page.screenshot({ path: `.local/screenshots/${info.project.name}-video-minimum.png` });
 });
 
-test("vídeo longo e movimento ativo cabem juntos na janela mínima Windows", async ({
+test("vídeo longo preserva controles sem movimento automático na janela mínima Windows", async ({
   page,
 }, info) => {
   await page.setViewportSize({ width: 360, height: 600 });
@@ -238,11 +238,10 @@ test("vídeo longo e movimento ativo cabem juntos na janela mínima Windows", as
   await page.getByLabel("Mensagem para o assistente").fill("Explique a arquitetura");
   await page.getByRole("button", { name: "Enviar mensagem" }).click();
   await expect(page.getByText("Pronto para o próximo passo.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true }).click();
   await page.getByRole("button", { name: "Analisar em segundo plano", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Desligar movimento do mouse", exact: true }),
-  ).toBeInViewport();
+  ).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Pausar análise", exact: true })).toBeInViewport();
   await expect(
     page.getByRole("button", { name: "Cancelar análise", exact: true }),
@@ -251,12 +250,12 @@ test("vídeo longo e movimento ativo cabem juntos na janela mínima Windows", as
   expect(box!.y + box!.height).toBeLessThanOrEqual(600);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({
-    path: `.local/screenshots/${info.project.name}-video-mouse-minimum.png`,
+    path: `.local/screenshots/${info.project.name}-video-windows-minimum.png`,
   });
   await page.getByRole("button", { name: "Pausar análise", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Mover mouse a cada 5 min", exact: true }),
-  ).toHaveAttribute("aria-pressed", "false");
+  ).toHaveCount(0);
 });
 
 for (const status of ["completed", "cancelled"] as const) {

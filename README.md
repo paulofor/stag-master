@@ -2,7 +2,7 @@
 
 Assistente desktop para Windows, com um painel compacto de conversa inspirado na área marcada da referência. Orientado como Engenheiro de Sistemas especialista e experiente em arquitetura e programação: ler especificações, entender o negócio do sistema, pesquisar documentação, trabalhar com arquivos e Git, executar testes e interagir com o Windows do cliente.
 
-Esta é a versão 0.4.54, chamada **STAG Plus**. A numeração continua a sequência do STAG anterior. A atualização preserva o perfil existente, incluindo configurações, conexões, histórico e sessões lembradas; o nome STAG fica reservado para uma futura versão mais simples. Mantém navegador com abas **Documentação** e **Sistema do projeto**, conexões SQL Server pela ferramenta `stag_sql`, economia de dados enviados ao modelo, APIs autenticadas, análise de vídeos longos com estado visível e leitura do disco, memória em `.stag`, branches, controle dos aplicativos Windows permitidos e avisos visuais/sonoros. Preserva a proteção contra abuso, engenharia de sistemas, painel único, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
+Esta é a versão 0.4.55, chamada **STAG Plus**. A numeração continua a sequência do STAG anterior. A atualização preserva o perfil existente, incluindo configurações, conexões, histórico e sessões lembradas; o nome STAG fica reservado para uma futura versão mais simples. Mantém navegador com abas **Documentação** e **Sistema do projeto**, conexões SQL Server pela ferramenta `stag_sql`, economia de dados enviados ao modelo, APIs autenticadas, análise de vídeos longos com estado visível e leitura do disco, memória em `.stag`, branches, controle dos aplicativos Windows permitidos e avisos visuais/sonoros. Preserva a proteção contra abuso, engenharia de sistemas, painel único, modelos/esforços da conta, histórico por projeto, aprovações, comandos/diffs/plano e métricas. Login pela conta ChatGPT usando **Codex App Server local**, sem chave de API.
 
 Na versão 0.4.42, perguntas interativas também funcionam no modo normal. Quando precisar de uma resposta ou ação manual, o assistente deve abrir um card e aguardar **Responder**. A conversa mostra **Aguardando sua resposta ou autorização** e aciona os avisos existentes do Windows. Durante uma pergunta bloqueante no modo Projeto, você pode selecionar novamente a mesma pasta para preparar novos repositórios Git, preservando a pergunta, a fila e o rascunho. Para outra pasta ou modo de acesso, pare a execução antes. Atualize, reinicie o STAG Plus e inicie uma nova conversa para disponibilizar `stag_ask_user`; uma resposta antiga com opções apenas em texto não vira uma pergunta pendente retroativamente.
 
@@ -88,7 +88,7 @@ Ao **concluir o trabalho e ficar ocioso**, o assistente também toca o mesmo sin
 
 ## Indicador do controle Windows
 
-Durante uma ação de desktop autorizada, o STAG Plus mostra **bordas azuis com brilho suave em cada monitor**. O efeito não toma o foco nem intercepta cliques ou teclado e funciona com o STAG Plus minimizado. Desaparece ao concluir, parar, revogar o acesso, desconectar ou fechar o aplicativo. Também acompanha o pequeno movimento periódico do mouse; navegador, espera por aprovação e consentimento ocioso não ativam as bordas. A preferência do Windows por movimento reduzido desativa a animação.
+Durante uma ação de desktop autorizada, o STAG Plus mostra **bordas azuis com brilho suave em cada monitor**. O efeito não toma o foco nem intercepta cliques ou teclado e funciona com o STAG Plus minimizado. Desaparece ao concluir, parar, revogar o acesso, desconectar ou fechar o aplicativo. Navegador, espera por aprovação e consentimento ocioso não ativam as bordas. A preferência do Windows por movimento reduzido desativa a animação.
 
 As bordas apenas indicam a operação em andamento. As permissões dos aplicativos, capturas e confirmações continuam as mesmas. Se os monitores ou a escala da tela mudarem durante uma ação, ela será interrompida; confira o alvo antes de tentar novamente.
 
@@ -108,15 +108,9 @@ Trocas exigem ausência de alterações pendentes, sem descarte automático. Exc
 
 **Atualizar lista** relê o Git após mudanças externas ou falhas. A tela não executa fetch/push, hooks ou filtros de arquivos; branches com filtros como Git LFS precisam ser trocadas no cliente Git para preservar os conteúdos. Busca limitada a 200 repositórios/20 mil pastas/dois minutos e até 1.000 branches por projeto; falhas e listas parciais ficam explícitas. Repositórios com metadados externos ou redirecionados não são operados pela tela.
 
-## Movimento periódico do mouse
+## Movimento automático removido
 
-No Windows, o botão **Mover mouse a cada 5 min** permanece visível abaixo do controle do desktop, inclusive em Projeto e Leitura. O painel explica o que falta para ativar: conexão, login, projeto, autorização do desktop ou primeira mensagem da conversa Windows. Autorize o desktop, envie uma mensagem para iniciar a conversa, clique no botão e confirme a ativação. A cada cinco minutos, o main tenta deslocar o cursor até dois pixels e retornar, sem cliques, teclas ou troca de foco; não consome turnos do assistente.
-
-Uma contagem regressiva mostra a **próxima tentativa**. Ao vencer o prazo, o painel informa quando aguarda a fila de ferramentas e quando está movendo o mouse; depois mostra o resultado ou motivo da omissão. Recarregar a interface conserva o prazo do main. O prazo seguinte começa depois de concluir a tentativa, sem acumular movimentos quando outra ferramenta ocupa a fila.
-
-O cursor precisa estar sobre **a janela principal do STAG Plus (inclusive o navegador integrado), Postman, IntelliJ IDEA, Visual Studio Code ou DBeaver em primeiro plano**, sem botões do mouse pressionados. O STAG Plus identifica sua própria janela; os aplicativos externos continuam exigindo executável/produto/assinatura reconhecidos. FortiClient, outros aplicativos, sobreposições e alvos alterados são omitidos. O painel informa o motivo da omissão e as contagens; uma falha desliga a opção e permite ativar novamente. Esse gesto não autoriza cliques, teclas, capturas ou navegação no STAG Plus.
-
-Funciona com o STAG Plus minimizado. **Desligar movimento do mouse**, **Parar**, pausar/cancelar vídeo, revogar desktop, trocar de conversa/projeto, desconectar ou fechar desligam e descartam movimentos pendentes. Reload da interface conserva o estado do main; reinício exige ativação explícita. Não há persistência de consentimento nem garantia de impedir suspensão, bloqueio ou expiração de sessões; as políticas do Windows permanecem preservadas.
+A partir da versão **0.4.55**, o STAG Plus não oferece movimento automático do mouse: botão, temporizador e operação nativa foram removidos.
 
 ## Vídeos longos em segundo plano
 
