@@ -259,3 +259,63 @@ test("janela compacta alterna navegador e conversa, rotina segue e crítico pode
   await expect(page.getByText("Controle do modelo desativado")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("autorização de testes exibe origem, persiste no reload do painel e revoga durante tarefa", async ({
+  page,
+}, info) => {
+  const browser = structuredClone(emptySnapshot.browser);
+  const url = "https://sistema-homologacao.synthetic.invalid:8443/form";
+  Object.assign(browser, {
+    available: true,
+    visible: true,
+    authorized: true,
+    activeTab: "system",
+    url,
+  });
+  browser.tabs.system.url = url;
+  await installBridge(page, {
+    browser,
+    project: { name: "Projeto sintético", path: "/synthetic/project" },
+    mode: "project",
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  const control = page.getByRole("checkbox", { name: "Autorizar testes neste site" });
+  await expect(control).not.toBeChecked();
+  await control.check();
+  await expect(page.getByText("Testes autorizados neste site", { exact: true })).toBeVisible();
+  const saved = await page.evaluate(() => window.stag!.getSnapshot());
+  expect(saved.browser.testOrigin).toBe(new URL(url).origin);
+  await installBridge(page, { ...saved, busy: true });
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  await expect(control).toBeChecked();
+  await expect(control).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: `.local/screenshots/${info.project.name}-browser-testing.png` });
+  await control.uncheck();
+  await expect(control).not.toBeChecked();
+  const revoked = await page.evaluate(() => window.stag!.getSnapshot());
+  expect(revoked.browser.testOrigin).toBeUndefined();
+  expect(revoked.busy).toBe(false);
+});
+
+test("Leitura mantém a opção de testes desabilitada", async ({ page }) => {
+  const browser = structuredClone(emptySnapshot.browser);
+  Object.assign(browser, {
+    available: true,
+    visible: true,
+    authorized: true,
+    activeTab: "system",
+    url: "https://test.invalid",
+  });
+  browser.tabs.system.url = browser.url;
+  await installBridge(page, {
+    browser,
+    project: { name: "Projeto sintético", path: "/synthetic/project" },
+    mode: "read",
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar navegador", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: "Autorizar testes neste site" })).toBeDisabled();
+});

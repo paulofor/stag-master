@@ -26,6 +26,7 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
       const publish = () => listeners.forEach((fn) => fn(structuredClone(state)));
       const resetBrowser = () => {
         state.browser.authorized = false;
+        delete state.browser.testOrigin;
         state.browser.activeTab = "documentation";
         for (const tab of ["documentation", "system"] as const)
           state.browser.tabs[tab] = {
@@ -412,6 +413,15 @@ export async function installBridge(page: Page, overrides: Partial<Snapshot> = {
               if (!action.allow) {
                 resetBrowser();
                 state.busy = false;
+                state.approvals = [];
+              }
+              break;
+            case "browserTesting":
+              if (action.allow) state.browser.testOrigin = action.origin;
+              else {
+                delete state.browser.testOrigin;
+                state.busy = false;
+                state.queuePaused = true;
                 state.approvals = [];
               }
               break;

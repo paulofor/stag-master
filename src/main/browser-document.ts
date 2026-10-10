@@ -9,6 +9,7 @@ export function browserDocument(request: {
   index?: number;
   operation?: "select" | "fill";
   delta?: number;
+  testOrigin?: string;
 }) {
   type Target = { element: HTMLElement; signature: string };
   const world = window as Window & {
@@ -320,6 +321,35 @@ export function browserDocument(request: {
     /continuar conectado|manter conectado|permanecer conectado|lembrar|remember|stay (?:signed|logged) in|keep me (?:signed|logged) in/i.test(
       label(el),
     );
+  const form =
+    related
+      .map((node) => ("form" in node ? (node as HTMLInputElement).form : null))
+      .find(Boolean) || el.closest("form");
+  const protectedLabel =
+    /\b(publicar|publish|deploy|pagar|pagamento|pay|payment|comprar|buy|purchase|checkout|login|log in|sign in|entrar|senha|password|token|credencial|credenciais|seguran[cç]a|security|permiss[oõ]es|permissions|configura[cç](?:[aã]o|[oõ]es)|settings)\b/i.test(
+      [...related.map(label), option?.label || ""].join(" "),
+    );
+  const destinations = [
+    ...related
+      .filter((node) => node instanceof HTMLAnchorElement)
+      .map((node) => (node as HTMLAnchorElement).href),
+    ...(form ? [form.action] : []),
+    ...related
+      .filter((node) => node.hasAttribute("formaction"))
+      .map((node) => node.getAttribute("formaction")!),
+  ];
+  const externalDestination = destinations.some((url) => {
+    try {
+      return new URL(url, location.href).origin !== location.origin;
+    } catch {
+      return true;
+    }
+  });
+  const sensitiveForm = !!form?.querySelector(
+    'input[type="password"], [autocomplete^="cc-"], [autocomplete="one-time-code"]',
+  );
+  const protectedInteraction =
+    sensitiveField || sensitiveForm || rememberLogin || protectedLabel || externalDestination;
   const reason = sensitiveField
     ? "O campo envolve senha, código de acesso ou pagamento."
     : rememberLogin
@@ -327,7 +357,11 @@ export function browserDocument(request: {
       : submit || criticalLabel
         ? "O controle ou a opção pode enviar dados ou efetuar uma ação crítica."
         : null;
-  if (request.action === "probe") return { reason, label: label(el) };
+  if (request.action === "probe") return { reason, protectedInteraction, label: label(el) };
+  if (request.testOrigin && (location.origin !== request.testOrigin || protectedInteraction))
+    throw new Error(
+      "O alvo ou o efeito saiu da autorização de testes. Faça um novo snapshot e solicite confirmação específica.",
+    );
   if (request.action === "download") {
     if (el instanceof HTMLAnchorElement && /^https?:/.test(el.href)) return { url: el.href };
     if (

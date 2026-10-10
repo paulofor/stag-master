@@ -1578,6 +1578,7 @@ summary::-webkit-details-marker {
   gap: 6px;
 }
 .browser-session-settings small {
+  overflow-wrap: anywhere;
   flex-basis: 100%;
   color: #788372;
   font-size: 10px;

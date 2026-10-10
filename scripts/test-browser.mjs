@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { join } from "node:path";
 import { expect } from "@playwright/test";
 import { validateBrowserCombos } from "./test-browser-combos.mjs";
+import { validateBrowserTesting } from "./test-browser-testing.mjs";
 import { validateBrowserDates } from "./test-browser-dates.mjs";
 import { validateBrowserSessions } from "./test-browser-sessions.mjs";
 import { validateBrowserCertificates } from "./test-browser-certificates.mjs";
@@ -275,15 +276,17 @@ export async function validateBrowser(application, dir, site, page) {
     return rejected;
   });
   assert.ok(oversizedRejected, "O navegador deve permanecer dentro da área útil da janela.");
-  const execute = (args) =>
+  const execute = (args, testOrigin) =>
     application.evaluate(
-      async (_electron, input) => global.browserHarness.browser.execute(input),
-      args,
+      async (_electron, { input, origin }) =>
+        global.browserHarness.browser.execute(input, undefined, origin),
+      { input: args, origin: testOrigin },
     );
-  const reason = (args) =>
+  const reason = (args, testOrigin) =>
     application.evaluate(
-      async (_electron, input) => global.browserHarness.browser.confirmationReason(input),
-      args,
+      async (_electron, { input, origin }) =>
+        global.browserHarness.browser.confirmationReason(input, origin),
+      { input: args, origin: testOrigin },
     );
   const snapshot = async () =>
     JSON.parse((await execute({ action: "snapshot" })).contentItems[0].text);
@@ -412,6 +415,7 @@ export async function validateBrowser(application, dir, site, page) {
     );
     await validateBrowserCombos({ execute, reason, snapshot, dom, target, site });
     await validateBrowserDates({ execute, reason, snapshot, dom, target, site });
+    await validateBrowserTesting({ execute, reason, snapshot, dom, target, site });
     await execute({
       action: "navigate",
       url: site.url,

@@ -1341,7 +1341,31 @@ createInterface({ input: process.stdin }).on("line", (line) => {
             duplicate,
             "stag_browser",
           );
-        if (input.includes("download")) {
+        if (input.includes("teste formulário real")) {
+          call({ action: "snapshot", tab: "system" }, (answer) => {
+            const doc = JSON.parse(answer.result.contentItems[0].text);
+            const ref = doc.elements.find((el) => el.label === "Cadastrar")?.ref;
+            if (!ref) return response(thread, turn, "Formulário sintético não encontrado.");
+            call({
+              action: "click",
+              tab: "system",
+              pageId: doc.pageId,
+              ref,
+              risk: "routine",
+              intent: "Cadastrar registro sintético no ambiente de teste",
+            });
+          });
+        } else if (input.includes("teste autorizado")) {
+          call({
+            action: "press",
+            tab: input.includes("documentação") ? "documentation" : "system",
+            pageId: "fixture-page",
+            ref: "e1",
+            key: "Enter",
+            risk: input.includes("crítico") ? "critical" : "routine",
+            intent: "Salvar registro sintético no ambiente de teste",
+          });
+        } else if (input.includes("download")) {
           call(
             {
               action: "download",

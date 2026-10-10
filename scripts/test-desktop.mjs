@@ -708,6 +708,35 @@ try {
     await expect
       .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
       .toBe(false);
+    // Real renderer/preload/main/service/driver: a declared test form submits without a card.
+    await page.getByRole("tab", { name: "Sistema do projeto" }).click();
+    await page.getByLabel("Endereço do navegador").fill(site.url + "testing");
+    await page.getByRole("button", { name: "Ir", exact: true }).click();
+    const testingControl = page.getByRole("checkbox", { name: "Autorizar testes neste site" });
+    await expect(testingControl).toBeEnabled();
+    await testingControl.click();
+    await expect(testingControl).toBeChecked();
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).browser.testOrigin,
+      new URL(site.url).origin,
+    );
+    const writes = site.effects.testWrites;
+    await page.getByLabel("Mensagem para o assistente").fill("navegador teste formulário real");
+    await page.getByRole("button", { name: "Enviar mensagem" }).click();
+    await expect.poll(() => site.effects.testWrites).toBe(writes + 1);
+    await expect
+      .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+      .toBe(false);
+    await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+    await page.reload();
+    await expect(testingControl).toBeChecked();
+    await testingControl.click();
+    await expect(testingControl).not.toBeChecked();
+    assert.equal(
+      (await page.evaluate(() => window.stag.getSnapshot())).browser.testOrigin,
+      undefined,
+    );
+    await page.getByRole("tab", { name: "Documentação" }).click();
     const exportSite = await startDownloadSite();
     try {
       await page

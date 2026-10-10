@@ -27,6 +27,7 @@ try {
       "src/main/rpc.ts",
       "src/main/desktop-tools.ts",
       "src/main/browser-tools.ts",
+      "src/main/browser-testing.ts",
       "src/main/http-tools.ts",
       "src/main/sql-tools.ts",
       "src/main/database-connections.ts",
@@ -48,6 +49,9 @@ try {
     format: "esm",
     external: ["yaml"],
   });
+  const { browserTestingCapability, browserTestingInstructions } = await import(
+    pathToFileURL(join(dir, "browser-testing.mjs")).href
+  );
   const { RpcClient } = await import(pathToFileURL(join(dir, "rpc.mjs")).href);
   const { desktopTool } = await import(pathToFileURL(join(dir, "desktop-tools.mjs")).href);
   const { httpTool } = await import(pathToFileURL(join(dir, "http-tools.mjs")).href);
@@ -251,6 +255,7 @@ try {
         additionalContext: {
           ...localExecutionContext(target.mode),
           ...browserCaptureCapability(true, authorized),
+          ...browserTestingCapability(target.mode),
           ...projectBranchesContext(projectBranches),
           ...projectSourcesContext(project, sourceList, authorized, true),
           ...extraContext,
@@ -775,6 +780,25 @@ try {
         true,
       );
       assert.deepEqual(browserRequests.at(-1), expected);
+    }
+    for (const origin of ["https://testing.synthetic.invalid:8443", undefined]) {
+      const capability = browserTestingCapability("project", origin);
+      provider.queueToolCall((body) => {
+        const received = `${body.instructions}\n${JSON.stringify(body.input)}`;
+        assert.ok(received.includes("Testes na aba system"));
+        assert.ok(
+          received.includes(JSON.stringify(capability.stag_browser_testing.value).slice(1, -1)),
+          "O provedor deve receber a capacidade vigente, inclusive após perda da autorização.",
+        );
+        assert.ok(browserTool.description.includes(browserTestingInstructions));
+        return { name: "stag_browser", arguments: { action: "snapshot", tab: "system" } };
+      });
+      await syntheticTurn(
+        [{ type: "text", text: "Confira o formulário de teste com a capacidade vigente." }],
+        sources,
+        true,
+        capability,
+      );
     }
     for (const tab of ["documentation", "system"]) {
       const args = {
