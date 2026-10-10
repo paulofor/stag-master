@@ -1,6 +1,7 @@
 import { net, type Session } from "electron";
 import { Readable } from "node:stream";
 import type { BrowserDownloadResponse } from "./browser-download";
+import { browserDownloadAccept } from "./browser-download-path";
 
 // Electron fetch rejects manual redirects. ClientRequest exposes them before following.
 // The pinned Electron IncomingMessage extends Node Readable although its .d.ts omits it.
@@ -22,7 +23,13 @@ export function requestBrowserDownload(
   signal?.addEventListener("abort", abort, { once: true });
   const headers = (raw: Record<string, string | string[] | undefined>) => {
     const result = new Headers();
-    for (const key of ["content-type", "content-length", "content-encoding", "location"]) {
+    for (const key of [
+      "content-type",
+      "content-length",
+      "content-encoding",
+      "content-disposition",
+      "location",
+    ]) {
       const value = raw[key];
       if (value !== undefined) result.set(key, Array.isArray(value) ? value[0] : value);
     }
@@ -93,7 +100,7 @@ export function requestBrowserDownload(
         ),
       );
     });
-    request.setHeader("Accept", "application/pdf, application/zip, application/octet-stream");
+    request.setHeader("Accept", browserDownloadAccept);
     request.setHeader("Cache-Control", "no-store");
     if (signal?.aborted) request.abort();
     else request.end();

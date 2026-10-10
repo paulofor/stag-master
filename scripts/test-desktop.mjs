@@ -7,6 +7,7 @@ import { _electron, expect } from "@playwright/test";
 import { buildBrowserHarness, validateBrowser } from "./test-browser.mjs";
 import { validateSavedSession } from "./test-browser-sessions.mjs";
 import { startBrowserSite } from "../tests/fixtures/browser-site.mjs";
+import { startDownloadSite, syntheticBrowserXlsx } from "../tests/fixtures/browser-downloads.mjs";
 import engineeringCorpus from "../tests/fixtures/engineering-scenarios.json" with { type: "json" };
 import memoryCorpus from "../tests/fixtures/memory-scenarios.json" with { type: "json" };
 import sourceCorpus from "../tests/fixtures/source-scenarios.json" with { type: "json" };
@@ -707,6 +708,30 @@ try {
     await expect
       .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
       .toBe(false);
+    const exportSite = await startDownloadSite();
+    try {
+      await page
+        .getByLabel("Mensagem para o assistente")
+        .fill(`navegador exportação real ${exportSite.url}`);
+      await page.getByRole("button", { name: "Enviar mensagem" }).click();
+      await expect(
+        page.getByText("Navegador: exportação salva em relatorios/retorno.xlsx.", { exact: true }),
+      ).toBeVisible();
+      await expect
+        .poll(() => page.evaluate(async () => (await window.stag.getSnapshot()).busy))
+        .toBe(false);
+      assert.deepEqual(
+        await readFile(join(project, "relatorios/retorno.xlsx")),
+        syntheticBrowserXlsx(),
+      );
+      await expect(page.getByRole("status", { name: "Download do navegador" })).toContainText(
+        "relatorios/retorno.xlsx",
+      );
+      await expect(page.getByRole("region", { name: "Solicitação do assistente" })).toHaveCount(0);
+      await page.screenshot({ path: ".local/screenshots/browser-export-destination.png" });
+    } finally {
+      await exportSite.close();
+    }
     await page.getByLabel("Mensagem para o assistente").fill(`navegador fluxo real ${site.url}`);
     await page.getByRole("button", { name: "Enviar mensagem" }).click();
     await expect(

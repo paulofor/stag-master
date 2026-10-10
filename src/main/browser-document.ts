@@ -238,11 +238,15 @@ export function browserDocument(request: {
         : null;
   if (request.action === "probe") return { reason, label: label(el) };
   if (request.action === "download") {
-    if (!(el instanceof HTMLAnchorElement) || !/^https?:/.test(el.href))
-      throw new Error(
-        "Download exige um link HTTP(S) do snapshot atual. Botões e URLs blob/data não são suportados.",
-      );
-    return { url: el.href };
+    if (el instanceof HTMLAnchorElement && /^https?:/.test(el.href)) return { url: el.href };
+    if (
+      (el instanceof HTMLAnchorElement && /^(blob|data):/.test(el.href)) ||
+      el instanceof HTMLButtonElement ||
+      el.getAttribute("role") === "button" ||
+      (el instanceof HTMLInputElement && ["button", "submit"].includes(el.type))
+    )
+      return { click: true };
+    throw new Error("Download exige um link ou botão de exportação do snapshot atual.");
   }
   el.scrollIntoView({ block: "center", inline: "nearest" });
   if (request.action === "click") {

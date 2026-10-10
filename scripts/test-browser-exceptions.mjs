@@ -112,6 +112,32 @@ export async function validateBrowserCertificateExceptions({ application, page }
     assert.equal(tls.effects.files, requests, "Redirect não pode reutilizar a exceção TLS.");
     assert.equal(redirects.counts["/redirect"], 1);
     assert.deepEqual(await readdir(resolve(downloadProject, "stag-downloads")).catch(() => []), []);
+    await assert.rejects(
+      application.evaluate(async (_, project) => {
+        const browser = global.browserHarness.browser;
+        const doc = JSON.parse(
+          (await browser.execute({ action: "snapshot" })).contentItems[0].text,
+        );
+        return browser.execute(
+          {
+            action: "download",
+            pageId: doc.pageId,
+            ref: doc.elements.find((el) => el.label === "redirect").ref,
+            trigger: "click",
+            destination: "relatorios/tls.pdf",
+            risk: "routine",
+            intent: "Exportação sintética não herda exceção TLS",
+          },
+          { project, readOnly: false },
+        );
+      }, downloadProject),
+    );
+    assert.equal(
+      tls.effects.files,
+      requests,
+      "Exportação nativa não pode reutilizar a exceção TLS.",
+    );
+    assert.deepEqual(await readdir(resolve(downloadProject, "relatorios")).catch(() => []), []);
     await navigate(`${tls.url}another-page`);
     await assert.rejects(navigate(other.url), /ERR_CERT_AUTHORITY_INVALID/);
     assert.equal(

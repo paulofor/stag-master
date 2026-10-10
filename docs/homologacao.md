@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.58
+# Matriz de homologação da versão 0.4.59
+
+## Downloads e destino escolhido pelo modelo — versão 0.4.59
+
+Matriz definida antes dos testes. A imagem do cliente mostra uma exportação Excel bloqueada: o fluxo existente só lê links HTTP(S) PDF/ZIP e fixa o destino. Ampliar a operação download para botões/exportações da página e caminho relativo escolhido pelo modelo, mantendo a raiz autorizada, a fila e a validação do arquivo. Nenhum sistema ou documento real do cliente será acessado.
+
+| Área                       | Cenário e aceite                                                                                                                                               | Evidência prevista                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Caminho feliz              | PDF/ZIP por link, Excel gerado por botão/blob e CSV por exportação; nome e subpasta escolhidos; bytes e checksum conferidos                                    | Electron real com páginas e arquivos sintéticos        |
+| Destino e validações       | Caminhos relativos no projeto, criação de subpastas, sem sobrescrever; recusar travessia, caminhos absolutos, metadados, links/junctions e troca de identidade | Contratos de arquivos e Electron                       |
+| Falhas e recuperação       | Formato incompatível, excesso, stream interrompido, timeout, cancelamento antes/depois do início; limpar parcial e permitir nova ação sem repetir clique       | Fixtures controladas e driver de produção              |
+| Integrações                | Schema e contexto em início/retomada/fila; históricos antigos mantêm a capacidade original; confirmação crítica revalida ref, destino, aba e projeto           | Serviço e Codex real/provedor loopback                 |
+| Isolamento                 | Consentimento por conversa; Leitura não grava; uma exportação por operação; outra aba/popups não ganham download; TLS e sessões preservados                    | Duas abas, projetos sintéticos e regressões existentes |
+| Observabilidade e métricas | Progresso e destino confirmado na aba; falhas sem caminho de sucesso, credenciais ou conteúdo nos logs; contadores existentes                                  | Serviço e UI                                           |
+| Plataformas                | Chromium amplo/compacto/Pixel 7 e Electron locais; execução nativa e pacote Windows no CI                                                                      | check, test:desktop, format:check, PR/main             |
+
+O harness confere transporte e execução, sem prometer obediência semântica do modelo ou validação antimalware. Arquivos são dados não confiáveis e não são abertos, executados ou extraídos automaticamente.
+
+Evidência local em 2026-10-10: `npm run check` passou (904 contratos na rodada inicial, build, decoder/ASR, Codex real/provedor loopback e 146 cenários Chromium/Pixel 7). Após os ajustes, 63 contratos focalizados e dois casos de serviço passaram; typecheck/build finais e `test:desktop` completo também. O harness Electron ampliado confirmou Excel por botão/blob/link/data, CSV por POST, caminho/bytes/SHA, colisão sem novo clique, cancelamento, timeout, TLS e recuperação. Uma navegação recusada ainda estava carregando ao liberar a fila: a correção aguarda seu encerramento sem parar uma navegação posterior. Mensagens antigas das fixtures foram alinhadas à orientação de destino. A conferência visual encontrou arquivo pequeno exibido como 0,0 MiB; corrigido para B/KiB e validados novamente os dois cenários de interface afetados, com caminhos longos sem overflow. Capturas sintéticas inspecionadas. Formatação, diff, sintaxe JavaScript, bash -n e ShellCheck passaram.
+
+Os 15 contratos do servidor de licenças e o bootstrap Docker passaram. A integração Docker desse módulo independente não iniciou: a engine dedicada não enxerga o bind mount do workspace (`bind source path does not exist` no segredo sintético do PostgreSQL). A limpeza aguardou containers/volumes; nenhum código do servidor foi alterado. O fluxo de downloads foi validado localmente sem Docker. A limitação de namespaces bwrap do Linux foi explicitada pelo smoke; Windows nativo, pacote e integração do servidor permanecem sujeitos aos jobs obrigatórios PR/main. Node 22.23.3 somente no workspace; instalação compartilhada preservada.
 
 ## Capturas autônomas do navegador interno — versão 0.4.58
 

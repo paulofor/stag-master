@@ -7,6 +7,7 @@ import {
   type BrowserDownloadContext,
 } from "./browser-download";
 import { requestBrowserDownload } from "./browser-download-network";
+import { BrowserDownloadCapture } from "./browser-download-capture";
 import {
   browserArguments,
   browserConfirmationReason,
@@ -51,12 +52,14 @@ class BrowserPage extends EventEmitter {
   private timedOut = false;
   private captureController: AbortController | null = null;
   private downloadController: AbortController | null = null;
+  private downloadCapture: BrowserDownloadCapture | null = null;
   private pdfUrl: string | null = null;
   private mainRequestId: number | null = null;
   private bounds = { x: 0, y: 0, width: 0, height: 0 };
   private visible = true;
   private pageId: string | null = null;
   private generation = 0;
+  private navigationSequence = 0;
   private disposed = false;
   private profileId: string | null = null;
   private configuredSessions = new WeakSet<Electron.Session>();
@@ -131,16 +134,27 @@ class BrowserPage extends EventEmitter {
     browserSession.setDevicePermissionHandler(() => false);
     if (!this.configuredSessions.has(browserSession)) {
       this.configuredSessions.add(browserSession);
-      browserSession.on("will-download", (event) => {
+      browserSession.on("will-download", (event, item, contents) => {
+        if (
+          !this.disposed &&
+          browserSession === this.view.webContents.session &&
+          this.downloadCapture?.accept(event, item, contents)
+        )
+          return;
         event.preventDefault();
         if (this.disposed || browserSession !== this.view.webContents.session) return;
         this.info.error =
-          "Download bloqueado neste clique. Peça ao assistente para usar download de stag_browser para salvar PDF ou ZIP no projeto.";
+          "Para baixar, peça ao assistente para usar download de stag_browser neste botão/link e escolher o destino no projeto (por exemplo relatorios/retorno.xlsx).";
         this.publish();
       });
     }
     // Subframes and redirects cannot reach local protocols/files or launch external applications.
+    const refusedDownloadRequests = new Set<number>();
     browserSession.webRequest.onBeforeRequest((details, callback) => {
+      if (refusedDownloadRequests.has(details.id)) {
+        callback({ cancel: true });
+        return;
+      }
       if (
         details.resourceType === "mainFrame" &&
         details.webContentsId === this.view?.webContents.id
@@ -164,8 +178,26 @@ class BrowserPage extends EventEmitter {
       }
       if (!permitted && this.view)
         permitted = browserPdfResource(details, this.pdfUrl, this.view.webContents.id);
+      if (this.downloadCapture && details.webContentsId === this.view?.webContents.id) {
+        if (this.certificates.warning(details.url)) permitted = false;
+        if (this.info.url.startsWith("https:") && details.url.startsWith("http:"))
+          permitted = false;
+        if (!permitted) this.downloadController?.abort();
+      }
       callback({ cancel: !permitted });
     });
+    browserSession.webRequest.onBeforeRedirect((details) => {
+      if (
+        details.webContentsId === this.view?.webContents.id &&
+        this.downloadCapture &&
+        !this.downloadCapture.redirect(details.id, details.url, details.redirectURL)
+      )
+        refusedDownloadRequests.add(details.id);
+    });
+    browserSession.webRequest.onErrorOccurred((details) =>
+      refusedDownloadRequests.delete(details.id),
+    );
+    browserSession.webRequest.onCompleted((details) => refusedDownloadRequests.delete(details.id));
     this.view = new WebContentsView({
       webPreferences: {
         session: browserSession,
@@ -190,7 +222,8 @@ class BrowserPage extends EventEmitter {
         return;
       }
       const accepted = this.certificates.inspect(url, error, certificate.data, isMainFrame);
-      callback(accepted);
+      callback(accepted && !this.downloadCapture);
+      if (this.downloadCapture) this.downloadController?.abort();
       if (!accepted && isMainFrame) this.publish();
     });
     browserSession.webRequest.onHeadersReceived((details, callback) => {
@@ -234,6 +267,9 @@ class BrowserPage extends EventEmitter {
     contents.on("will-redirect", guard);
     contents.on("did-start-navigation", (_event, _url, inPlace, mainFrame) => {
       if (mainFrame && contents === this.view.webContents) {
+        // An attachment navigation starts before will-download. Keep its owner until
+        // a document actually commits; ordinary navigation still cancels immediately.
+        if (this.downloadCapture && !inPlace) return;
         this.cancelDownload();
         this.captureController?.abort();
         this.pageId = null;
@@ -257,10 +293,17 @@ class BrowserPage extends EventEmitter {
     contents.on("did-start-loading", update);
     contents.on("did-stop-loading", update);
     contents.on("did-navigate", update);
+    contents.on("did-navigate", () => {
+      if (contents === this.view.webContents && this.downloadCapture) {
+        this.cancelDownload();
+        this.pageId = null;
+      }
+    });
     contents.on("did-navigate-in-page", update);
     contents.on("page-title-updated", update);
     contents.on("did-fail-load", (_event, code, _description, _url, mainFrame) => {
       if (contents === this.view.webContents && mainFrame && code !== -3) {
+        if (this.downloadCapture) this.cancelDownload();
         this.pageId = null;
         this.loadFailure = browserLoadError(code);
         this.info.error = this.loadFailure;
@@ -410,9 +453,26 @@ class BrowserPage extends EventEmitter {
       this.publish();
     }
   }
+  private async finishExportNavigation(contents: Electron.WebContents): Promise<void> {
+    if (contents.isDestroyed() || !contents.isLoading()) return;
+    // A refused attachment redirect can still be loading after the capture rejects.
+    // Drain it before releasing the queue, otherwise its late failure cancels the next navigation.
+    await this.bounded(
+      new Promise<void>((resolve) => {
+        const done = () => {
+          contents.off("did-stop-loading", done);
+          contents.off("destroyed", done);
+          resolve();
+        };
+        contents.once("did-stop-loading", done);
+        contents.once("destroyed", done);
+        contents.stop();
+      }),
+    );
+  }
   private async downloadTarget(
     input: Extract<BrowserArguments, { action: "download" }>,
-  ): Promise<string> {
+  ): Promise<{ url: string; click: boolean }> {
     this.checkReadable();
     this.checkPage(input.pageId);
     if (input.ref) {
@@ -420,12 +480,14 @@ class BrowserPage extends EventEmitter {
         action: "download",
         pageId: input.pageId,
         ref: input.ref,
-      })) as { url: string };
-      return this.downloadUrl(result.url);
+      })) as { url?: string; click?: boolean };
+      const click = result.click || input.trigger === "click";
+      return { url: this.downloadUrl(click ? this.view.webContents.getURL() : result.url!), click };
     }
     if (!this.pdfUrl || this.pdfUrl !== this.view.webContents.getURL())
       throw new Error("Informe o ref de um link do snapshot ou abra um PDF e obtenha seu pageId.");
-    return this.downloadUrl(this.pdfUrl);
+    if (input.trigger) throw new Error("Exportação por clique exige ref do snapshot atual.");
+    return { url: this.downloadUrl(this.pdfUrl), click: false };
   }
   private downloadUrl(url: string): string {
     const target = browserUrl(url);
@@ -446,10 +508,16 @@ class BrowserPage extends EventEmitter {
         "Downloads exigem uma pasta de projeto com escrita autorizada; Leitura não salva arquivos.",
       );
     if (this.downloadController) throw new Error("Aguarde a limpeza do download anterior.");
-    const url = await this.downloadTarget(input);
+    const target = await this.downloadTarget(input);
+    if (target.click && context.legacy)
+      throw new Error(
+        "Este histórico aceita somente links HTTP(S). Abra nova conversa para exportar por botão.",
+      );
+    const contents = this.view.webContents;
     const controller = new AbortController();
     this.downloadController = controller;
     const generation = this.generation,
+      navigation = this.navigationSequence,
       pageId = this.pageId,
       info = this.info;
     const ownsPage = () =>
@@ -465,11 +533,53 @@ class BrowserPage extends EventEmitter {
       };
       this.publish();
       const result = await downloadBrowserFile({
-        url,
+        url: target.url,
+        destination: input.destination,
         context,
         signal: controller.signal,
         fetch: (url, init) =>
           requestBrowserDownload(this.view.webContents.session, this.downloadUrl(url), init),
+        ...(target.click
+          ? {
+              native: async (
+                path: string,
+                progress: (state: NonNullable<BrowserPageInfo["download"]>) => void,
+                verify: () => void,
+              ) => {
+                const capture = new BrowserDownloadCapture({
+                  contents,
+                  path,
+                  source: target.url,
+                  signal: controller.signal,
+                  progress,
+                  check: () => {
+                    verify();
+                    if (
+                      !ownsPage() ||
+                      contents !== this.view.webContents ||
+                      controller.signal.aborted
+                    )
+                      throw new Error("Download cancelado.");
+                    this.downloadUrl(contents.getURL());
+                  },
+                  url: (url) => this.downloadUrl(url),
+                });
+                this.downloadCapture = capture;
+                try {
+                  return await capture.run(() =>
+                    this.document({ action: "click", pageId: input.pageId, ref: input.ref }),
+                  );
+                } finally {
+                  try {
+                    if (navigation === this.navigationSequence)
+                      await this.finishExportNavigation(contents);
+                  } finally {
+                    if (this.downloadCapture === capture) this.downloadCapture = null;
+                  }
+                }
+              },
+            }
+          : {}),
         progress: (state) => {
           if (ownsPage() && !controller.signal.aborted) {
             this.info.download = state;
@@ -550,6 +660,7 @@ class BrowserPage extends EventEmitter {
       return;
     }
     const url = input.action === "navigate" ? browserUrl(input.url) : null;
+    this.navigationSequence++;
     this.cancelDownload();
     this.pageId = null;
     this.info.error = null;

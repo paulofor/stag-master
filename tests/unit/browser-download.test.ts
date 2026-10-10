@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, readFile, readdir, rm, mkdir, symlink, rename, realpath } from "node:fs/promises";
+import {
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  mkdir,
+  symlink,
+  rename,
+  realpath,
+  writeFile,
+  link,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -9,6 +20,7 @@ import {
   browserTool,
   browserDownloadInstructions,
   browserConfirmationReason,
+  browserApproval,
 } from "../../src/main/browser-tools";
 import { assistantInstructions } from "../../src/main/policy";
 
@@ -34,6 +46,146 @@ const run = (fetch = vi.fn(async () => new Response(pdf)), extra = {}) =>
   });
 
 describe("download limitado para o projeto", () => {
+  it("escolhe nome/subpasta, não sobrescreve nem aceita troca durante a transferência", async () => {
+    const destination = "relatórios/retorno.pdf";
+    const result = await run(undefined, { destination });
+    expect(result.path).toBe(destination);
+    expect(await readFile(join(root, destination))).toEqual(pdf);
+    expect(await readdir(join(root, "relatórios"))).toEqual(["retorno.pdf"]);
+    const fetch = vi.fn();
+    await expect(run(fetch, { destination })).rejects.toThrow("já existe");
+    expect(fetch).not.toHaveBeenCalled();
+    const race = "relatórios/concorrente.pdf";
+    await expect(
+      run(
+        vi.fn(async () => {
+          await writeFile(join(root, race), "preservar");
+          return new Response(pdf);
+        }),
+        { destination: race },
+      ),
+    ).rejects.toThrow();
+    expect(await readFile(join(root, race), "utf8")).toBe("preservar");
+    expect(await readdir(join(root, "relatórios"))).toHaveLength(2);
+  });
+  it.each([
+    "../outside.pdf",
+    "/outside.pdf",
+    "C:\\pasta\\file.pdf",
+    "\\\\server\\file.pdf",
+    "pasta/../file.pdf",
+    "pasta//file.pdf",
+    "pasta/.git/file.pdf",
+    ".stag/memoria.txt",
+    "pasta/.env.txt",
+    "pasta/CON.pdf",
+    "pasta/CON .pdf",
+    "CONIN$.txt",
+    "pasta/nul.txt",
+    "a.pdf:secret",
+    "pasta./file.pdf",
+    "a.pdf ",
+    "setup.exe",
+    "node_modules/a.pdf",
+    "a/../../b.csv",
+  ])("recusa destino inválido antes da rede: %s", async (destination) => {
+    const fetch = vi.fn();
+    await expect(run(fetch, { destination })).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await readdir(root)).toEqual([]);
+    expect(
+      browserArguments.safeParse({ action: "download", pageId: "p", ref: "e1", destination })
+        .success,
+    ).toBe(false);
+  });
+  it("destinos recusam links/junctions, hardlinks e extensão incompatível sem perder o original", async () => {
+    const outside = join(root, "vizinho");
+    await mkdir(outside);
+    await symlink(outside, join(root, "atalho"), process.platform === "win32" ? "junction" : "dir");
+    await expect(run(undefined, { destination: "atalho/a.pdf" })).rejects.toThrow("link");
+    expect(await readdir(outside)).toEqual([]);
+    await writeFile(join(root, "original.pdf"), pdf);
+    await link(join(root, "original.pdf"), join(root, "hard.pdf"));
+    await expect(run(undefined, { destination: "hard.pdf" })).rejects.toThrow("já existe");
+    expect(await readFile(join(root, "original.pdf"))).toEqual(pdf);
+    await expect(run(undefined, { destination: "relatorio.xlsx" })).rejects.toThrow("extensão");
+    expect(await readdir(root)).not.toContain("relatorio.xlsx");
+    const args = browserArguments.parse({
+      action: "download",
+      pageId: "p",
+      ref: "e1",
+      destination: "exports/retorno.xlsx",
+      trigger: "click",
+      risk: "critical",
+      intent: "Exportar relatório sintético",
+    });
+    expect(browserApproval(args, "Confirme exportação").detail).toContain("exports/retorno.xlsx");
+  });
+  it.each([
+    ["xlsx", zip],
+    ["xls", Buffer.from("d0cf11e0a1b11ae100000000", "hex")],
+    ["csv", Buffer.from("empresa;valor\nSintética;10\n")],
+    ["json", Buffer.from('{"fixture":true}')],
+    ["xml", Buffer.from('<?xml version="1.0"?><fixture/>')],
+    ["txt", Buffer.from("evidência sintética")],
+  ])(
+    "grava exportação %s sem carregar integralmente, sem abrir e sem executar",
+    async (format, bytes) => {
+      const result = await run(
+        vi.fn(async () => new Response(bytes)),
+        { destination: `exports/file.${format}` },
+      );
+      expect(result.format).toBe(format);
+      expect(await readFile(join(root, result.path))).toEqual(bytes);
+      expect(result.sha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    },
+  );
+  it("grava exportação nativa no mesmo destino validado e limpa falha parcial", async () => {
+    const fetch = vi.fn();
+    const native = vi.fn(async (path: string) => {
+      await writeFile(path, zip);
+      return { filename: "../../retorno.xlsx", mime: "application/octet-stream" };
+    });
+    const result = await run(fetch, { native, destination: "exports/retorno.xlsx" });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result.path).toBe("exports/retorno.xlsx");
+    expect(result.format).toBe("xlsx");
+    expect(await readFile(join(root, result.path))).toEqual(zip);
+    await expect(
+      run(fetch, {
+        destination: "exports/falhou.xlsx",
+        native: async (path: string) => {
+          await writeFile(path, "partial");
+          throw new Error("SYNTHETIC_SECRET");
+        },
+      }),
+    ).rejects.not.toThrow("SYNTHETIC_SECRET");
+    expect(await readdir(join(root, "exports"))).toEqual(["retorno.xlsx"]);
+    await run(fetch, { native, destination: "exports/recuperado.xlsx" });
+  });
+  it("recusa HTML/login, conteúdo binário e UTF-8 truncado disfarçados de CSV", async () => {
+    for (const bytes of [
+      Buffer.from("<html>login</html>"),
+      Buffer.from("MZ fixture"),
+      Buffer.from([97, 0, 98]),
+      Buffer.from([0xc3]),
+    ])
+      await expect(
+        run(
+          vi.fn(async () => new Response(bytes)),
+          { destination: "f.csv" },
+        ),
+      ).rejects.toThrow("formato");
+    await expect(
+      run(
+        vi.fn(
+          async () => new Response("<h1>login</h1>", { headers: { "Content-Type": "text/html" } }),
+        ),
+        { destination: "f.csv" },
+      ),
+    ).rejects.toThrow("formato");
+    expect(await readdir(root)).toEqual([]);
+  });
   it("grava bytes íntegros, checksum e caminhos exclusivos para PDF e ZIP sem extrair", async () => {
     const progress = vi.fn();
     for (const bytes of [pdf, zip, pdf]) {

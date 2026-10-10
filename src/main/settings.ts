@@ -15,6 +15,7 @@ const settingsSchema = z.object({
         mode: z.enum(["read", "project", "windows"]),
         browserTool: z.boolean().optional(),
         browserDownloads: z.boolean().optional(),
+        browserDownloadDestinations: z.boolean().optional(),
         pdfTool: z.boolean().optional(),
         httpTool: z.boolean().optional(),
         sqlTool: z.boolean().optional(),

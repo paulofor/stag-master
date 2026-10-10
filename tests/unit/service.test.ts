@@ -1519,6 +1519,29 @@ describe("fila de textos por conversa", () => {
     expect(browser.execute).toHaveBeenCalledOnce();
     expect(desktop.execute).not.toHaveBeenCalled();
   });
+  it("envia destino/capacidade na fila e recupera após falha sem repetir a exportação", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("lento");
+    await enqueue("navegador download destino");
+    browser.execute.mockRejectedValueOnce(new Error("Exportação interrompida"));
+    await finish();
+    await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledOnce());
+    await complete();
+    expect(service.snapshot().metrics.failures).toBe(1);
+    await send("navegador download destino");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+    const latest = (await calls()).filter((c) => c.method === "turn/start").slice(-2);
+    for (const call of latest)
+      expect(call.params.additionalContext.stag_browser_downloads.value).toContain(
+        "destination com caminho relativo",
+      );
+    await service.request({ type: "newChat" });
+    await send("navegador download destino");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledTimes(2);
+  });
   it("mantém FIFO, deduplica IDs e remove pendências sem interromper o turno", async () => {
     await ready();
     await send("lento");
@@ -3525,6 +3548,50 @@ describe("fluxo local do assistente", () => {
     expect(browser.execute).not.toHaveBeenCalled();
     expect(service.snapshot().error).toContain("nova conversa");
     expect(service.snapshot().mode).toBe("project");
+  });
+  it("destino e exportação sobrevivem retomada e perda parcial de capacidade sem ampliar históricos", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download destino duplicado");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        action: "download",
+        destination: "relatorios/retorno.xlsx",
+        trigger: "click",
+      }),
+      { project: dir, readOnly: false },
+    );
+    const thread = service.snapshot().threadId!;
+    await service.request({ type: "resume", threadId: thread });
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download destino crítico");
+    await vi.waitFor(() => expect(service.snapshot().approvals).toHaveLength(1));
+    expect(service.snapshot().approvals[0].detail).toContain("relatorios/retorno.xlsx");
+    await approve(false);
+    expect(browser.execute).toHaveBeenCalledOnce();
+    const settings = await store.load();
+    delete settings.threads[thread].browserDownloadDestinations;
+    await store.save(settings);
+    await service.init();
+    await service.request({ type: "resume", threadId: thread });
+    await service.request({ type: "browserConsent", allow: true });
+    await send("navegador download destino");
+    await complete();
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(service.snapshot().error).toContain("nova conversa");
+    await send("navegador download");
+    await complete();
+    expect(browser.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ action: "download" }),
+      { project: dir, readOnly: false, legacy: true },
+    );
+    const calls = await rpc.call<any[]>("_fixture/readCalls");
+    const contexts = calls
+      .filter((c) => c.method === "turn/start")
+      .map((c) => c.params.additionalContext.stag_browser_downloads.value);
+    expect(contexts.some((c) => c.includes("destination com caminho relativo"))).toBe(true);
+    expect(contexts.at(-1)).toContain("não possui destination/trigger");
   });
   it("parar download aguarda limpeza e revogação não reutiliza resultado antigo", async () => {
     await ready();
