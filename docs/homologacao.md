@@ -1,4 +1,21 @@
-# Matriz de homologação da versão 0.4.52
+# Matriz de homologação da versão 0.4.53
+
+## Retomada do build local após bloqueio — versão 0.4.53
+
+Matriz definida antes dos testes. Lacuna observada: a orientação da pasta encaminhava qualquer operação bloqueada para ação manual, apesar da autorização de testes/builds locais; o modo de execução não era reforçado em cada turno. O relato do cliente contém uma pergunta redundante para concluir um build Angular. Isso não comprova a causa do bloqueio no Windows do cliente. Ajustar o contrato existente e transmitir o modo vigente, sem criar outro executor.
+
+| Área                       | Cenário e aceite                                                                                                                           | Evidência prevista                                      |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| Caminho feliz              | Continuar testes/builds locais já solicitados sem perguntar novamente, inclusive após falha anterior de sandbox no modo Windows            | Contrato, descrição de stag_ask_user e corpus sintético |
+| Diagnóstico e recuperação  | Distinguir erro de projeto/dependência e restrição efetiva; corrigir dentro do escopo; ação manual apenas quando necessária                | Corpus, perda parcial e retomada                        |
+| Integração                 | Modo vigente em start/resume e cada turn, incluindo conversa já carregada; política enviada deve corresponder ao contexto                  | Serviço/RPC e Codex real com provedor loopback          |
+| Limites e isolamento       | Leitura preservada; requests reais continuam bloqueantes, recusáveis e sem pergunta duplicada; troca de conversa não herda o modo anterior | Políticas, aprovações, recuperação e isolamento         |
+| Observabilidade e métricas | Relatos não alegam build executado sem evidência; contar turnos/cards e conferir ausência de controle visual inesperado                    | Snapshots/fixture sintéticos, sem segredos              |
+| Plataformas                | Regressões Chromium desktop/Pixel 7 e Electron Linux; execução nativa Windows no CI                                                        | check, test:desktop, format:check, jobs PR/main         |
+
+O harness determinístico verifica transmissão e recuperação dos contratos, sem comprovar obediência semântica absoluta do modelo. Sandbox e aprovação são controles distintos, conforme a [documentação oficial](https://developers.openai.com/pt-BR/docs/sandboxing). Nenhum Angular, processo ou sessão do cliente é acessado.
+
+Evidência local: as quatro regressões iniciais falharam com o código anterior e passaram após a correção. `npm run check` aprovado com 871 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 148 cenários Chromium/Pixel 7. `xvfb-run -a npm run test:desktop`, formatação, sintaxe JavaScript e diff aprovados. O smoke confirmou entrega do contexto local em turnos e retomada, além dos contratos ampliados; Linux declarou a limitação de namespaces bwrap, sem comprovar execução nativa Windows. O job Windows do PR/main deve validar a plataforma e gerar o instalador. Node 22.23.3 foi instalado somente em `.local/runtime`; `sandbox-node-health` confirmou a instalação compartilhada preservada. Nenhum script shell alterado ou processo do cliente acessado.
 
 ## Servidor independente de licenças — versão 0.1.0
 
