@@ -54,6 +54,8 @@ O navegador lateral solicitado pelo cliente é um painel opcional ao lado dessa 
 
 ## Validação e entrega
 
+Capturas do navegador interno usam `stag_browser` com `action: screenshot` sempre que necessárias à tarefa, após consentimento da conversa, sem pergunta por print nem autorização desktop. Vale em Projeto, Leitura e Windows; não grava arquivo nem exige snapshot prévio/processId. Orientação em start/resume/tool e capacidade vigente em cada turno/fila. Preserve visibilidade, limites, cancelamento e isolamento acima. Harness confere a imagem recebida pelo provedor loopback através do Codex real e os pixels no Electron; não promete decisão semântica do modelo.
+
 Leia `docs/homologacao.md`. Execute `npm run check`, `npm run test:desktop`, `npm run format:check` e revise o diff antes de publicar. No Linux o teste desktop usa Xvfb (`xvfb-run -a npm run test:desktop`). No Windows execute também `npm run test:windows` e `npm run dist:win`. Alterações de protocolo precisam de testes de recuperação e aprovação. Atualize a matriz quando mudar um fluxo.
 
 App Server e ferramentas Windows experimentais têm versão fixada no lockfile. O teste real de handshake protege contra divergência das fixtures. Não use publicação como teste. A homologação Linux não comprova execução nativa Windows: declare essa limitação e confira o job Windows no PR.

@@ -10,6 +10,7 @@ import {
   browserSessionInstructions,
   browserCertificateInstructions,
   browserTabsInstructions,
+  browserCaptureInstructions,
 } from "../../src/main/browser-tools";
 import { desktopTool } from "../../src/main/desktop-tools";
 import { cyberSafetyInstructions, cyberToolSafetyDescription } from "../../src/main/cyber-safety";
@@ -162,6 +163,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
           expect(instructions).toContain(browserSessionInstructions);
           expect(instructions).toContain(browserCertificateInstructions);
           expect(instructions).toContain(browserTabsInstructions);
+          expect(instructions).toContain(browserCaptureInstructions);
           expect(instructions).not.toContain("Mover mouse a cada 5 min");
           expect(instructions).not.toContain("O movimento periódico do mouse");
           for (const fragment of engineeringCorpus.requiredInstructions)
@@ -173,6 +175,7 @@ describe("contrato de engenharia e escopo de negócio", () => {
     expect(browserTool.description).toContain(browserSessionInstructions);
     expect(browserTool.description).toContain(browserCertificateInstructions);
     expect(browserTool.description).toContain(browserTabsInstructions);
+    expect(browserTool.description).toContain(browserCaptureInstructions);
   });
 });
 
