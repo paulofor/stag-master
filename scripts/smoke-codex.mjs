@@ -60,9 +60,13 @@ try {
   const { databaseTool, inspectDatabaseImport, databaseImportInstructions } = await import(
     pathToFileURL(join(dir, "database-import.mjs")).href
   );
-  const { browserTool, browserArguments, browserTabsInstructions } = await import(
-    pathToFileURL(join(dir, "browser-tools.mjs")).href
-  );
+  const {
+    browserTool,
+    browserArguments,
+    browserTabsInstructions,
+    browserCaptureInstructions,
+    browserCaptureCapability,
+  } = await import(pathToFileURL(join(dir, "browser-tools.mjs")).href);
   const { pdfTool, pdfCapability, pdfInstructions } = await import(
     pathToFileURL(join(dir, "pdf-tools.mjs")).href
   );
@@ -245,6 +249,7 @@ try {
         input,
         additionalContext: {
           ...localExecutionContext(target.mode),
+          ...browserCaptureCapability(true, authorized),
           ...projectBranchesContext(projectBranches),
           ...projectSourcesContext(project, sourceList, authorized, true),
           ...extraContext,
@@ -627,6 +632,16 @@ try {
     }
     const args = browserArguments.parse(message.params.arguments);
     browserRequests.push(args);
+    if (args.action === "screenshot") {
+      rpc.respond(message.id, {
+        success: true,
+        contentItems: [
+          { type: "inputText", text: `Captura sintética da aba ${args.tab}.` },
+          { type: "inputImage", imageUrl: imageFixture.dataUrl },
+        ],
+      });
+      return;
+    }
     rpc.respond(message.id, {
       success: true,
       contentItems: [
@@ -656,6 +671,46 @@ try {
     }
     assert.equal(browserRequests.length, 2);
     for (const tab of ["documentation", "system"]) {
+      const countImages = (value) => {
+        if (!value || typeof value !== "object") return 0;
+        if (value.type === "input_image") return Number(value.image_url === imageFixture.dataUrl);
+        return Object.values(value).reduce((count, child) => count + countImages(child), 0);
+      };
+      const imagesBefore = countImages(provider.inputs.at(-1));
+      provider.queueToolCall((body) => {
+        assert.ok(
+          JSON.stringify(body.input).includes(
+            JSON.stringify(browserCaptureCapability(true, true).stag_browser_capture.value).slice(
+              1,
+              -1,
+            ),
+          ),
+          "Capacidade vigente de captura deve chegar ao provedor.",
+        );
+        assert.ok(
+          `${body.instructions}\n${JSON.stringify(body.input)}`.includes(
+            "sem pedir autorização por captura",
+          ),
+        );
+        return { name: "stag_browser", arguments: { action: "screenshot", tab } };
+      });
+      await syntheticTurn(
+        [{ type: "text", text: `Confira visualmente a aba ${tab}.` }],
+        sources,
+        true,
+      );
+      assert.deepEqual(browserRequests.at(-1), { action: "screenshot", tab });
+      assert.equal(
+        countImages(provider.inputs.at(-1)),
+        imagesBefore + 1,
+        "A captura deve chegar como imagem ao provedor.",
+      );
+      assert.ok(
+        JSON.stringify(provider.inputs.at(-1)).includes(`Captura sintética da aba ${tab}.`),
+      );
+    }
+    assert.ok(browserTool.description.includes(browserCaptureInstructions));
+    for (const tab of ["documentation", "system"]) {
       const args = {
         action: "download",
         tab,
@@ -678,7 +733,7 @@ try {
       assert.deepEqual(browserRequests.at(-1), args);
     }
     console.log(
-      "Codex real/provedor loopback: schema de produção com duas abas e download, despacho e respostas identificadas aprovados.",
+      "Codex real/provedor loopback: duas abas, captura sem pergunta adicional com imagem entregue ao provedor e download aprovados.",
     );
   } finally {
     rpc.off("request", browserRequest);

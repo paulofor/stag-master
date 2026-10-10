@@ -1,4 +1,21 @@
-# Matriz de homologação da versão 0.4.57
+# Matriz de homologação da versão 0.4.58
+
+## Capturas autônomas do navegador interno — versão 0.4.58
+
+Matriz definida antes dos testes. A operação `screenshot` já existe e não exige aprovação individual, mas falta orientação explícita sobre seu uso autônomo, distinta das capturas do desktop, e capacidade vigente por turno. O smoke do Codex verifica texto de navegador, sem conferir a imagem retornada por essa operação ao provedor. Reforçar os contratos e a cobertura existentes, sem novo executor, consentimento ou operação.
+
+| Área                       | Cenário e aceite                                                                                                                                 | Evidência prevista                               |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| Caminho feliz              | Após Autorizar navegador, o modelo pode capturar sempre que necessário à tarefa, sem pergunta por print; ambas as abas e todos os modos          | Serviço, política e Electron reais               |
+| Transmissão e retomada     | Contrato em start/resume e descrição da ferramenta; capacidade por turno, inclusive fila; imagem chega ao provedor pelo schema real              | Codex fixado com provedor loopback e serviço     |
+| Falhas e recuperação       | Falha gráfica transitória tem tentativas limitadas; janela oculta/minimizada informa indisponibilidade; próxima captura recupera sem reload      | Harness de captura Electron existente            |
+| Isolamento                 | Consentimento pertence à conversa; revogação, troca e histórico sem tool recusam; Leitura captura sem gravar; sem desktop/foco/permissões extras | Fixtures de serviço e duas abas sintéticas       |
+| Observabilidade e métricas | Sem card por captura, pixels fora de snapshots/logs públicos; falhas contam nas métricas existentes; captura sem repetição automática de ações   | Serviço e provedor sintéticos                    |
+| Plataformas                | Chromium amplo/compacto/Pixel 7 e Electron Linux locais; execução nativa e pacote Windows no CI                                                  | check, test:desktop, format:check e jobs PR/main |
+
+Somente projetos, páginas e pixels sintéticos. O harness comprova entrega das instruções e execução da ferramenta, sem garantir decisões semânticas do modelo. O navegador precisa estar visível; a captura não restaura nem foca a janela automaticamente.
+
+Evidência local em 2026-10-10: três regressões iniciais detectaram a ausência da capacidade por turno; passaram após o ajuste. `npm run check` aprovou typecheck, 864 contratos, build, decoder/ASR reais, Codex fixado/provedor loopback e 146 cenários Chromium desktop/Pixel 7. A sonda verifica imagens `input_image` recebidas pelo provedor após cada screenshot, nas duas abas, além do contexto efetivamente entregue. `xvfb-run -a npm run test:desktop` passou com o driver de produção, pixels/PDF sintéticos, falhas gráficas transitórias/persistentes, cancelamento, ocultação, recuperação e isolamento; a captura PDF foi inspecionada visualmente. `npm run test:licenses` aprovou 15 contratos, PostgreSQL/Docker, painel desktop/mobile, backup/restauração e reinício; containers/volumes do namespace exclusivo foram removidos. Formatação, sintaxe JavaScript, diff, `bash -n` e ShellCheck dos scripts de licenças aprovados. Node 22.23.3 somente no workspace; instalação compartilhada preservada. O smoke informa a restrição bwrap do kernel Linux; execução nativa Windows e instalador serão conferidos nos jobs do PR/main. Nenhum site, sessão ou dado do cliente foi utilizado.
 
 ## Recuperação do catálogo SQL na conversa — versão 0.4.57
 

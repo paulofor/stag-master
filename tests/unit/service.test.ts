@@ -40,6 +40,7 @@ import {
   browserCertificateInstructions,
   browserTabsInstructions,
   browserDownloadInstructions,
+  browserCaptureInstructions,
   type BrowserArguments,
 } from "../../src/main/browser-tools";
 import { cyberSafetyInstructions, cyberSafetyRefusal } from "../../src/main/cyber-safety";
@@ -1494,6 +1495,30 @@ describe("fila de textos por conversa", () => {
       status,
     });
   }
+  it("reenvia capacidade de captura na fila e não transfere autorização para outra conversa", async () => {
+    await ready();
+    await service.request({ type: "browserConsent", allow: true });
+    await send("lento");
+    await enqueue("navegador captura");
+    await finish();
+    await vi.waitFor(() => expect(browser.execute).toHaveBeenCalledOnce());
+    await complete();
+    const latest = (await calls()).filter((call) => call.method === "turn/start").at(-1)!;
+    expect(latest.params.additionalContext.stag_browser_capture.value).toContain(
+      "sem pedir autorização por captura",
+    );
+    expect(service.snapshot().approvals).toEqual([]);
+    await service.request({ type: "newChat" });
+    await send("navegador captura");
+    await complete();
+    const other = (await calls()).filter((call) => call.method === "turn/start").at(-1)!;
+    expect(other.params.threadId).not.toBe(latest.params.threadId);
+    expect(other.params.additionalContext.stag_browser_capture.value).toContain(
+      "Autorizar navegador",
+    );
+    expect(browser.execute).toHaveBeenCalledOnce();
+    expect(desktop.execute).not.toHaveBeenCalled();
+  });
   it("mantém FIFO, deduplica IDs e remove pendências sem interromper o turno", async () => {
     await ready();
     await send("lento");
@@ -3331,6 +3356,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain(browserSessionInstructions);
       expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.developerInstructions).toContain(browserTabsInstructions);
+      expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
       expect(call.params.developerInstructions).toContain("localhost/127.0.0.1");
       expect(call.params.sandbox).toBe("danger-full-access");
     }
@@ -3376,6 +3402,7 @@ describe("fluxo local do assistente", () => {
       expect(call.params.developerInstructions).toContain(browserSessionInstructions);
       expect(call.params.developerInstructions).toContain(browserCertificateInstructions);
       expect(call.params.sandbox).toBe("workspace-write");
+      expect(call.params.developerInstructions).toContain(browserCaptureInstructions);
       if (call.method === "thread/resume") expect(call.params).not.toHaveProperty("dynamicTools");
     }
     expect(openExternal.mock.calls).toEqual([["https://auth.openai.com/fixture-login"]]);
@@ -3408,6 +3435,12 @@ describe("fluxo local do assistente", () => {
     await send("abrir aplicação local http://localhost:4201/");
     await complete();
     expect(service.snapshot().items.at(-1)?.text).toContain("nova conversa");
+    const calls =
+      await rpc.call<{ method: string; params: Record<string, any> }[]>("_fixture/readCalls");
+    expect(
+      calls.filter((call) => call.method === "turn/start").at(-1)!.params.additionalContext
+        .stag_browser_capture.value,
+    ).toContain("Este histórico não possui stag_browser");
     await expect(service.request({ type: "browserConsent", allow: true })).rejects.toThrow(
       "nova conversa",
     );
@@ -3622,6 +3655,63 @@ describe("fluxo local do assistente", () => {
     expect(JSON.stringify(service.snapshot())).not.toContain("SYNTHETIC_BROWSER_PIXELS");
     expect(service.snapshot().mode).toBe("project");
   });
+  it.each(["read", "project", "windows"] as const)(
+    "informa capturas autônomas por turno e recupera falhas em %s sem autorização por print",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      const context = async () => {
+        const calls =
+          await rpc.call<
+            { method: string; params: { additionalContext?: Record<string, { value: string }> } }[]
+          >("_fixture/readCalls");
+        return calls.filter((call) => call.method === "turn/start").at(-1)!.params.additionalContext
+          ?.stag_browser_capture?.value;
+      };
+      await send("navegador captura");
+      await complete();
+      expect(await context()).toContain("Autorizar navegador");
+      expect(browser.execute).not.toHaveBeenCalled();
+
+      await service.request({ type: "browserConsent", allow: true });
+      browser.execute.mockResolvedValue({
+        success: true,
+        contentItems: [{ type: "inputImage", imageUrl: imageFixture.dataUrl }],
+      });
+      for (const tab of ["documentation", "system"] as const) {
+        service.updateBrowser({ ...service.snapshot().browser, activeTab: tab });
+        await send("navegador captura duplicado");
+        await complete();
+        expect(browser.execute).toHaveBeenLastCalledWith({ action: "screenshot", tab });
+        expect(await context()).toContain("sem pedir autorização por captura");
+        expect(service.snapshot().approvals).toEqual([]);
+      }
+      expect(browser.execute).toHaveBeenCalledTimes(2);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(JSON.stringify(service.snapshot())).not.toContain(imageFixture.dataUrl);
+      expect(service.snapshot().mode).toBe(mode);
+
+      browser.execute.mockRejectedValueOnce(new Error(browserCaptureError));
+      await send("navegador captura");
+      await complete();
+      expect(service.snapshot().metrics.failures).toBe(1);
+      await send("navegador captura");
+      await complete();
+      expect(service.snapshot().error).toBeNull();
+      expect(await context()).toContain("sem pedir autorização por captura");
+
+      await service.request({ type: "connect" });
+      await send("navegador captura");
+      await complete();
+      expect(await context()).toContain("sem pedir autorização por captura");
+      expect(browser.execute).toHaveBeenCalledTimes(5);
+      await service.request({ type: "browserConsent", allow: false });
+      await send("navegador captura");
+      await complete();
+      expect(await context()).toContain("Autorizar navegador");
+      expect(browser.execute).toHaveBeenCalledTimes(5);
+    },
+  );
   it("navegador confirma cada efeito crítico e recusa não executa", async () => {
     await ready();
     await service.request({ type: "browserConsent", allow: true });

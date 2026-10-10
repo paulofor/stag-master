@@ -5,10 +5,30 @@ import {
   browserConfirmationReason,
   browserUrl,
   browserTool,
+  browserCaptureCapability,
 } from "../../src/main/browser-tools";
 import { actionSchema } from "../../src/shared/validation";
 
 describe("contrato do navegador", () => {
+  it("distingue captura autorizada, falta de consentimento e histórico sem ferramenta", () => {
+    expect(browserCaptureCapability(true, true).stag_browser_capture.value).toContain(
+      "sem pedir autorização por captura",
+    );
+    expect(browserCaptureCapability(true, false).stag_browser_capture.value).toContain(
+      "Autorizar navegador",
+    );
+    for (const authorized of [true, false]) {
+      const value = browserCaptureCapability(false, authorized).stag_browser_capture.value;
+      expect(value).toContain("nova conversa");
+      expect(value).not.toContain("sem pedir autorização por captura");
+    }
+    for (const tab of ["documentation", "system"]) {
+      const args = browserArguments.parse({ action: "screenshot", tab });
+      expect(browserConfirmationReason(args)).toBeNull();
+      for (const extra of [{ processId: 1 }, { pageId: "old" }, { path: "print.png" }])
+        expect(browserArguments.safeParse({ ...args, ...extra }).success).toBe(false);
+    }
+  });
   it("aceita somente as duas abas em tools e IPC e identifica a aba na aprovação", () => {
     for (const tab of ["documentation", "system"] as const) {
       expect(browserArguments.parse({ action: "snapshot", tab }).tab).toBe(tab);

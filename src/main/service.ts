@@ -67,6 +67,7 @@ import {
   browserArguments,
   browserApproval,
   browserTool,
+  browserCaptureCapability,
   type BrowserArguments,
 } from "./browser-tools";
 import type { BrowserDownloadContext } from "./browser-download";
@@ -2033,6 +2034,10 @@ export class AssistantService extends EventEmitter {
           ...localExecutionContext(this.state.mode),
           ...pdfCapability(
             !!this.options.pdf && !!this.settings.threads[this.state.threadId!]?.pdfTool,
+          ),
+          ...browserCaptureCapability(
+            !!this.options.browser && !!this.settings.threads[this.state.threadId!]?.browserTool,
+            this.state.browser.authorized && this.browserConsentThread === this.state.threadId,
           ),
           stag_browser_downloads: {
             kind: "application",
