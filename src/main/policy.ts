@@ -1,6 +1,10 @@
 import type { AccessMode, DocumentationSource } from "../shared/types";
 import { cyberSafetyInstructions } from "./cyber-safety";
-import { engineeringInstructions, developmentProcessInstructions } from "./engineering-policy";
+import {
+  engineeringInstructions,
+  developmentProcessInstructions,
+  localValidationInstructions,
+} from "./engineering-policy";
 import { projectMemoryInstructions } from "./project-memory";
 import { projectSourcesInstructions } from "./project-sources";
 import { videoInstructions } from "../shared/request-video";
@@ -78,12 +82,12 @@ export function localExecutionContext(mode: AccessMode) {
     mode === "read"
       ? "Leitura (read-only): investigue sem modificar; não execute builds/testes com escrita nem inicie processos da aplicação."
       : mode === "project"
-        ? "Projeto (workspace-write): testes/builds e processos locais do projeto já solicitados são rotina dentro da raiz autorizada; investigue falhas sem nova pergunta conversacional. Escalonamento necessário permanece sujeito à política vigente."
-        : "Windows (danger-full-access): execução nativa local já permitida, sem nova pergunta ou escalonamento por rotina para testes/builds e processos locais do projeto já solicitados, mesmo após falha anterior na sandbox.";
+        ? "Projeto (workspace-write): testes/builds e processos locais do projeto já solicitados são rotina dentro da raiz autorizada. Use o executor com sandbox_permissions=use_default (ou omita esse argumento). Se o diagnóstico comprovar que a ação exige sair da sandbox e a política permitir, solicite o escalonamento diretamente na ferramenta de execução, sem pergunta preliminar no chat ou em stag_ask_user; aguarde a aprovação nativa. Recusa ou impedimento persistente não autoriza outro executor nem alteração de acesso."
+        : "Windows (danger-full-access): execução nativa local já permitida, sem nova pergunta ou escalonamento por rotina para testes/builds e processos locais do projeto já solicitados, mesmo após falha anterior na sandbox. Use o executor com sandbox_permissions=use_default (ou omita esse argumento): o acesso vigente já é sem sandbox. Não use require_escalated para essa rotina; isso criaria uma aprovação desnecessária. EPERM neste modo requer diagnóstico local, não uma nova autorização genérica para sair da sandbox.";
   return {
     stag_local_execution: {
       kind: "application" as const,
-      value: `Execução local vigente — ${current} Aprovações reais continuam no fluxo nativo (on-request), sem aceitação automática ou pergunta duplicada. Este contexto não autoriza efeitos críticos, publicação, acesso a segredos ou outro projeto.`,
+      value: `Execução local vigente — ${current}${mode === "read" ? "" : `\n${localValidationInstructions}`} Aprovações reais continuam no fluxo nativo (on-request), sem aceitação automática ou pergunta duplicada. Este contexto não autoriza efeitos críticos, publicação, acesso a segredos ou outro projeto.`,
     },
   };
 }

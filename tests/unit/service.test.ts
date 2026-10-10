@@ -2518,6 +2518,106 @@ describe("memória persistente do projeto", () => {
   });
 });
 describe("engenharia e limite de assuntos", () => {
+  it.each(["project", "windows", "read"] as const)(
+    "preserva o contrato das cinco repetições Angular na fila e na retomada: %s",
+    async (mode) => {
+      await ready();
+      await service.request({ type: "preferences", mode, windowsConsent: mode === "windows" });
+      const scenarios = engineeringCorpus.scenarios.filter((s) => s.requiresLocalExecution);
+      expect(scenarios).toHaveLength(5);
+      const approvals: number[] = [];
+      service.on("snapshot", (snapshot) => approvals.push(snapshot.approvals.length));
+      await send("lento");
+      const threadId = service.snapshot().threadId!;
+      for (const scenario of scenarios)
+        await service.request({
+          type: "enqueue",
+          threadId,
+          id: randomUUID(),
+          text: scenario.input,
+        });
+      await service.request({ type: "pauseQueue", threadId, paused: true });
+      const history = await rpc.call<any>("thread/read", { threadId, includeTurns: true });
+      await rpc.call("_fixture/finishTurn", {
+        threadId,
+        turnId: history.thread.turns.at(-1).id,
+        status: "completed",
+      });
+      await complete();
+      await service.request({ type: "connect" });
+      await service.request({ type: "pauseQueue", threadId, paused: false });
+      await vi.waitFor(() => {
+        expect(service.snapshot().queuedMessages).toEqual([]);
+        expect(service.snapshot().busy).toBe(false);
+      });
+      const responses = service.snapshot().items.filter((item) => item.kind === "assistant");
+      expect(responses.slice(-scenarios.length).map((item) => item.text)).toEqual(
+        scenarios.map((scenario) => (mode === "read" ? scenario.readResponse : scenario.response)),
+      );
+      expect(service.snapshot().threadId).toBe(threadId);
+      expect(service.snapshot().mode).toBe(mode);
+      expect(service.snapshot().metrics.failures).toBe(0);
+      expect(approvals.every((count) => count === 0)).toBe(true);
+      expect(desktop.execute).not.toHaveBeenCalled();
+      expect(browser.execute).not.toHaveBeenCalled();
+      const calls = await rpc.call<any[]>("_fixture/readCalls");
+      expect(calls.filter((call) => call.method === "thread/resume")).toHaveLength(1);
+      const turns = calls.filter((call) => call.method === "turn/start");
+      expect(turns.map((call) => call.params.input[0].text)).toEqual(scenarios.map((s) => s.input));
+      for (const turn of turns) {
+        expect(turn.params.runtimeWorkspaceRoots).toEqual([dir]);
+        expect(turn.params.approvalPolicy).toBe("on-request");
+        expect(turn.params.sandboxPolicy.type).toBe(
+          mode === "read" ? "readOnly" : mode === "windows" ? "dangerFullAccess" : "workspaceWrite",
+        );
+      }
+    },
+  );
+
+  it.each(["ausente", "parcial", "não confiável"])(
+    "detecta contexto de repetição %s e recupera no turno seguinte sem retomar",
+    async (failure) => {
+      await ready();
+      const scenario = engineeringCorpus.scenarios.find((s) => s.id === "angular-retry-types")!;
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+      const original = rpc.call.bind(rpc);
+      const intercepted = vi.spyOn(rpc, "call").mockImplementation((method, params = {}) => {
+        if (method === "turn/start") {
+          const context = { ...(params.additionalContext as Record<string, any>) };
+          if (failure === "ausente") delete context.stag_local_execution;
+          else {
+            context.stag_local_execution = { ...context.stag_local_execution };
+            if (failure === "parcial")
+              context.stag_local_execution.value = context.stag_local_execution.value.replace(
+                "spawn EPERM",
+                "erro sintético",
+              );
+            else context.stag_local_execution.kind = "untrusted";
+          }
+          return original(method, { ...params, additionalContext: context });
+        }
+        return original(method, params);
+      });
+      try {
+        await send(scenario.input);
+        await complete();
+        expect(service.snapshot().items.at(-1)?.text).toBe(
+          "Fixture: contexto de validação local ausente ou incompleto.",
+        );
+      } finally {
+        intercepted.mockRestore();
+      }
+      await send(scenario.input);
+      await complete();
+      expect(service.snapshot().items.at(-1)?.text).toBe(scenario.response);
+      const calls = await rpc.call<any[]>("_fixture/readCalls");
+      expect(calls.some((call) => call.method === "thread/resume")).toBe(false);
+      expect(service.snapshot().approvals).toEqual([]);
+    },
+  );
+
   it.each([
     ["project", "workspaceWrite", "Projeto (workspace-write)"],
     ["windows", "dangerFullAccess", "Windows (danger-full-access)"],
@@ -2709,6 +2809,9 @@ describe("engenharia e limite de assuntos", () => {
       "Uma falha anterior na sandbox não cria uma nova exigência de autorização",
     ],
     ["concluir sem nova pergunta", "Não pergunte se pode concluir a validação local já solicitada"],
+    ["repetição após correções", "corrigir tipos, animações ou testes de recuperação"],
+    ["EPERM sem decisão", "EPERM ou spawn EPERM é um erro de execução"],
+    ["pacote local", "build de produção local não é publicação"],
     ["build em Leitura", "No modo Leitura, não execute builds ou testes que gravem artefatos"],
     ["falha de build", "não use commit, push, pipeline ou deploy para descobrir o próximo erro"],
     [
@@ -2758,7 +2861,7 @@ describe("engenharia e limite de assuntos", () => {
       threadId: service.snapshot().threadId,
       cwd: dir,
       ...threadPolicy("project", dir),
-      developerInstructions: instructions.replace(fragment, ""),
+      developerInstructions: instructions.replaceAll(fragment, ""),
     });
     await send(scenario.input);
     await complete();

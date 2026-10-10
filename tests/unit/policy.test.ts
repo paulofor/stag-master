@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assistantInstructions, threadPolicy, turnPolicy } from "../../src/main/policy";
+import {
+  assistantInstructions,
+  localExecutionContext,
+  threadPolicy,
+  turnPolicy,
+} from "../../src/main/policy";
 import {
   browserTool,
   browserSessionInstructions,
@@ -111,6 +116,35 @@ it("distingue falha da sandbox de nova autorização para concluir o build local
     );
   }
   expect(userInputTool.description).toContain("falha anterior na sandbox");
+});
+
+it.each(["project", "windows"] as const)(
+  "mantém o ciclo de correção e repetição após EPERM no contexto vigente: %s",
+  (mode) => {
+    const initial = assistantInstructions(mode, "win32", false, true, "C:\\synthetic");
+    const current = localExecutionContext(mode).stag_local_execution.value;
+    for (const text of [initial, current]) {
+      expect(text).toContain("spawn EPERM");
+      expect(text).toContain("corrigir tipos, animações ou testes de recuperação");
+      expect(text).toContain("build de produção local não é publicação");
+      expect(text).toContain("não use stag_ask_user");
+      expect(text).toContain("use_default");
+    }
+    expect(userInputTool.description).toContain("spawn EPERM");
+    expect(userInputTool.description).toContain("pacote de produção local");
+  },
+);
+
+it("distingue o executor Windows vigente do escalonamento real em Projeto", () => {
+  const windows = localExecutionContext("windows").stag_local_execution.value;
+  const project = localExecutionContext("project").stag_local_execution.value;
+  const read = localExecutionContext("read").stag_local_execution.value;
+  expect(windows).toContain("Não use require_escalated");
+  expect(project).toContain("solicite o escalonamento diretamente na ferramenta de execução");
+  expect(project).toContain("sem pergunta preliminar no chat");
+  expect(read).toContain("não execute builds/testes com escrita");
+  expect(read).not.toContain("solicite o escalonamento");
+  expect(read).not.toContain("corrigir tipos, animações ou testes de recuperação");
 });
 
 describe("contrato de engenharia e escopo de negócio", () => {

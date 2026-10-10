@@ -740,12 +740,29 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       }
       const engineeringScenario = engineeringCorpus.scenarios.find((s) => s.input === input);
       if (engineeringScenario) {
+        // Inspect this turn, not the accumulated context: old data must not hide a missing update.
+        const local = p.additionalContext?.stag_local_execution;
+        const localFragments =
+          thread.sandbox === "read-only"
+            ? ["Leitura (read-only)", "não execute builds/testes com escrita"]
+            : [
+                ...engineeringCorpus.requiredLocalExecution,
+                thread.sandbox === "danger-full-access"
+                  ? "Não use require_escalated"
+                  : "solicite o escalonamento diretamente na ferramenta de execução",
+              ];
         if (
           !engineeringCorpus.requiredInstructions.every((fragment) =>
             thread.developerInstructions.includes(fragment),
           )
         ) {
           response(thread, turn, "Fixture: contrato de engenharia ausente ou incompleto.");
+        } else if (
+          engineeringScenario.requiresLocalExecution &&
+          (local?.kind !== "application" ||
+            !localFragments.every((fragment) => local.value?.includes(fragment)))
+        ) {
+          response(thread, turn, "Fixture: contexto de validação local ausente ou incompleto.");
         } else if (
           engineeringScenario.context &&
           !thread.turns.some((t) =>

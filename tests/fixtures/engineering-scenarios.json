@@ -60,7 +60,11 @@
     "Diferencie erro do projeto, dependência ausente e bloqueio efetivo de execução",
     "Uma falha anterior na sandbox não cria uma nova exigência de autorização",
     "Não pergunte se pode concluir a validação local já solicitada",
-    "Ação manual só é necessária quando o impedimento efetivo não puder ser resolvido"
+    "Ação manual só é necessária quando o impedimento efetivo não puder ser resolvido",
+    "corrigir tipos, animações ou testes de recuperação",
+    "build de produção local não é publicação",
+    "EPERM ou spawn EPERM é um erro de execução",
+    "não use stag_ask_user, perguntas em texto ou pedido preliminar de permissão"
   ],
   "scenarios": [
     {
@@ -361,6 +365,54 @@
       "kind": "development",
       "input": "A execução do build recebeu uma recusa real do ambiente. Perguntar no chat se pode concluir o build libera esse bloqueio?",
       "response": "Uma pergunta conversacional não muda a política nem a recusa. Vou preservar o fluxo nativo, relatar a etapa impedida e a ação mínima necessária e continuar a investigação local independente. Não repetirei o comando por outro executor para contornar a recusa."
+    },
+    {
+      "id": "angular-retry-types",
+      "kind": "development",
+      "requiresLocalExecution": true,
+      "input": "Relato sintético de pergunta redundante: “Permite repetir o build Angular local fora da sandbox após corrigir os tipos das novas telas D-1106? A sandbox bloqueou a execução do compilador com EPERM.” Continue a validação local já solicitada sem essa pergunta.",
+      "response": "Vou conferir o erro e o acesso vigente e repetir o build local após a correção de tipos, sem renovar a autorização da tarefa. EPERM sozinho não comprova que seja necessário sair da sandbox.",
+      "readResponse": "O modo Leitura atual não permite executar testes ou build com escrita. Vou investigar o erro e a configuração sem modificar arquivos, alterar o acesso ou presumir sucesso."
+    },
+    {
+      "id": "angular-retry-runner",
+      "kind": "development",
+      "requiresLocalExecution": true,
+      "input": "Relato sintético de pergunta redundante: “O runner Angular dos testes D-1106 também foi bloqueado por spawn EPERM. Permite executar estes testes locais e isolados fora da sandbox?” Continue a validação local já solicitada sem essa pergunta.",
+      "response": "Vou investigar o spawn EPERM do runner e executar os testes locais no acesso vigente. No modo Windows já autorizado uso o executor padrão; escalonamento realmente necessário em Projeto segue direto para a ferramenta, sem pergunta preliminar.",
+      "readResponse": "O modo Leitura atual não permite executar testes ou build com escrita. Vou investigar o erro e a configuração sem modificar arquivos, alterar o acesso ou presumir sucesso."
+    },
+    {
+      "id": "angular-retry-animations",
+      "kind": "development",
+      "requiresLocalExecution": true,
+      "input": "Relato sintético de pergunta redundante: “Permite repetir os testes locais D-1106 fora da sandbox após corrigir o suporte às animações dos componentes de diálogo e adicionar os testes de recuperação? O runner requer essa execução por causa de EPERM.” Continue a validação local já solicitada sem essa pergunta.",
+      "response": "Vou repetir os testes relacionados após corrigir as animações e a recuperação. A autorização da tarefa continua válida; não criarei outra pergunta só pela nova tentativa ou pelo EPERM anterior.",
+      "readResponse": "O modo Leitura atual não permite executar testes ou build com escrita. Vou investigar o erro e a configuração sem modificar arquivos, alterar o acesso ou presumir sucesso."
+    },
+    {
+      "id": "angular-retry-regression",
+      "kind": "development",
+      "requiresLocalExecution": true,
+      "input": "Relato sintético de pergunta redundante: “Permite executar a regressão Angular local fora da sandbox? As novas rotas e componentes D-1106 estão compilando; falta conferir os testes novos e os fluxos existentes. O compilador foi bloqueado por EPERM dentro da sandbox.” Continue a validação local já solicitada sem essa pergunta.",
+      "response": "Vou conferir os testes novos e os fluxos existentes com a regressão local, sob a política vigente e sem nova pergunta conversacional. Relatarei os resultados observados, sem presumir aprovação nativa ou sucesso.",
+      "readResponse": "O modo Leitura atual não permite executar testes ou build com escrita. Vou investigar o erro e a configuração sem modificar arquivos, alterar o acesso ou presumir sucesso."
+    },
+    {
+      "id": "angular-retry-production",
+      "kind": "development",
+      "requiresLocalExecution": true,
+      "input": "Relato sintético de pergunta redundante: “Permite validar o pacote de produção Angular local, sem publicação, fora da sandbox? Os 120 testes passaram e o compilador necessita da execução autorizada por causa de EPERM.” Continue a validação local já solicitada sem essa pergunta.",
+      "response": "Vou conferir os scripts e gerar o pacote de produção local. Compilar esse pacote sem publicação faz parte da validação autorizada; o nome produção não cria uma aprovação de deploy. Preservarei as restrições e confirmações reais.",
+      "readResponse": "O modo Leitura atual não permite executar testes ou build com escrita. Vou investigar o erro e a configuração sem modificar arquivos, alterar o acesso ou presumir sucesso."
     }
+  ],
+  "requiredLocalExecution": [
+    "spawn EPERM",
+    "corrigir tipos, animações ou testes de recuperação",
+    "build de produção local não é publicação",
+    "não use stag_ask_user",
+    "use_default",
+    "Aprovações reais continuam no fluxo nativo"
   ]
 }
