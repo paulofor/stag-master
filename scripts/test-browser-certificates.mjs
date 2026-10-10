@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { expect } from "@playwright/test";
 import { startBrowserTlsSite } from "../tests/fixtures/browser-tls.mjs";
+import { validateBrowserCertificateExceptions } from "./test-browser-exceptions.mjs";
 
 export async function validateBrowserCertificates({
   application,
@@ -136,6 +137,7 @@ export async function validateBrowserCertificates({
     assert.equal((await state()).error, null);
     assert.match((await snapshot()).text, /Documentação sintética/);
     assert.equal(tls.effects.requests, 0);
+    await validateBrowserCertificateExceptions({ application, page });
     await application.evaluate(() => global.browserHarness.browser.reset(null));
     await navigate(site.url);
   } finally {

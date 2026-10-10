@@ -126,6 +126,14 @@ export interface BrowserPageInfo {
   canGoForward: boolean;
   error: string | null;
   download?: BrowserDownloadInfo;
+  certificate?: BrowserCertificateInfo;
+  insecureOrigin?: string;
+}
+export interface BrowserCertificateInfo {
+  id: string;
+  origin: string;
+  fingerprint: string;
+  error: string;
 }
 export interface BrowserDownloadInfo {
   status: "downloading" | "completed" | "failed" | "canceled";
@@ -263,7 +271,9 @@ export type Action =
   | { type: "browserControl"; control: BrowserControl }
   | { type: "browserBounds"; bounds: { x: number; y: number; width: number; height: number } };
 export type BrowserControl = (
-  { action: "navigate"; url: string } | { action: "back" | "forward" | "reload" }
+  | { action: "navigate"; url: string }
+  | { action: "back" | "forward" | "reload" | "clearCertificateExceptions" }
+  | { action: "trustCertificate"; certificateId: string; tab: BrowserTab }
 ) & { tab?: BrowserTab };
 export interface DesktopBridge {
   getSnapshot(): Promise<Snapshot>;

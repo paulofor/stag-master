@@ -269,6 +269,50 @@ export function BrowserPane({
           {state.error}
         </div>
       )}
+      {state.certificate && (
+        <div className="browser-certificate" role="alert">
+          <strong>Certificado inválido · {state.certificate.origin}</strong>
+          <span>
+            Você pode abrir este site por sua conta e risco. A identidade do servidor não foi
+            confirmada.
+          </span>
+          <button
+            className="text-button"
+            disabled={manualDisabled}
+            onClick={() =>
+              void run({
+                type: "browserControl",
+                control: {
+                  action: "trustCertificate",
+                  tab: state.activeTab,
+                  certificateId: state.certificate!.id,
+                },
+              })
+            }
+          >
+            Abrir mesmo assim
+          </button>
+          {busy && <small>Pare o assistente para liberar o site e depois retome a tarefa.</small>}
+        </div>
+      )}
+      {state.insecureOrigin && (
+        <div className="browser-certificate" role="status">
+          <strong>Não seguro · {state.insecureOrigin}</strong>
+          <span>Certificado aceito por você somente nesta sessão da aba.</span>
+          <button
+            className="text-button"
+            disabled={manualDisabled}
+            onClick={() =>
+              void run({
+                type: "browserControl",
+                control: { action: "clearCertificateExceptions", tab: state.activeTab },
+              })
+            }
+          >
+            Encerrar acesso não seguro
+          </button>
+        </div>
+      )}
       {state.download && (
         <div className="browser-download" role="status" aria-label="Download do navegador">
           <strong>{state.download.message}</strong>

@@ -1,4 +1,4 @@
-import { BrowserWindow, WebContentsView, session } from "electron";
+import { BrowserWindow, WebContentsView, session, dialog } from "electron";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
@@ -15,6 +15,7 @@ import {
 } from "./browser-tools";
 import { browserDocument } from "./browser-document";
 import { browserLoadError } from "./browser-errors";
+import { BrowserCertificates } from "./browser-certificates";
 import { browserCaptureError, browserCaptureHidden, captureBrowserPage } from "./browser-capture";
 import { browserPdfResource, pdfSnapshotNote } from "./browser-pdf";
 import {
@@ -59,6 +60,8 @@ class BrowserPage extends EventEmitter {
   private disposed = false;
   private profileId: string | null = null;
   private configuredSessions = new WeakSet<Electron.Session>();
+  private certificates = new BrowserCertificates();
+  private sessionReady: Promise<void> = Promise.resolve();
   constructor(
     private window: BrowserWindow,
     private tab: BrowserTab,
@@ -72,12 +75,20 @@ class BrowserPage extends EventEmitter {
     this.window.on("minimize", this.cancelCapture);
   }
   snapshot(): BrowserPageInfo {
-    return { ...this.info };
+    return {
+      ...this.info,
+      certificate: this.certificates.snapshot(),
+      insecureOrigin:
+        this.certificates.pending || this.loadFailure
+          ? undefined
+          : this.certificates.warning(this.info.url),
+    };
   }
   private publish(): void {
     if (!this.disposed) this.emit("state", this.snapshot());
   }
   reset(profileId = this.profileId): void {
+    this.certificates = new BrowserCertificates();
     this.downloadController?.abort();
     this.captureController?.abort();
     this.generation++;
@@ -90,6 +101,12 @@ class BrowserPage extends EventEmitter {
       oldSession.webRequest.onBeforeRequest((_details, callback) => callback({ cancel: true }));
       oldSession.flushStorageData();
       old.close();
+      // Chromium can reuse a TLS socket accepted by the disposed WebContents.
+      // Close it before reusing a persistent profile; cookies/storage remain intact.
+      this.sessionReady = this.sessionReady
+        .catch(() => {})
+        .then(() => oldSession.closeAllConnections());
+      void this.sessionReady.catch(() => {});
       if (!oldSession.isPersistent()) {
         void oldSession.clearStorageData().catch(() => {});
         void oldSession.clearCache().catch(() => {});
@@ -166,6 +183,16 @@ class BrowserPage extends EventEmitter {
     this.view.setBackgroundColor("#ffffff");
     this.window.contentView.addChildView(this.view);
     const contents = this.view.webContents;
+    contents.on("certificate-error", (event, url, error, certificate, callback, isMainFrame) => {
+      event.preventDefault();
+      if (this.disposed || contents !== this.view.webContents) {
+        callback(false);
+        return;
+      }
+      const accepted = this.certificates.inspect(url, error, certificate.data, isMainFrame);
+      callback(accepted);
+      if (!accepted && isMainFrame) this.publish();
+    });
     browserSession.webRequest.onHeadersReceived((details, callback) => {
       if (
         contents === this.view.webContents &&
@@ -211,6 +238,7 @@ class BrowserPage extends EventEmitter {
         this.captureController?.abort();
         this.pageId = null;
         if (!inPlace) {
+          this.certificates.pending = null;
           this.loadFailure = null;
           this.info.error = null;
         }
@@ -393,11 +421,21 @@ class BrowserPage extends EventEmitter {
         pageId: input.pageId,
         ref: input.ref,
       })) as { url: string };
-      return browserUrl(result.url);
+      return this.downloadUrl(result.url);
     }
     if (!this.pdfUrl || this.pdfUrl !== this.view.webContents.getURL())
       throw new Error("Informe o ref de um link do snapshot ou abra um PDF e obtenha seu pageId.");
-    return browserUrl(this.pdfUrl);
+    return this.downloadUrl(this.pdfUrl);
+  }
+  private downloadUrl(url: string): string {
+    const target = browserUrl(url);
+    // net.request can reuse a TLS socket accepted by WebContents in the same session.
+    // Downloads retain strict TLS, including every redirect, without copying cookies elsewhere.
+    if (this.certificates.warning(target))
+      throw new Error(
+        "Download bloqueado: este site usa uma exceção de certificado. Corrija o certificado para baixar arquivos com validação TLS.",
+      );
+    return target;
   }
   private async download(
     input: Extract<BrowserArguments, { action: "download" }>,
@@ -430,7 +468,8 @@ class BrowserPage extends EventEmitter {
         url,
         context,
         signal: controller.signal,
-        fetch: (url, init) => requestBrowserDownload(this.view.webContents.session, url, init),
+        fetch: (url, init) =>
+          requestBrowserDownload(this.view.webContents.session, this.downloadUrl(url), init),
         progress: (state) => {
           if (ownsPage() && !controller.signal.aborted) {
             this.info.download = state;
@@ -474,6 +513,42 @@ class BrowserPage extends EventEmitter {
     }
   }
   async control(input: BrowserControl): Promise<void> {
+    const owner = this.generation;
+    try {
+      await this.sessionReady;
+    } catch {
+      throw new Error(
+        "Não foi possível encerrar a conexão anterior do navegador. Feche e reabra o STAG Plus.",
+      );
+    }
+    if (this.disposed || owner !== this.generation)
+      throw new Error("Operação do navegador cancelada.");
+    if (input.action === "clearCertificateExceptions") {
+      this.reset();
+      await this.sessionReady;
+      return;
+    }
+    if (input.action === "trustCertificate") {
+      const generation = this.generation;
+      const certificates = this.certificates;
+      const pending = certificates.challenge(input.certificateId);
+      const result = await dialog.showMessageBox(this.window, {
+        type: "warning",
+        title: "Acesso não seguro",
+        message: `Abrir ${pending.origin} mesmo com certificado inválido?`,
+        detail: `Aba: ${browserTabLabels[this.tab]}\n${pending.error}\nSHA-256: ${pending.fingerprint}\n\nA identidade do servidor não foi confirmada. Dados enviados, incluindo senhas, podem ser interceptados. A exceção vale somente para este site e certificado nesta aba, até fechar/revogar o navegador ou trocar de conversa. Lembrar sessões não salva esta exceção.`,
+        buttons: ["Cancelar", "Abrir mesmo assim"],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      if (result.response !== 1) return;
+      if (this.disposed || generation !== this.generation || certificates !== this.certificates)
+        throw new Error("Acesso cancelado: a página ou conversa mudou.");
+      const url = certificates.accept(input.certificateId);
+      await this.control({ action: "navigate", url });
+      return;
+    }
     const url = input.action === "navigate" ? browserUrl(input.url) : null;
     this.cancelDownload();
     this.pageId = null;
@@ -565,7 +640,7 @@ class BrowserPage extends EventEmitter {
         contentItems: [
           {
             type: "inputText",
-            text: `Navegador · ${browserTabLabels[this.tab]}: ${size.width}×${size.height} pixels. Interações usam refs do snapshot, não coordenadas do desktop.`,
+            text: `Navegador · ${browserTabLabels[this.tab]}: ${size.width}×${size.height} pixels. Interações usam refs do snapshot, não coordenadas do desktop.${this.certificates.warning(this.info.url) ? " Não seguro: certificado aceito manualmente pelo cliente nesta aba." : ""}`,
           },
           { type: "inputImage", imageUrl: image.toDataURL() },
         ],
@@ -600,7 +675,16 @@ class BrowserPage extends EventEmitter {
       contentItems: [
         {
           type: "inputText",
-          text: JSON.stringify({ ...(result as Record<string, unknown>), tab: this.tab }),
+          text: JSON.stringify({
+            ...(result as Record<string, unknown>),
+            tab: this.tab,
+            ...(this.certificates.warning(this.info.url)
+              ? {
+                  connectionWarning:
+                    "Não seguro: certificado aceito manualmente pelo cliente nesta aba; não comprova identidade do servidor.",
+                }
+              : {}),
+          }),
         },
       ],
     };
