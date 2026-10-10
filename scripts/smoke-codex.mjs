@@ -221,29 +221,35 @@ try {
   // The server reports cwd/runtime roots separately from additional configured roots.
   assert.deepEqual(started.sandbox.writableRoots, []);
   // A real user turn is required for UI history; raw injected Responses items aren't UI turns.
-  async function syntheticTurn(input, sourceList = sources, authorized = false, extraContext = {}) {
+  async function syntheticTurn(
+    input,
+    sourceList = sources,
+    authorized = false,
+    extraContext = {},
+    target = { threadId: started.thread.id, mode: "project" },
+  ) {
     let timer;
     let listener;
     const completed = new Promise((resolve, reject) => {
       timer = setTimeout(() => reject(new Error("Turno sintético não concluiu.")), 30000);
       listener = (message) => {
-        if (message.method === "turn/completed" && message.params.threadId === started.thread.id)
+        if (message.method === "turn/completed" && message.params.threadId === target.threadId)
           resolve(message.params.turn);
       };
       rpc.on("notification", listener);
     });
     try {
       await rpc.call("turn/start", {
-        threadId: started.thread.id,
+        threadId: target.threadId,
         cwd: project,
         input,
         additionalContext: {
-          ...localExecutionContext("project"),
+          ...localExecutionContext(target.mode),
           ...projectBranchesContext(projectBranches),
           ...projectSourcesContext(project, sourceList, authorized, true),
           ...extraContext,
         },
-        ...turnPolicy("project", project),
+        ...turnPolicy(target.mode, project),
       });
       assert.equal((await completed).status, "completed");
     } finally {
@@ -613,7 +619,7 @@ try {
     ),
     "Fontes de start devem chegar ao provedor pelo Codex real.",
   );
-  function verifyEngineeringContract() {
+  function verifyEngineeringContract(mode = "project") {
     const delivered = JSON.stringify({
       input: provider.inputs.at(-1),
       instructions: provider.instructions.at(-1),
@@ -625,12 +631,52 @@ try {
       );
     assert.ok(
       JSON.stringify(provider.inputs.at(-1)).includes(
-        localExecutionContext("project").stag_local_execution.value,
+        JSON.stringify(localExecutionContext(mode).stag_local_execution.value).slice(1, -1),
       ),
       "O contexto vigente de execução local deve chegar em cada turno, inclusive após retomada.",
     );
   }
   verifyEngineeringContract();
+  // Deterministic transport check, not evidence of a model's semantic decision or an Angular run.
+  for (const mode of ["project", "windows", "read"]) {
+    const params = {
+      cwd: project,
+      model: (models.data.find((model) => model.isDefault) || models.data[0]).model,
+      ...threadPolicy(mode, project),
+      developerInstructions: assistantInstructions(mode, process.platform, false, true, project),
+    };
+    const localThread = await rpc.call("thread/start", {
+      ...params,
+      dynamicTools: [userInputTool],
+    });
+    const scenarios = engineeringCorpus.scenarios.filter((s) => s.requiresLocalExecution);
+    for (const [index, scenario] of scenarios.entries()) {
+      if (index === 3) {
+        const recovered = await rpc.call("thread/resume", {
+          ...params,
+          threadId: localThread.thread.id,
+        });
+        assert.deepEqual(recovered.sandbox, localThread.sandbox);
+        assert.deepEqual(recovered.runtimeWorkspaceRoots, [project]);
+      }
+      await syntheticTurn(
+        [{ type: "text", text: scenario.input }],
+        [],
+        false,
+        {},
+        {
+          threadId: localThread.thread.id,
+          mode,
+        },
+      );
+      verifyEngineeringContract(mode);
+    }
+  }
+  console.log(
+    "Codex real/provedor loopback: contrato de repetição após EPERM entregue nos três modos, cinco etapas e retomada; sem inferência ou execução Angular.",
+  );
+  // Restore the provider observation used by the remaining project probes.
+  await syntheticTurn([{ type: "text", text: "Continue a inspeção sintética do projeto." }]);
   function verifyBranchesContract() {
     const delivered = JSON.stringify({
       input: provider.inputs.at(-1),

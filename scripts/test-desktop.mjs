@@ -606,6 +606,11 @@ try {
       "local-process-sandbox",
       "local-process-shared",
       "local-process-production-proxy",
+      "angular-retry-types",
+      "angular-retry-runner",
+      "angular-retry-animations",
+      "angular-retry-regression",
+      "angular-retry-production",
     ]) {
       const scenario = engineeringCorpus.scenarios.find((s) => s.id === id);
       if (scenario.context) {

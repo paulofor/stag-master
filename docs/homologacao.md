@@ -1,4 +1,24 @@
-# Matriz de homologação da versão 0.4.55
+# Matriz de homologação da versão 0.4.56
+
+## Repetição de testes e builds Angular após EPERM — versão 0.4.56
+
+Matriz definida antes dos testes. O cliente relatou cinco perguntas repetidas após corrigir tipos, animações e testes de recuperação, além de regressão e pacote de produção locais. O contrato genérico existente não explicita esses casos, não distingue `spawn EPERM` de uma decisão do usuário e não orienta o argumento do executor conforme o modo vigente. O harness de contexto por turno só conferia o nome do modo. Ampliar os contratos e o corpus existentes, sem outro executor, classificação automática de comandos ou aprovação automática.
+
+| Área                    | Cenário e aceite                                                                                                                                                                               | Evidência prevista                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Ciclo local             | Tipos, runner, animações/recuperação, regressão e build de produção local pertencem à mesma tarefa em Projeto/Windows; nenhuma pergunta conversacional adicional                               | Cinco casos sintéticos do relato, serviço/RPC e Electron     |
+| Diagnóstico             | EPERM não comprova sozinho restrição da sandbox nem cria decisão do cliente; conferir erro/script/destino e corrigir dentro do acesso vigente                                                  | Contratos de início/retomada/turno e corpus                  |
+| Executor                | Windows usa acesso vigente com use_default, sem require_escalated rotineiro; Projeto mantém sandbox e encaminha escalonamento realmente necessário direto ao executor, sem pergunta preliminar | Política, contexto e aprovação bidirecional existente        |
+| Recuperação             | Contexto acompanha tentativas sucessivas, fila e retomada; perda parcial detectada e envio seguinte recuperado                                                                                 | Fixture determinística e provedor loopback pelo Codex fixado |
+| Isolamento              | Leitura não grava; outra conversa/projeto não herda acesso; recusa real, deploy e efeitos externos preservados                                                                                 | Serviço, corpus e políticas sem alterações de permissões     |
+| Observabilidade e dados | Cards e métricas distinguem pergunta redundante de request real; sem afirmar execução/resultado de Angular do cliente ou registrar segredos                                                    | Snapshots e contadores sintéticos                            |
+| Plataformas             | Sem nova interface; Chromium desktop/Pixel 7 e Electron locais; Windows e pacote conferidos nos jobs nativos                                                                                   | check, test:desktop, format:check e CI PR/main               |
+
+O harness comprova transmissão e recuperação dos contratos, sem garantir todas as decisões de um LLM. As respostas do corpus são sintéticas; nenhum sistema D-1106 ou conta do cliente é acessado. Linux não comprova EPERM na máquina do cliente nem execução nativa Windows. Aprovações reais seguem o [protocolo oficial do App Server](https://developers.openai.com/codex/app-server#approvals); o STAG não as concede automaticamente.
+
+Evidência local: três regressões de contrato falharam antes da correção. `npm run check` passou com 854 contratos, typecheck/build, decoder/ASR reais, Codex fixado/provedor loopback e 146 cenários Chromium desktop/Pixel 7. O smoke verificou os cinco casos em Projeto/Windows/Leitura, incluindo retomada. `xvfb-run -a npm run test:desktop` passou com os cinco relatos no serviço/preload/conversa, além dos fluxos existentes de perguntas, recusas, som, navegador, conexões e vídeo. A rodada focal corrigiu duas expectativas do próprio harness: a reconexão reinicia o registro de chamadas da fixture e a perda parcial deve retirar todas as cópias de um fragmento compartilhado. Nenhuma política de acesso foi alterada para fazer testes passarem.
+
+`npm run test:licenses` passou (15 testes, PostgreSQL/Docker e painel desktop/mobile), com namespace Compose exclusivo, transporte sintético já existente por stdin e limpeza aguardada; ausência de containers/volumes confirmada. Formatação, sintaxe JavaScript, diff, `bash -n` e ShellCheck dos scripts shell existentes aprovados. Node 22.23.3 instalado somente no workspace; `sandbox-node-health` confirmou ferramentas compartilhadas preservadas. O smoke declara a restrição bwrap do Linux; execução nativa e instalador Windows dependem dos jobs do PR/main. Nenhuma conta, configuração de autenticação, processo ou projeto do cliente foi usado nos testes.
 
 ## Remoção do movimento automático do mouse — versão 0.4.55
 
