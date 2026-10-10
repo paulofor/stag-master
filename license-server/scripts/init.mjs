@@ -67,14 +67,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (args.length % 2) throw new Error("Argumentos inválidos.");
     for (let i = 0; i < args.length; i += 2) {
       const key = args[i];
-      if (!["--directory", "--env-file", "--url", "--username"].includes(key) || key in values)
+      if (!["--directory", "--output-env", "--url", "--username"].includes(key) || key in values)
         throw new Error("Argumentos inválidos.");
       values[key] = args[i + 1];
     }
     const base = resolve(dirname(fileURLToPath(import.meta.url)), "..");
     await initialize({
       directory: values["--directory"] || join(base, ".secrets"),
-      envFile: values["--env-file"] || join(base, ".env"),
+      envFile: values["--output-env"] || join(base, ".env"),
       url: values["--url"],
       username: values["--username"],
     });

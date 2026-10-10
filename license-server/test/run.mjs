@@ -55,6 +55,9 @@ const env = {
   COMPOSE_ANSI: "never",
   COMPOSE_PROGRESS: "quiet",
   COMPOSE_IGNORE_ORPHANS: "false",
+  LOCAL_UID: String(process.getuid?.() || 0),
+  LOCAL_GID: String(process.getgid?.() || 0),
+  LICENSE_SETUP_DIR: join(directory, "setup-check"),
 };
 const base = [
   "compose",
@@ -176,7 +179,8 @@ try {
     overlay.services.postgres.volumes = [
       { type: "volume", source: "test-db-secrets", target: "/run/secrets", read_only: true },
     ];
-    overlay.volumes = { "test-api-secrets": {}, "test-db-secrets": {} };
+    overlay.volumes = { "test-api-secrets": {}, "test-db-secrets": {}, "test-setup": {} };
+    overlay.services.setup.volumes = ["test-setup:/setup"];
     overlay.services["secret-init"] = {
       profiles: ["test"],
       build: {
@@ -218,7 +222,40 @@ try {
     "Licenças: construindo aplicação pelo Dockerfile e PostgreSQL fixado; dados exclusivos.",
   );
   owned = true;
-  await run(["build", "license-server", "postgres"], { label: "Build Docker" });
+  await run(["build", "license-server", "postgres", "setup"], { label: "Build Docker" });
+  await mkdir(env.LICENSE_SETUP_DIR, { mode: 0o700 });
+  await run(["--profile", "setup", "run", "--rm", "--no-deps", "setup"], {
+    label: "Bootstrap Docker de produção",
+  });
+  const setupSource = await readFile(join(root, "license-server/test/setup-check.mjs"), "utf8");
+  const setupCheck = JSON.parse(
+    (
+      await run(
+        [
+          "--profile",
+          "setup",
+          "run",
+          "--rm",
+          "--no-deps",
+          "--entrypoint",
+          "node",
+          "setup",
+          "--input-type=module",
+          "-e",
+          setupSource,
+        ],
+        { label: "Verificação do bootstrap Docker" },
+      )
+    ).output,
+  );
+  assert.deepEqual(setupCheck, {
+    privateDirectory: true,
+    privatePassword: true,
+    validPassword: true,
+    validKey: true,
+    publicConfig: true,
+  });
+  console.log("Licenças: bootstrap pela CLI empacotada em Docker aprovado, sem Node no host.");
   if (stdinSecrets) {
     const input = JSON.stringify({
       postgres_password: secretValues[0],
@@ -462,6 +499,8 @@ try {
         ...compose,
         "-f",
         join(root, "license-server/compose.https.yaml"),
+        "--profile",
+        "*",
         "down",
         "--volumes",
         "--remove-orphans",
@@ -478,6 +517,7 @@ try {
   }
   // Keep only screenshots for local review; secrets, dumps and temporary configuration are removed.
   await rm(secretDir, { recursive: true, force: true });
+  await rm(env.LICENSE_SETUP_DIR, { recursive: true, force: true });
   for (const name of ["config.env", "mirror.json", "proxy-mirror.json", "licenses.dump"])
     await rm(join(directory, name), { force: true });
   console.log(

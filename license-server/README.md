@@ -25,7 +25,7 @@ Pré-requisitos: Docker Engine, Buildx e Compose v2.24.4+ (ou v5). Na raiz do ch
 docker version
 docker buildx version
 docker compose version
-docker compose -p stag-licenses-local -f license-server/compose.yaml build license-server
+docker compose -p stag-licenses-local -f license-server/compose.yaml build license-server postgres setup
 LOCAL_UID=$(id -u) LOCAL_GID=$(id -g) docker compose -p stag-licenses-local -f license-server/compose.yaml --profile setup run --rm --no-deps setup
 docker compose -p stag-licenses-local --env-file license-server/.env -f license-server/compose.yaml up -d --wait
 ```

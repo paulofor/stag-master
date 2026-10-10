@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { generateKeyPairSync, createPublicKey, sign } from "node:crypto";
+import { generateKeyPairSync, createPublicKey } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { mkdir, mkdtemp, readFile, lstat, rm, symlink, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { publicOrigin, loadConfig } from "../dist/config.js";
@@ -186,5 +189,32 @@ test("Inicialização preserva destinos existentes, segredos restritos e configu
     assert.equal(await readFile(join(dir, "existing.env"), "utf8"), "preserve");
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+test("CLI real usa argumento próprio para gravar configuração sem acionar --env-file do Node", async () => {
+  await mkdir(".local", { recursive: true });
+  const directory = await mkdtemp(resolve(".local/license-cli-"));
+  try {
+    const output = join(directory, "config.env");
+    const secrets = join(directory, "secrets");
+    const { stdout, stderr } = await promisify(execFile)(
+      process.execPath,
+      [
+        fileURLToPath(new URL("../scripts/init.mjs", import.meta.url)),
+        "--directory",
+        secrets,
+        "--output-env",
+        output,
+      ],
+      { maxBuffer: 16384 },
+    );
+    const password = await readFile(join(secrets, "initial-admin-password.txt"), "utf8");
+    assert.equal(stderr, "");
+    assert.ok(stdout.includes("Configuração criada."));
+    assert.ok(!stdout.includes(password));
+    assert.ok(!stdout.includes("PRIVATE KEY"));
+    assert.match(await readFile(output, "utf8"), /^PUBLIC_URL=http:\/\/127\.0\.0\.1:8080/m);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
