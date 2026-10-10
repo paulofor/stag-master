@@ -1,5 +1,9 @@
 # Matriz de homologação da versão 0.4.52
 
+## Servidor independente de licenças — versão 0.1.0
+
+Nova pasta `license-server/` com painel web, API de ativação/renovação, assinatura Ed25519, PostgreSQL e Compose. A [matriz específica](../license-server/HOMOLOGACAO.md) foi definida antes dos testes e cobre concorrência, expiração, revogação, cópia de identidade, CSRF, recuperação, backup, métricas e isolamento dos dados de homologação. O desktop conserva a versão 0.4.52 e ainda não exige licença do servidor; publicação no VPS fica para o destino a definir.
+
 ## Licença proprietária do STAG Plus — versão 0.4.52
 
 Matriz definida antes dos testes. Lacuna observada: o pacote ainda declara MIT e o harness do instalador só confere crédito/versão, sem validar apresentação ou distribuição dos termos. Aplicar a licença proprietária somente às novas contribuições próprias, preservando o material já publicado sob MIT e as licenças dos componentes de terceiros. Reutilizar o compilador NSIS e o teste do pacote existentes.

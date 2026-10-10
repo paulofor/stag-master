@@ -1,0 +1,32 @@
+services:
+  license-server:
+    environment:
+      PUBLIC_URL: https://${LICENSE_DOMAIN:?Defina o dominio da VPS}
+  proxy:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile.proxy
+    environment:
+      LICENSE_DOMAIN: ${LICENSE_DOMAIN:?Defina o dominio da VPS}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - license-caddy-data:/data
+      - license-caddy-config:/config
+    depends_on:
+      license-server:
+        condition: service_healthy
+    networks: [web]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  license-caddy-data:
+  license-caddy-config:

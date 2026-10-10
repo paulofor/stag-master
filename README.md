@@ -18,6 +18,8 @@ As versões até **0.4.51**, o código e os demais materiais já publicados sob 
 
 O instalador apresenta os termos antes da instalação e inclui `LICENSE.txt` e `LICENSE-MIT-LEGACY.txt` ao lado do executável. A mudança é de licenciamento: ainda não há ativação, expiração ou revogação técnica de acesso. A visibilidade do repositório não é alterada; os direitos de visualizar/forkar previstos nos termos do GitHub permanecem. [Orientação do GitHub sobre licenças](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).
 
+O [servidor de licenças](license-server/README.md), versão independente **0.1.0**, fica em `license-server/`: painel web para emitir/prorrogar/revogar licenças e liberar computadores, API com autorizações assinadas, PostgreSQL, Docker e preparação HTTPS. O VPS será definido posteriormente. O aplicativo Windows ainda não está integrado ao servidor; seus modos, permissões e dados permanecem como antes.
+
 ## Consultar PDFs e ZIPs da internet
 
 Atualize e inicie uma **nova conversa**, selecione o projeto e clique em **Autorizar navegador**. Peça, por exemplo: “Baixe o PDF e o ZIP desta página para consultar os documentos do projeto”. Se o site exigir login, entre na própria aba do STAG Plus; a sessão do Chrome/Edge é separada.

@@ -24,6 +24,8 @@
     "test:sqlserver": "node scripts/test-sqlserver.mjs",
     "test:server:config": "node --test server/test/config.test.mjs",
     "test:server": "npm run test:server:config && node server/test/run.mjs",
+    "test:licenses:unit": "npm --prefix license-server test",
+    "test:licenses": "npm run test:licenses:unit && node license-server/test/run.mjs",
     "check": "npm run typecheck && npm test && npm run build && npm run test:video && npm run test:codex && npm run test:e2e",
     "dist:win": "npm run build && electron-builder --win --x64 --publish never",
     "format": "prettier --write .",

@@ -1,0 +1,10 @@
+{
+  admin off
+}
+
+{$LICENSE_DOMAIN} {
+  request_body {
+    max_size 16KB
+  }
+  reverse_proxy license-server:8080
+}
